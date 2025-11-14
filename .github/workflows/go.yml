@@ -1,0 +1,142 @@
+name: Go Tests and Lint
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'server/**'
+      - '.github/workflows/go.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'server/**'
+      - '.github/workflows/go.yml'
+
+jobs:
+  test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: earthring_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('server/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        working-directory: ./server
+        run: go mod download
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 1
+          done
+
+      - name: Set up PostGIS extension
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          psql -c "CREATE EXTENSION IF NOT EXISTS postgis;" || echo "PostGIS extension already exists"
+
+      - name: Run tests
+        working-directory: ./server
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: earthring_test
+          DB_SSLMODE: disable
+          JWT_SECRET: test_jwt_secret_for_ci
+          REFRESH_SECRET: test_refresh_secret_for_ci
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./server/coverage.out
+          flags: go
+          name: go-coverage
+          fail_ci_if_error: false
+
+  lint:
+    name: Go Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: ./server
+          args: --timeout=5m
+
+  build:
+    name: Build Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build server
+        working-directory: ./server
+        run: go build -v -o bin/earthring-server ./cmd/earthring-server
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthring-server
+          path: server/bin/earthring-server
+          retention-days: 7
+

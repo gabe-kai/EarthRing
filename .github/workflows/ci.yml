@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  # Combined status check - runs all workflows
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: CI Summary
+        run: |
+          echo "## CI Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow triggers the following checks:" >> $GITHUB_STEP_SUMMARY
+          echo "- Go Tests and Lint (go.yml)" >> $GITHUB_STEP_SUMMARY
+          echo "- Python Tests and Lint (python.yml)" >> $GITHUB_STEP_SUMMARY
+          echo "- JavaScript Tests and Build (javascript.yml)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All workflows run in parallel for faster feedback." >> $GITHUB_STEP_SUMMARY
+
