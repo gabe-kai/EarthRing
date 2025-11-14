@@ -7,7 +7,7 @@ A multi-genre game (city builder, light Sims elements, and racing) set on an orb
 EarthRing is set on a massive orbital ring structure:
 - **Circumference**: 264,000 km
 - **Base Width**: 400 meters
-- **Elevator Stations**: 12 stations spaced ~22,000 km apart, flaring to 5 km wide
+- **Elevator Stations**: 12 pillar/elevator hubs spaced ~22,000 km apart, flaring to 25 km maximum width
 - **Gameplay**: City building, NPC simulation, and racing through player-built cities
 
 ## Prerequisites
@@ -90,7 +90,7 @@ EarthRing/
 ├── README.md                          # This file
 ├── implementation-phases.md           # Implementation roadmap
 ├── .gitignore                         # Git ignore patterns
-├── docs/                              # Design documentation (10 documents)
+├── docs/                              # Design documentation (13 documents)
 │   ├── 01-architecture-overview.md
 │   ├── 02-map-system.md
 │   ├── 03-database-schema.md
@@ -187,6 +187,9 @@ Comprehensive design documentation is available in the `docs/` directory:
 - **08-procedural-generation.md**: Procedural generation algorithms
 - **09-zone-system.md**: Player-defined zones and road generation
 - **10-game-mechanics.md**: City builder, Sims, and racing mechanics
+- **11-microgravity-physics.md**: Microgravity physics implementation specification
+- **12-npc-ai-pathfinding.md**: NPC AI and pathfinding algorithms specification
+- **13-transportation-generation.md**: Transportation generation algorithm specification
 
 See `implementation-phases.md` for the implementation roadmap and planning details.
 
