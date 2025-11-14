@@ -4,25 +4,37 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
+	"github.com/earthring/server/internal/config"
 	"github.com/gorilla/websocket"
 )
 
 // main starts the EarthRing game server.
-// It sets up HTTP routes for health checks and WebSocket connections,
-// then starts listening on the configured port (default: 8080).
+// It loads configuration, sets up HTTP routes for health checks and WebSocket connections,
+// then starts listening on the configured port.
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// Set up HTTP server with timeouts
+	server := &http.Server{
+		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
+	}
+
+	// Set up routes
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/ws", websocketHandler)
 
-	log.Printf("EarthRing server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	log.Printf("EarthRing server starting on %s:%s (environment: %s)", 
+		cfg.Server.Host, cfg.Server.Port, cfg.Server.Environment)
+	
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

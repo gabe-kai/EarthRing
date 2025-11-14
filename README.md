@@ -41,7 +41,29 @@ EarthRing is set on a massive orbital ring structure:
    ./scripts/setup.sh
    ```
 
-3. **Set up the database**
+3. **Configure environment variables**
+   
+   **Server configuration:**
+   ```powershell
+   # Copy example file and update with your values
+   cd server
+   Copy-Item .env.example .env
+   # Edit .env and set:
+   # - DB_PASSWORD (your PostgreSQL password)
+   # - JWT_SECRET (generate with: openssl rand -hex 32)
+   # - REFRESH_SECRET (generate with: openssl rand -hex 32)
+   ```
+   
+   **Client configuration (optional):**
+   ```powershell
+   cd client-web
+   Copy-Item .env.example .env.local
+   # Edit .env.local if you need to change server URLs
+   ```
+   
+   See `server/internal/config/README.md` for detailed configuration options.
+
+4. **Set up the database**
    
    **Option A: Using the migration script (Recommended)**
    ```powershell
@@ -63,7 +85,7 @@ EarthRing is set on a massive orbital ring structure:
    
    **Note**: The migration script (`database/run_migrations.ps1`) will automatically create the database if it doesn't exist and apply all migrations. See `database/migrations/README.md` for details.
 
-4. **Verify installation**
+5. **Verify installation**
    ```bash
    cd server && go test ./... && python -m pytest tests/test_basic.py -v
    cd ../client-web && npm test
@@ -75,8 +97,9 @@ EarthRing is set on a massive orbital ring structure:
 ```bash
 # Terminal 1: Go server
 cd server
+# Make sure .env file exists with required configuration
 go run cmd/earthring-server/main.go
-# Runs on http://localhost:8080
+# Runs on http://localhost:8080 (or port specified in SERVER_PORT)
 
 # Terminal 2: Web client
 cd client-web
