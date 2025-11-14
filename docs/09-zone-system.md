@@ -235,6 +235,7 @@ Transportation infrastructure is not manually placed by players. Instead, it gro
    - **Medium Traffic**: Generate bike/skate lane
    - **Low Traffic**: Foot traffic only (no infrastructure)
    - **Hub/Regional Stations**: Generate road lanes (autos, buses, cargo)
+   - **Note**: See `13-transportation-generation.md` for detailed threshold values and implementation specifications
 
 ### Transportation Growth Process
 
@@ -591,7 +592,7 @@ Players can modify their zones:
 ## Open Questions
 
 1. What is the maximum number of vertices per zone polygon? (Needs performance testing with different clients - web, light local, Unreal)
-2. What are the exact traffic thresholds for generating each transportation type? (To be determined during implementation/testing)
+2. ~~What are the exact traffic thresholds for generating each transportation type?~~ **RESOLVED** - See `13-transportation-generation.md` for detailed threshold values and implementation specifications
 3. How should we handle zone boundaries at chunk boundaries? (Zones can span chunks - implementation details TBD)
 
 ## Future Considerations

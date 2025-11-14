@@ -26,7 +26,10 @@ scene.add(cube);
 
 camera.position.z = 5;
 
-// Animation loop
+/**
+ * Animation loop that continuously renders the scene.
+ * Updates cube rotation and renders each frame using requestAnimationFrame.
+ */
 function animate() {
   requestAnimationFrame(animate);
   cube.rotation.x += 0.01;
