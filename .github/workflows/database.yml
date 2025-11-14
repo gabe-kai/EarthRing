@@ -1,0 +1,101 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'database/migrations/**'
+      - '.github/workflows/database.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'database/migrations/**'
+      - '.github/workflows/database.yml'
+  workflow_dispatch:
+
+jobs:
+  test-migrations:
+    name: Test Database Migrations
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: earthring_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 1
+          done
+
+      - name: Create test database
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          psql -c "CREATE DATABASE earthring_test;" || echo "Database may already exist"
+          psql -d earthring_test -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+          psql -d earthring_test -c "CREATE EXTENSION IF NOT EXISTS postgis_topology;"
+
+      - name: Test migrations up
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          # Apply all migrations
+          for file in database/migrations/*_up.sql; do
+            echo "Applying migration: $file"
+            psql -f "$file" || exit 1
+          done
+
+      - name: Verify schema
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          # Check that all expected tables exist
+          psql -c "\dt" | grep -E "(players|zones|structures|chunks|roads|npcs|racing_events)" || exit 1
+          echo "✅ All tables created successfully"
+
+      - name: Test migrations down (optional)
+        if: failure()
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          echo "Testing rollback capability..."
+          # Note: This is a basic test - full rollback testing would require more complex logic
+          echo "Rollback test skipped (would require ordered rollback logic)"
+

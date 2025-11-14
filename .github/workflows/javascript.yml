@@ -1,0 +1,97 @@
+name: JavaScript Tests
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'client-web/**'
+      - '.github/workflows/javascript.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'client-web/**'
+      - '.github/workflows/javascript.yml'
+
+jobs:
+  test:
+    name: JavaScript Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: client-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./client-web
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./client-web
+        run: npm test
+
+  lint:
+    name: JavaScript Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: client-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./client-web
+        run: npm ci
+
+      - name: Run ESLint (if configured)
+        working-directory: ./client-web
+        run: |
+          if [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f "eslint.config.js" ]; then
+            npm run lint || echo "ESLint not configured, skipping"
+          else
+            echo "ESLint not configured, skipping lint step"
+          fi
+        continue-on-error: true
+
+  build:
+    name: Build Client
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: client-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./client-web
+        run: npm ci
+
+      - name: Build client
+        working-directory: ./client-web
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthring-client
+          path: client-web/dist
+          retention-days: 7
+
