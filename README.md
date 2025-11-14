@@ -23,6 +23,8 @@ EarthRing is set on a massive orbital ring structure:
 
 ## Quick Start
 
+**Important**: All commands should be run from the project root directory (`EarthRing/`). The project root contains `README.md`, `docs/`, `server/`, `client-web/`, etc.
+
 ### Setup
 
 1. **Clone the repository**
@@ -30,6 +32,8 @@ EarthRing is set on a massive orbital ring structure:
    git clone <repository-url>
    cd EarthRing
    ```
+   
+   **Note**: Ensure you're in the project root directory (`EarthRing/`) before running any commands. The project root is identifiable by the presence of `README.md`, `docs/`, `server/`, and `client-web/` directories.
 
 2. **Run setup script** (installs dependencies)
    ```powershell
@@ -131,8 +135,12 @@ EarthRing/
 
 ## Development Workflow
 
+**Important**: Always run git commands from the project root directory (`EarthRing/`).
+
 1. **Create a feature branch**
    ```bash
+   # Ensure you're in the project root
+   cd EarthRing  # or: cd "C:\Users\gabek\Cursor Projects\EarthRing" on Windows
    git checkout -b feature/your-feature-name
    ```
 

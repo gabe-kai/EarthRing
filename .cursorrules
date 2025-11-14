@@ -1,0 +1,39 @@
+# Cursor AI Rules for EarthRing Project
+
+## Important Directory Information
+
+**Project Root Directory**: `C:\Users\gabek\Cursor Projects\EarthRing`
+
+When running git commands or any terminal commands, always ensure you are in the project root directory:
+- **Correct**: `C:\Users\gabek\Cursor Projects\EarthRing`
+- **Incorrect**: Any subdirectory or parent directory
+
+## Git Operations
+
+- Always run git commands from the project root directory
+- Use `cd "C:\Users\gabek\Cursor Projects\EarthRing"` before running git commands
+- The project root contains: `README.md`, `docs/`, `server/`, `client-web/`, `database/`, etc.
+
+## Project Structure
+
+The project root contains:
+- `README.md` - Project overview and setup instructions
+- `docs/` - Design documentation (13 documents)
+- `server/` - Go server and Python procedural service
+- `client-web/` - Three.js web client
+- `database/` - Database schema and migrations
+- `scripts/` - Setup and utility scripts
+- `implementation-phases.md` - Implementation roadmap
+
+## Development Workflow
+
+1. Always start from project root: `cd "C:\Users\gabek\Cursor Projects\EarthRing"`
+2. Navigate to subdirectories as needed: `cd server`, `cd client-web`, etc.
+3. Return to root for git operations: `cd "C:\Users\gabek\Cursor Projects\EarthRing"`
+
+## Notes for AI Agents
+
+- When asked to run git commands, always verify you're in the project root first
+- Use absolute paths when necessary: `cd "C:\Users\gabek\Cursor Projects\EarthRing"`
+- The workspace path should be: `C:\Users\gabek\Cursor Projects\EarthRing`
+
