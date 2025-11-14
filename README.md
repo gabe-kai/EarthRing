@@ -144,15 +144,19 @@ EarthRing/
 │   │   ├── database/                  # Database access layer
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
 │   │   ├── procedural/                # Procedural generation (Python)
-│   │   └── auth/                      # Authentication
+│   │   ├── auth/                      # Authentication
+│   │   ├── config/                    # Configuration management
+│   │   └── testutil/                  # Test utilities and helpers
 │   ├── pkg/                           # Public library code
 │   ├── migrations/                    # Database migrations
 │   ├── config/                        # Configuration files
-│   ├── tests/                         # Python tests
+│   ├── tests/                         # Python tests (pytest fixtures, integration tests)
 │   ├── go.mod                         # Go dependencies
 │   └── requirements.txt               # Python dependencies
 ├── client-web/                        # Three.js web client
 │   ├── src/                           # Source code (network, state, rendering, input, chunks, ui)
+│   │   ├── config.js                  # Client configuration
+│   │   └── test-utils.js              # Test utilities and mocks
 │   ├── assets/                        # Game assets (models, textures, shaders)
 │   ├── public/                        # Static files
 │   ├── package.json                   # Node.js dependencies
@@ -163,6 +167,8 @@ EarthRing/
 │   ├── migrations/                    # Migration scripts (13 migrations)
 │   └── run_migrations.ps1            # PowerShell migration runner
 ├── scripts/                           # Utility scripts (setup.sh, setup.ps1)
+├── .github/                           # GitHub Actions workflows
+│   └── workflows/                     # CI/CD pipeline (Go, Python, JavaScript, Database)
 └── tests/                             # Integration and E2E tests
 ```
 
@@ -186,8 +192,12 @@ EarthRing/
 
 4. **Run tests before committing**
    ```bash
+   # Run all tests
    cd server && go test ./... && python -m pytest
    cd ../client-web && npm test
+   
+   # Or use test utilities for integration tests
+   # See server/internal/testutil/README.md and server/tests/README.md
    ```
 
 5. **Commit and push**
@@ -207,8 +217,19 @@ All code must be properly documented and follow project standards:
 - **Documentation Updates**: Update relevant design docs when architecture changes
 - **README Updates**: Update README if structure, setup, or dependencies change
 - **Tests**: All new functionality should have tests
+- **Test Utilities**: Use test utilities from `server/internal/testutil/` and `client-web/src/test-utils.js` for consistency
 
 See the design documentation in `docs/` for detailed specifications.
+
+### Testing Framework
+
+The project includes comprehensive testing utilities:
+
+- **Go**: Test utilities in `server/internal/testutil/` (database helpers, HTTP test helpers, fixtures)
+- **Python**: Pytest fixtures in `server/tests/conftest.py` (database connections, test data generators)
+- **JavaScript**: Test utilities in `client-web/src/test-utils.js` (mocks, fixtures)
+
+See `server/internal/testutil/README.md` and `server/tests/README.md` for detailed usage.
 
 ## Documentation
 
