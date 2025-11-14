@@ -42,6 +42,17 @@ EarthRing is set on a massive orbital ring structure:
    ```
 
 3. **Set up the database**
+   
+   **Option A: Using the migration script (Recommended)**
+   ```powershell
+   # Windows PowerShell
+   .\database\run_migrations.ps1 -Action up
+   
+   # Linux/Mac (if using golang-migrate)
+   migrate -path database/migrations -database "postgres://postgres:password@localhost:5432/earthring_dev?sslmode=disable" up
+   ```
+   
+   **Option B: Manual setup**
    ```sql
    psql -U postgres
    CREATE DATABASE earthring_dev;
@@ -49,6 +60,8 @@ EarthRing is set on a massive orbital ring structure:
    CREATE EXTENSION IF NOT EXISTS postgis;
    CREATE EXTENSION IF NOT EXISTS postgis_topology;
    ```
+   
+   **Note**: The migration script (`database/run_migrations.ps1`) will automatically create the database if it doesn't exist and apply all migrations. See `database/migrations/README.md` for details.
 
 4. **Verify installation**
    ```bash
@@ -122,9 +135,10 @@ EarthRing/
 │   ├── package.json                   # Node.js dependencies
 │   └── vite.config.js                 # Vite configuration
 ├── database/                          # Database files
-│   ├── schema/                        # SQL schema files
+│   ├── schema/                        # SQL schema files (reference only)
 │   ├── seeds/                         # Seed data
-│   └── migrations/                    # Migration scripts
+│   ├── migrations/                    # Migration scripts (13 migrations)
+│   └── run_migrations.ps1            # PowerShell migration runner
 ├── scripts/                           # Utility scripts (setup.sh, setup.ps1)
 └── tests/                             # Integration and E2E tests
 ```
