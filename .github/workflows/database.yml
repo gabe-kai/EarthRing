@@ -68,8 +68,8 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: earthring_test
         run: |
-          # Apply all migrations
-          for file in database/migrations/*_up.sql; do
+          # Apply all migrations in order
+          for file in $(ls database/migrations/*_up.sql | sort); do
             echo "Applying migration: $file"
             psql -f "$file" || exit 1
           done
