@@ -41,16 +41,18 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 		t.Fatalf("Failed to create players table: %v", err)
 	}
 
-	// Create test player
+	// Create test player with unique username/email
 	passwordService := auth.NewPasswordService(&config.Config{})
 	hashedPassword, _ := passwordService.HashPassword("password123")
+	username := testutil.RandomUsername()
+	email := testutil.RandomEmail()
 	
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, "testuser", "test@example.com", hashedPassword, 1, 0, 0).Scan(&playerID)
+	`, username, email, hashedPassword, 1, 0, 0).Scan(&playerID)
 	if err != nil {
 		t.Fatalf("Failed to create test player: %v", err)
 	}
@@ -59,7 +61,7 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 		ID       int64
 		Username string
 		Email    string
-	}{ID: playerID, Username: "testuser", Email: "test@example.com"}
+	}{ID: playerID, Username: username, Email: email}
 
 	// Create config
 	cfg := &config.Config{
@@ -140,16 +142,18 @@ func TestUpdatePlayerPosition(t *testing.T) {
 		t.Fatalf("Failed to create players table: %v", err)
 	}
 
-	// Create test player
+	// Create test player with unique username/email
 	passwordService := auth.NewPasswordService(&config.Config{})
 	hashedPassword, _ := passwordService.HashPassword("password123")
+	username := testutil.RandomUsername()
+	email := testutil.RandomEmail()
 	
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, "testuser", "test@example.com", hashedPassword, 1, 0, 0).Scan(&playerID)
+	`, username, email, hashedPassword, 1, 0, 0).Scan(&playerID)
 	if err != nil {
 		t.Fatalf("Failed to create test player: %v", err)
 	}
@@ -158,7 +162,7 @@ func TestUpdatePlayerPosition(t *testing.T) {
 		ID       int64
 		Username string
 		Email    string
-	}{ID: playerID, Username: "testuser", Email: "test@example.com"}
+	}{ID: playerID, Username: username, Email: email}
 
 	// Create config
 	cfg := &config.Config{
