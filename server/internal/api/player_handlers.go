@@ -109,7 +109,9 @@ func (h *PlayerHandlers) GetPlayerProfile(w http.ResponseWriter, r *http.Request
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(profile)
+	if err := json.NewEncoder(w).Encode(profile); err != nil {
+		log.Printf("Failed to encode player profile: %v", err)
+	}
 }
 
 // GetCurrentPlayerProfile handles GET /api/players/me requests.
@@ -173,7 +175,9 @@ func (h *PlayerHandlers) GetCurrentPlayerProfile(w http.ResponseWriter, r *http.
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(profile)
+	if err := json.NewEncoder(w).Encode(profile); err != nil {
+		log.Printf("Failed to encode player profile: %v", err)
+	}
 }
 
 // UpdatePlayerPosition handles PUT /api/players/{player_id}/position requests.
