@@ -190,8 +190,9 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:     "test-secret-key-for-testing-only",
-			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTSecret:         "test-secret-key-for-testing-only",
+			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
+			JWTExpiration:     15 * time.Minute, // Ensure token is valid
 		},
 	}
 
@@ -264,8 +265,9 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:     "test-secret-key-for-testing-only",
-			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTSecret:         "test-secret-key-for-testing-only",
+			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
+			JWTExpiration:     15 * time.Minute, // Ensure token is valid
 		},
 	}
 
@@ -294,7 +296,7 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
 
-	// Test: Unsupported version
+	// Test: Unsupported version (with valid token)
 	req := httptest.NewRequest("GET", "/ws?token="+token, nil)
 	req.Header.Set("Sec-WebSocket-Protocol", "earthring-v99")
 	w := httptest.NewRecorder()
