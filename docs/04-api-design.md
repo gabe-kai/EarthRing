@@ -474,6 +474,16 @@ WebSocket URL: wss://api.earthring.game/ws (production)
 Handshake: Include JWT token in query parameter or header
 ```
 
+**Connection Lifecycle:**
+- Client connects with JWT token (query parameter `?token=<jwt>` or `Authorization: Bearer <jwt>` header)
+- Server validates token and upgrades connection
+- Protocol version is negotiated via `Sec-WebSocket-Protocol` header
+- Connection remains open until client disconnects or server closes it
+- Automatic heartbeat: Server sends ping frames every 30 seconds
+- Client should respond to ping frames with pong frames
+- Client can also send `ping` messages for application-level heartbeat
+- Connection timeout: 60 seconds without pong response triggers disconnect
+
 #### Protocol Version Negotiation
 
 **Decision**: WebSocket protocol version is negotiated during the handshake using the `Sec-WebSocket-Protocol` header.
@@ -526,7 +536,19 @@ All WebSocket messages use JSON:
 
 #### Client → Server
 
-1. **chunk_request**
+1. **ping** (Heartbeat)
+   ```json
+   {
+     "type": "ping",
+     "id": "ping_123"
+   }
+   ```
+   - Used for connection keepalive/heartbeat
+   - Server responds with `pong` message
+   - Recommended interval: 30 seconds
+   - Server also sends automatic ping frames every 30 seconds
+
+2. **chunk_request**
    ```json
    {
      "type": "chunk_request",
@@ -606,7 +628,30 @@ All WebSocket messages use JSON:
 
 #### Server → Client
 
-1. **chunk_data**
+1. **pong** (Heartbeat Response)
+   ```json
+   {
+     "type": "pong",
+     "id": "ping_123" // Matches ping request ID
+   }
+   ```
+   - Response to `ping` messages
+   - Server also sends automatic pong frames in response to ping frames
+
+2. **error**
+   ```json
+   {
+     "type": "error",
+     "id": "req_123", // Matches request ID if applicable
+     "error": "Error message",
+     "message": "Human-readable error message",
+     "code": "ErrorCode"
+   }
+   ```
+   - Sent when an error occurs processing a message
+   - Common error codes: `InvalidMessageFormat`, `UnknownMessageType`, `NotImplemented`, `Unauthorized`
+
+3. **chunk_data**
    ```json
    {
      "type": "chunk_data",
