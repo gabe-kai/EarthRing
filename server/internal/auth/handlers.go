@@ -285,9 +285,11 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"message": "Logged out successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode logout response: %v", err)
+	}
 }
 
 // Helper methods
@@ -295,17 +297,21 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandlers) sendTokenResponse(w http.ResponseWriter, status int, response TokenResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode token response: %v", err)
+	}
 }
 
 func (h *AuthHandlers) sendError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{
+	if err := json.NewEncoder(w).Encode(ErrorResponse{
 		Error:   code,
 		Message: message,
 		Code:    code,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode error response: %v", err)
+	}
 }
 
 func (h *AuthHandlers) sendValidationError(w http.ResponseWriter, err error) {

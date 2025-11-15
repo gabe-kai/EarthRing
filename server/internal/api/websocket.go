@@ -332,7 +332,9 @@ func (c *WebSocketConnection) writePump() {
 				return
 			}
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					log.Printf("Failed to write close message: %v", err)
+				}
 				return
 			}
 
