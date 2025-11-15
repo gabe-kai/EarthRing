@@ -19,9 +19,9 @@ def test_get_chunk_width():
     floor = 0
     chunk_index = 100
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
-    
+
     width = generation.get_chunk_width(floor, chunk_index, chunk_seed)
-    
+
     # Should return base width (400m) for Phase 1
     assert width == 400.0
     assert isinstance(width, float)

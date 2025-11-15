@@ -16,16 +16,16 @@ from internal.procedural import seeds
 def test_get_chunk_seed():
     """Test chunk seed generation"""
     world_seed = 12345
-    
+
     # Same inputs should produce same seed
     seed1 = seeds.get_chunk_seed(0, 100, world_seed)
     seed2 = seeds.get_chunk_seed(0, 100, world_seed)
     assert seed1 == seed2
-    
+
     # Different inputs should produce different seeds
     seed3 = seeds.get_chunk_seed(0, 101, world_seed)
     assert seed1 != seed3
-    
+
     # Different floors should produce different seeds
     seed4 = seeds.get_chunk_seed(1, 100, world_seed)
     assert seed1 != seed4

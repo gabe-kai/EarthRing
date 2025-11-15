@@ -6,12 +6,12 @@ Seed generation utilities for deterministic procedural generation.
 def get_chunk_seed(floor: int, chunk_index: int, world_seed: int) -> int:
     """
     Generate deterministic seed for a chunk.
-    
+
     Args:
         floor: Floor number
         chunk_index: Chunk index
         world_seed: Global world seed
-        
+
     Returns:
         Deterministic chunk seed
     """
@@ -24,12 +24,12 @@ def get_chunk_seed(floor: int, chunk_index: int, world_seed: int) -> int:
 def get_building_seed(chunk_seed: int, cell_x: int, cell_y: int) -> int:
     """
     Generate deterministic seed for a building cell.
-    
+
     Args:
         chunk_seed: Seed of the parent chunk
         cell_x: X coordinate of the cell within the chunk
         cell_y: Y coordinate of the cell within the chunk
-        
+
     Returns:
         Deterministic building seed
     """
@@ -40,12 +40,12 @@ def get_building_seed(chunk_seed: int, cell_x: int, cell_y: int) -> int:
 def get_window_seed(building_seed: int, window_x: int, window_y: int) -> int:
     """
     Generate deterministic seed for a window.
-    
+
     Args:
         building_seed: Seed of the parent building
         window_x: X coordinate of the window
         window_y: Y coordinate of the window
-        
+
     Returns:
         Deterministic window seed
     """
@@ -56,10 +56,10 @@ def get_window_seed(building_seed: int, window_x: int, window_y: int) -> int:
 def seeded_random(seed: int):
     """
     Create deterministic random number generator.
-    
+
     Args:
         seed: Seed value
-        
+
     Returns:
         Seeded Random instance
     """
