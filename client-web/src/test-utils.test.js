@@ -10,6 +10,7 @@ import {
   createMockPlayer,
   wait,
   createMockFetchResponse,
+  WebSocketConstants,
 } from './test-utils';
 
 describe('Test Utilities', () => {
@@ -17,7 +18,7 @@ describe('Test Utilities', () => {
     it('should create a mock WebSocket with default values', () => {
       const mockWS = createMockWebSocket();
       
-      expect(mockWS.readyState).toBe(WebSocket.CONNECTING);
+      expect(mockWS.readyState).toBe(WebSocketConstants.CONNECTING);
       expect(mockWS.url).toBe('ws://localhost:8080/ws');
       expect(mockWS.protocol).toBe('earthring-v1');
       expect(typeof mockWS.send).toBe('function');

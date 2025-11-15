@@ -4,6 +4,12 @@
 
 import { vi } from 'vitest';
 
+// WebSocket readyState constants (for Node.js compatibility)
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
+const WS_CLOSING = 2;
+const WS_CLOSED = 3;
+
 /**
  * Creates a mock WebSocket connection
  * @param {Object} options - Configuration options
@@ -18,19 +24,19 @@ export function createMockWebSocket(options = {}) {
   } = options;
 
   const mockWS = {
-    readyState: WebSocket.CONNECTING,
+    readyState: WS_CONNECTING,
     url: options.url || 'ws://localhost:8080/ws',
     protocol: options.protocol || 'earthring-v1',
     
     send: vi.fn(),
     close: vi.fn(() => {
-      mockWS.readyState = WebSocket.CLOSED;
+      mockWS.readyState = WS_CLOSED;
       onClose();
     }),
     
     // Simulate connection events
     _simulateOpen: () => {
-      mockWS.readyState = WebSocket.OPEN;
+      mockWS.readyState = WS_OPEN;
       onOpen();
     },
     
@@ -39,13 +45,21 @@ export function createMockWebSocket(options = {}) {
     },
     
     _simulateError: (error) => {
-      mockWS.readyState = WebSocket.CLOSED;
+      mockWS.readyState = WS_CLOSED;
       onError(error);
     },
   };
 
   return mockWS;
 }
+
+// Export constants for use in tests
+export const WebSocketConstants = {
+  CONNECTING: WS_CONNECTING,
+  OPEN: WS_OPEN,
+  CLOSING: WS_CLOSING,
+  CLOSED: WS_CLOSED,
+};
 
 /**
  * Creates mock configuration for tests
