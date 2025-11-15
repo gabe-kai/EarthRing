@@ -99,8 +99,16 @@ jobs:
           done
           echo "✅ All $MIGRATION_COUNT migrations applied successfully"
           echo ""
+          echo "Verifying migrations were applied..."
           echo "Tables after migrations:"
           psql -d earthring_test -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+          echo ""
+          TABLE_COUNT=$(psql -d earthring_test -t -A -c "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';")
+          echo "Total tables in public schema: $TABLE_COUNT"
+          if [ "$TABLE_COUNT" -lt "7" ]; then
+            echo "⚠️  WARNING: Expected at least 7 tables, but found $TABLE_COUNT"
+            echo "This suggests migrations may not have been applied correctly."
+          fi
 
       - name: Verify schema
         env:
