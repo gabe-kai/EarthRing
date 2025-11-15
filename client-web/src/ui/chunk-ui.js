@@ -261,6 +261,39 @@ export function hideChunkPanel() {
 }
 
 /**
+ * Handle chunk metadata request
+ */
+async function handleChunkRequest() {
+  const resultDisplay = document.getElementById('chunk-result');
+  const submitButton = document.querySelector('#chunk-form button[type="submit"]');
+  
+  const floor = document.getElementById('chunk-floor').value;
+  const chunkIndex = document.getElementById('chunk-index').value;
+  const chunkID = `${floor}_${chunkIndex}`;
+  
+  resultDisplay.textContent = 'Loading...';
+  resultDisplay.className = 'result-display show';
+  submitButton.disabled = true;
+  
+  try {
+    // Debug: Check if token exists
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      throw new Error('No access token found. Please log in again.');
+    }
+    
+    const metadata = await getChunkMetadata(chunkID);
+    resultDisplay.textContent = JSON.stringify(metadata, null, 2);
+    resultDisplay.className = 'result-display show success';
+  } catch (error) {
+    resultDisplay.textContent = `Error: ${error.message}`;
+    resultDisplay.className = 'result-display show error';
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+/**
  * Set up event listeners for chunk panel
  */
 function setupChunkPanelListeners() {
@@ -272,43 +305,17 @@ function setupChunkPanelListeners() {
   // Chunk form
   document.getElementById('chunk-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const resultDisplay = document.getElementById('chunk-result');
-    const submitButton = e.target.querySelector('button[type="submit"]');
-    
-    const floor = document.getElementById('chunk-floor').value;
-    const chunkIndex = document.getElementById('chunk-index').value;
-    const chunkID = `${floor}_${chunkIndex}`;
-    
-    resultDisplay.textContent = 'Loading...';
-    resultDisplay.className = 'result-display show';
-    submitButton.disabled = true;
-    
-    try {
-      // Debug: Check if token exists
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        throw new Error('No access token found. Please log in again.');
-      }
-      
-      const metadata = await getChunkMetadata(chunkID);
-      resultDisplay.textContent = JSON.stringify(metadata, null, 2);
-      resultDisplay.className = 'result-display show success';
-    } catch (error) {
-      resultDisplay.textContent = `Error: ${error.message}`;
-      resultDisplay.className = 'result-display show error';
-    } finally {
-      submitButton.disabled = false;
-    }
+    await handleChunkRequest();
   });
 
   // Quick example buttons
   document.querySelectorAll('.example-button').forEach(button => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const chunkID = button.dataset.chunk;
       const [floor, chunkIndex] = chunkID.split('_');
       document.getElementById('chunk-floor').value = floor;
       document.getElementById('chunk-index').value = chunkIndex;
-      document.getElementById('chunk-form').dispatchEvent(new Event('submit'));
+      await handleChunkRequest();
     });
   });
 }
