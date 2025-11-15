@@ -72,4 +72,3 @@ def test_seeded_random():
     # Different seeds should produce different sequences
     rng3 = seeds.seeded_random(seed + 1)
     assert rng1.random() != rng3.random()
-

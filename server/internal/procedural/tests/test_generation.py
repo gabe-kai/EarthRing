@@ -43,4 +43,3 @@ def test_generate_empty_chunk():
     assert chunk["structures"] == []
     assert chunk["zones"] == []
     assert chunk["metadata"]["generated"] is True
-

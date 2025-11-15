@@ -24,7 +24,7 @@ from internal.procedural import generation
 app = FastAPI(
     title="EarthRing Procedural Generation Service",
     description="Service for generating procedural chunks, buildings, and city elements",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 # CORS middleware (allow Go server to call this service)
@@ -42,6 +42,7 @@ cfg = config.load_config()
 
 class HealthResponse(BaseModel):
     """Health check response"""
+
     status: str
     service: str
     version: str
@@ -49,20 +50,27 @@ class HealthResponse(BaseModel):
 
 class GenerateChunkRequest(BaseModel):
     """Request to generate a chunk"""
+
     floor: int = Field(..., ge=0, description="Floor number")
     chunk_index: int = Field(..., ge=0, description="Chunk index")
-    lod_level: str = Field(default="medium", description="Level of detail: low, medium, high")
-    world_seed: Optional[int] = Field(default=None, description="World seed (uses default if not provided)")
+    lod_level: str = Field(
+        default="medium", description="Level of detail: low, medium, high"
+    )
+    world_seed: Optional[int] = Field(
+        default=None, description="World seed (uses default if not provided)"
+    )
 
 
 class ChunkGeometry(BaseModel):
     """Chunk geometry data"""
+
     type: str = "Polygon"
     coordinates: List[List[List[float]]]
 
 
 class ChunkMetadata(BaseModel):
     """Chunk metadata"""
+
     chunk_id: str
     floor: int
     chunk_index: int
@@ -72,6 +80,7 @@ class ChunkMetadata(BaseModel):
 
 class GenerateChunkResponse(BaseModel):
     """Response from chunk generation"""
+
     success: bool
     chunk: ChunkMetadata
     geometry: Optional[ChunkGeometry] = None
@@ -105,7 +114,9 @@ async def generate_chunk(request: GenerateChunkRequest):
         )
 
         # Generate chunk seed
-        chunk_seed = seeds.get_chunk_seed(request.floor, request.chunk_index, world_seed)
+        chunk_seed = seeds.get_chunk_seed(
+            request.floor, request.chunk_index, world_seed
+        )
 
         # For Phase 1, return empty chunk with metadata
         # Full generation will be implemented in Phase 2
@@ -162,4 +173,3 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app", host=host, port=port, reload=cfg.environment == "development"
     )
-
