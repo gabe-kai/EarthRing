@@ -53,7 +53,6 @@ def generate_empty_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "zones": [],
         "metadata": {
             "generated": True,
-            "version": 1
-        }
+            "version": 1,
+        },
     }
-

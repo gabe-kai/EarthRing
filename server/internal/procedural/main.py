@@ -86,7 +86,7 @@ async def health_check():
     return HealthResponse(
         status="ok",
         service="earthring-procedural-service",
-        version="0.1.0"
+        version="0.1.0",
     )
 
 
@@ -94,24 +94,28 @@ async def health_check():
 async def generate_chunk(request: GenerateChunkRequest):
     """
     Generate a procedural chunk.
-    
+
     For Phase 1, this returns empty chunks with metadata only.
     Full generation will be implemented in Phase 2.
     """
     try:
         # Get world seed (use default if not provided)
-        world_seed = request.world_seed if request.world_seed is not None else cfg.world_seed
-        
+        world_seed = (
+            request.world_seed if request.world_seed is not None else cfg.world_seed
+        )
+
         # Generate chunk seed
         chunk_seed = seeds.get_chunk_seed(request.floor, request.chunk_index, world_seed)
-        
+
         # For Phase 1, return empty chunk with metadata
         # Full generation will be implemented in Phase 2
         chunk_id = f"{request.floor}_{request.chunk_index}"
-        
+
         # Basic chunk metadata (1km base width, can vary)
-        chunk_width = generation.get_chunk_width(request.floor, request.chunk_index, chunk_seed)
-        
+        chunk_width = generation.get_chunk_width(
+            request.floor, request.chunk_index, chunk_seed
+        )
+
         response = GenerateChunkResponse(
             success=True,
             chunk=ChunkMetadata(
@@ -119,42 +123,43 @@ async def generate_chunk(request: GenerateChunkRequest):
                 floor=request.floor,
                 chunk_index=request.chunk_index,
                 width=chunk_width,
-                version=1
+                version=1,
             ),
             geometry=None,  # Empty for Phase 1
             structures=[],
             zones=[],
-            message="Empty chunk generated (full generation pending Phase 2)"
+            message="Empty chunk generated (full generation pending Phase 2)",
         )
-        
+
         return response
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate chunk: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate chunk: {str(e)}"
+        )
 
 
 @app.get("/api/v1/chunks/seed/{floor}/{chunk_index}")
-async def get_chunk_seed(floor: int, chunk_index: int, world_seed: Optional[int] = None):
+async def get_chunk_seed(
+    floor: int, chunk_index: int, world_seed: Optional[int] = None
+):
     """Get the seed for a specific chunk (useful for debugging)"""
     seed = world_seed if world_seed is not None else cfg.world_seed
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, seed)
-    
+
     return {
         "floor": floor,
         "chunk_index": chunk_index,
         "world_seed": seed,
-        "chunk_seed": chunk_seed
+        "chunk_seed": chunk_seed,
     }
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PROCEDURAL_SERVICE_PORT", "8081"))
     host = os.getenv("PROCEDURAL_SERVICE_HOST", "0.0.0.0")
-    
+
     uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=cfg.environment == "development"
+        "main:app", host=host, port=port, reload=cfg.environment == "development"
     )
 

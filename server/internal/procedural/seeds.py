@@ -64,5 +64,5 @@ def seeded_random(seed: int):
         Seeded Random instance
     """
     import random
-    return random.Random(seed)
 
+    return random.Random(seed)

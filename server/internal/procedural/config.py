@@ -35,4 +35,3 @@ class Config:
 def load_config() -> Config:
     """Load configuration from environment variables"""
     return Config()
-

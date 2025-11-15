@@ -100,4 +100,3 @@ def test_data():
         "random_username": random_username,
         "random_email": random_email,
     }
-
