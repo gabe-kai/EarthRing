@@ -83,7 +83,17 @@ jobs:
           PGDATABASE: earthring_test
         run: |
           # Check that all expected tables exist
-          psql -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events');" | grep -E "(players|zones|structures|chunks|roads|npcs|racing_events)" || exit 1
+          # Use -t flag for tuples-only (no headers) and -A for unaligned output
+          TABLES=$(psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events') ORDER BY tablename;")
+          EXPECTED_TABLES="chunks npcs players racing_events roads structures zones"
+          for table in $EXPECTED_TABLES; do
+            if echo "$TABLES" | grep -q "^${table}$"; then
+              echo "✅ Table '$table' exists"
+            else
+              echo "❌ Table '$table' is missing"
+              exit 1
+            fi
+          done
           echo "✅ All tables created successfully"
 
       - name: Test migrations down (optional)
