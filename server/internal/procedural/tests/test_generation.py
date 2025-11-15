@@ -32,9 +32,9 @@ def test_generate_empty_chunk():
     floor = 0
     chunk_index = 100
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
-    
+
     chunk = generation.generate_empty_chunk(floor, chunk_index, chunk_seed)
-    
+
     assert chunk["chunk_id"] == "0_100"
     assert chunk["floor"] == 0
     assert chunk["chunk_index"] == 100
