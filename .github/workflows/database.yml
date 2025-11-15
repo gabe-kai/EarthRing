@@ -71,8 +71,15 @@ jobs:
           # Apply all migrations in order
           for file in $(ls database/migrations/*_up.sql | sort); do
             echo "Applying migration: $file"
-            psql -f "$file" || exit 1
+            if psql -f "$file"; then
+              echo "✅ Successfully applied: $file"
+            else
+              echo "❌ Failed to apply: $file"
+              psql -c "\dt"  # Show current tables for debugging
+              exit 1
+            fi
           done
+          echo "✅ All migrations applied successfully"
 
       - name: Verify schema
         env:
@@ -82,18 +89,28 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: earthring_test
         run: |
+          # Show all tables for debugging
+          echo "Current tables in database:"
+          psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+          echo ""
           # Check that all expected tables exist
           # Use -t flag for tuples-only (no headers) and -A for unaligned output
           TABLES=$(psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events') ORDER BY tablename;")
           EXPECTED_TABLES="chunks npcs players racing_events roads structures zones"
+          MISSING_TABLES=""
           for table in $EXPECTED_TABLES; do
             if echo "$TABLES" | grep -q "^${table}$"; then
               echo "✅ Table '$table' exists"
             else
               echo "❌ Table '$table' is missing"
-              exit 1
+              MISSING_TABLES="$MISSING_TABLES $table"
             fi
           done
+          if [ -n "$MISSING_TABLES" ]; then
+            echo ""
+            echo "Missing tables:$MISSING_TABLES"
+            exit 1
+          fi
           echo "✅ All tables created successfully"
 
       - name: Test migrations down (optional)
