@@ -183,4 +183,3 @@ func TestGetDurationEnv(t *testing.T) {
 		})
 	}
 }
-

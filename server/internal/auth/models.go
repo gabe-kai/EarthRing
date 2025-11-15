@@ -6,16 +6,16 @@ import (
 
 // User represents a player/user in the system
 type User struct {
-	ID           int64     `json:"id" db:"id"`
-	Username     string    `json:"username" db:"username"`
-	Email        string    `json:"email" db:"email"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	Role         string    `json:"role" db:"role"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	LastLogin    *time.Time `json:"last_login,omitempty" db:"last_login"`
-	Level        int        `json:"level" db:"level"`
-	ExperiencePoints int64  `json:"experience_points" db:"experience_points"`
-	CurrencyAmount   int64  `json:"currency_amount" db:"currency_amount"`
+	ID               int64      `json:"id" db:"id"`
+	Username         string     `json:"username" db:"username"`
+	Email            string     `json:"email" db:"email"`
+	PasswordHash     string     `json:"-" db:"password_hash"`
+	Role             string     `json:"role" db:"role"`
+	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
+	LastLogin        *time.Time `json:"last_login,omitempty" db:"last_login"`
+	Level            int        `json:"level" db:"level"`
+	ExperiencePoints int64      `json:"experience_points" db:"experience_points"`
+	CurrencyAmount   int64      `json:"currency_amount" db:"currency_amount"`
 }
 
 // RegisterRequest represents a user registration request
@@ -52,4 +52,3 @@ type ErrorResponse struct {
 	Message string `json:"message,omitempty"`
 	Code    string `json:"code,omitempty"`
 }
-

@@ -18,20 +18,20 @@ func TestNewProceduralClient(t *testing.T) {
 			RetryCount: 3,
 		},
 	}
-	
+
 	client := NewProceduralClient(cfg)
 	if client == nil {
 		t.Fatal("NewProceduralClient returned nil")
 	}
-	
+
 	if client.baseURL != "http://localhost:8081" {
 		t.Errorf("Expected baseURL http://localhost:8081, got %s", client.baseURL)
 	}
-	
+
 	if client.timeout != 30*time.Second {
 		t.Errorf("Expected timeout 30s, got %v", client.timeout)
 	}
-	
+
 	if client.retryCount != 3 {
 		t.Errorf("Expected retryCount 3, got %d", client.retryCount)
 	}
@@ -43,18 +43,18 @@ func TestProceduralClient_HealthCheck(t *testing.T) {
 		if r.URL.Path != "/health" {
 			t.Errorf("Expected path /health, got %s", r.URL.Path)
 		}
-		
+
 		response := HealthResponse{
 			Status:  "ok",
 			Service: "earthring-procedural-service",
 			Version: "0.1.0",
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		Procedural: config.ProceduralConfig{
 			BaseURL:    server.URL,
@@ -62,7 +62,7 @@ func TestProceduralClient_HealthCheck(t *testing.T) {
 			RetryCount: 0,
 		},
 	}
-	
+
 	client := NewProceduralClient(cfg)
 	err := client.HealthCheck()
 	if err != nil {
@@ -78,12 +78,12 @@ func TestProceduralClient_HealthCheck_Unhealthy(t *testing.T) {
 			Service: "earthring-procedural-service",
 			Version: "0.1.0",
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		Procedural: config.ProceduralConfig{
 			BaseURL:    server.URL,
@@ -91,7 +91,7 @@ func TestProceduralClient_HealthCheck_Unhealthy(t *testing.T) {
 			RetryCount: 0,
 		},
 	}
-	
+
 	client := NewProceduralClient(cfg)
 	err := client.HealthCheck()
 	if err == nil {
@@ -105,17 +105,17 @@ func TestProceduralClient_GenerateChunk(t *testing.T) {
 		if r.URL.Path != "/api/v1/chunks/generate" {
 			t.Errorf("Expected path /api/v1/chunks/generate, got %s", r.URL.Path)
 		}
-		
+
 		if r.Method != "POST" {
 			t.Errorf("Expected method POST, got %s", r.Method)
 		}
-		
+
 		// Parse request
 		var req GenerateChunkRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("Failed to decode request: %v", err)
 		}
-		
+
 		response := GenerateChunkResponse{
 			Success: true,
 			Chunk: ChunkMetadata{
@@ -130,12 +130,12 @@ func TestProceduralClient_GenerateChunk(t *testing.T) {
 			Zones:      []interface{}{},
 			Message:    stringPtr("Empty chunk generated"),
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		Procedural: config.ProceduralConfig{
 			BaseURL:    server.URL,
@@ -143,21 +143,21 @@ func TestProceduralClient_GenerateChunk(t *testing.T) {
 			RetryCount: 0,
 		},
 	}
-	
+
 	client := NewProceduralClient(cfg)
 	response, err := client.GenerateChunk(0, 12345, "medium", nil)
 	if err != nil {
 		t.Fatalf("GenerateChunk failed: %v", err)
 	}
-	
+
 	if !response.Success {
 		t.Error("Expected success=true")
 	}
-	
+
 	if response.Chunk.ChunkID != "0_12345" {
 		t.Errorf("Expected chunk ID 0_12345, got %s", response.Chunk.ChunkID)
 	}
-	
+
 	if response.Chunk.Width != 400.0 {
 		t.Errorf("Expected width 400.0, got %f", response.Chunk.Width)
 	}
@@ -165,7 +165,7 @@ func TestProceduralClient_GenerateChunk(t *testing.T) {
 
 func TestProceduralClient_GenerateChunk_Retry(t *testing.T) {
 	attempts := 0
-	
+
 	// Create mock server that fails first two times, succeeds on third
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -173,7 +173,7 @@ func TestProceduralClient_GenerateChunk_Retry(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		
+
 		response := GenerateChunkResponse{
 			Success: true,
 			Chunk: ChunkMetadata{
@@ -184,12 +184,12 @@ func TestProceduralClient_GenerateChunk_Retry(t *testing.T) {
 				Version:    1,
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
-	
+
 	cfg := &config.Config{
 		Procedural: config.ProceduralConfig{
 			BaseURL:    server.URL,
@@ -197,17 +197,17 @@ func TestProceduralClient_GenerateChunk_Retry(t *testing.T) {
 			RetryCount: 3,
 		},
 	}
-	
+
 	client := NewProceduralClient(cfg)
 	response, err := client.GenerateChunk(0, 100, "medium", nil)
 	if err != nil {
 		t.Fatalf("GenerateChunk failed after retries: %v", err)
 	}
-	
+
 	if !response.Success {
 		t.Error("Expected success=true")
 	}
-	
+
 	if attempts != 3 {
 		t.Errorf("Expected 3 attempts, got %d", attempts)
 	}
@@ -217,4 +217,3 @@ func TestProceduralClient_GenerateChunk_Retry(t *testing.T) {
 func stringPtr(s string) *string {
 	return &s
 }
-

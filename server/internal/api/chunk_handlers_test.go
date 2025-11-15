@@ -248,4 +248,3 @@ func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 		})
 	}
 }
-

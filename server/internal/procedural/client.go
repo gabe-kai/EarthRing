@@ -41,8 +41,8 @@ type GenerateChunkRequest struct {
 
 // ChunkGeometry represents chunk geometry data
 type ChunkGeometry struct {
-	Type        string              `json:"type"`
-	Coordinates [][][]float64       `json:"coordinates"`
+	Type        string        `json:"type"`
+	Coordinates [][][]float64 `json:"coordinates"`
 }
 
 // ChunkMetadata represents chunk metadata
@@ -56,12 +56,12 @@ type ChunkMetadata struct {
 
 // GenerateChunkResponse represents the response from chunk generation
 type GenerateChunkResponse struct {
-	Success    bool            `json:"success"`
-	Chunk      ChunkMetadata   `json:"chunk"`
-	Geometry   *ChunkGeometry  `json:"geometry,omitempty"`
-	Structures []interface{}   `json:"structures"`
-	Zones      []interface{}   `json:"zones"`
-	Message    *string         `json:"message,omitempty"`
+	Success    bool           `json:"success"`
+	Chunk      ChunkMetadata  `json:"chunk"`
+	Geometry   *ChunkGeometry `json:"geometry,omitempty"`
+	Structures []interface{}  `json:"structures"`
+	Zones      []interface{}  `json:"zones"`
+	Message    *string        `json:"message,omitempty"`
 }
 
 // HealthResponse represents a health check response
@@ -74,50 +74,50 @@ type HealthResponse struct {
 // HealthCheck checks if the procedural service is healthy
 func (c *ProceduralClient) HealthCheck() error {
 	url := fmt.Sprintf("%s/health", c.baseURL)
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}
-	
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check failed with status %d", resp.StatusCode)
 	}
-	
+
 	var health HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		return fmt.Errorf("failed to decode health response: %w", err)
 	}
-	
+
 	if health.Status != "ok" {
 		return fmt.Errorf("service reported unhealthy status: %s", health.Status)
 	}
-	
+
 	return nil
 }
 
 // GenerateChunk requests chunk generation from the procedural service
 func (c *ProceduralClient) GenerateChunk(floor, chunkIndex int, lodLevel string, worldSeed *int) (*GenerateChunkResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/chunks/generate", c.baseURL)
-	
+
 	request := GenerateChunkRequest{
 		Floor:      floor,
 		ChunkIndex: chunkIndex,
 		LODLevel:   lodLevel,
 		WorldSeed:  worldSeed,
 	}
-	
+
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	
+
 	var lastErr error
 	for attempt := 0; attempt <= c.retryCount; attempt++ {
 		if attempt > 0 {
@@ -125,48 +125,47 @@ func (c *ProceduralClient) GenerateChunk(floor, chunkIndex int, lodLevel string,
 			backoff := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
 			time.Sleep(backoff)
 		}
-		
+
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 		if err != nil {
 			lastErr = fmt.Errorf("failed to create request: %w", err)
 			continue
 		}
-		
+
 		req.Header.Set("Content-Type", "application/json")
-		
+
 		resp, err := c.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("request failed: %w", err)
 			continue
 		}
-		
+
 		defer resp.Body.Close()
-		
+
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response: %w", err)
 			continue
 		}
-		
+
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("generation failed with status %d: %s", resp.StatusCode, string(respBody))
 			continue
 		}
-		
+
 		var response GenerateChunkResponse
 		if err := json.Unmarshal(respBody, &response); err != nil {
 			lastErr = fmt.Errorf("failed to decode response: %w", err)
 			continue
 		}
-		
+
 		if !response.Success {
 			lastErr = fmt.Errorf("generation failed: %v", response.Message)
 			continue
 		}
-		
+
 		return &response, nil
 	}
-	
+
 	return nil, fmt.Errorf("generation failed after %d attempts: %w", c.retryCount+1, lastErr)
 }
-

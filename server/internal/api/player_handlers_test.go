@@ -46,7 +46,7 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 	hashedPassword, _ := passwordService.HashPassword("password123")
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
-	
+
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
@@ -56,7 +56,7 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test player: %v", err)
 	}
-	
+
 	player := struct {
 		ID       int64
 		Username string
@@ -147,7 +147,7 @@ func TestUpdatePlayerPosition(t *testing.T) {
 	hashedPassword, _ := passwordService.HashPassword("password123")
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
-	
+
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
@@ -157,7 +157,7 @@ func TestUpdatePlayerPosition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test player: %v", err)
 	}
-	
+
 	player := struct {
 		ID       int64
 		Username string
@@ -241,4 +241,3 @@ func TestUpdatePlayerPosition(t *testing.T) {
 		t.Errorf("Expected floor %d, got %d", updateReq.Floor, floor)
 	}
 }
-

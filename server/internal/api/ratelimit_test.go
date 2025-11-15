@@ -12,31 +12,31 @@ func TestRateLimitMiddleware(t *testing.T) {
 	// Create a simple handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
-	
+
 	// Create rate limit middleware (5 requests per minute)
 	middleware := RateLimitMiddleware(5, 1*time.Minute)
 	wrappedHandler := middleware(handler)
-	
+
 	// Make 5 requests (should all succeed)
 	for i := 0; i < 5; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "127.0.0.1:12345"
 		w := httptest.NewRecorder()
-		
+
 		wrappedHandler.ServeHTTP(w, req)
-		
+
 		if w.Code != http.StatusOK {
 			t.Errorf("Request %d: Expected status 200, got %d", i+1, w.Code)
 		}
-		
+
 		// Check rate limit headers
 		limit := w.Header().Get("X-RateLimit-Limit")
 		if limit != "5" {
 			t.Errorf("Request %d: Expected X-RateLimit-Limit '5', got '%s'", i+1, limit)
 		}
-		
+
 		remaining := w.Header().Get("X-RateLimit-Remaining")
 		expectedRemaining := 5 - (i + 1)
 		// Convert expected remaining to string
@@ -52,18 +52,18 @@ func TestRateLimitMiddleware(t *testing.T) {
 			}
 		}
 	}
-	
+
 	// 6th request should be rate limited
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected status 429 (Too Many Requests), got %d", w.Code)
 	}
-	
+
 	// Check error response
 	if w.Body.String() == "" {
 		t.Error("Expected error response body, got empty")
@@ -101,7 +101,7 @@ func TestGetClientIP(t *testing.T) {
 			expectedResult: "[::1]",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test", nil)
@@ -112,7 +112,7 @@ func TestGetClientIP(t *testing.T) {
 			if tt.realIP != "" {
 				req.Header.Set("X-Real-IP", tt.realIP)
 			}
-			
+
 			result := getClientIP(req)
 			if result != tt.expectedResult {
 				t.Errorf("Expected '%s', got '%s'", tt.expectedResult, result)
@@ -120,4 +120,3 @@ func TestGetClientIP(t *testing.T) {
 		})
 	}
 }
-

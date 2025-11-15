@@ -48,13 +48,13 @@ func (c TestDBConfig) DatabaseURL() string {
 // Returns a connection that should be closed after tests
 func SetupTestDB(t *testing.T) *sql.DB {
 	cfg := DefaultTestDBConfig()
-	
+
 	// Connect to postgres database first to create test database
 	adminURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/postgres?sslmode=%s",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.SSLMode,
 	)
-	
+
 	adminDB, err := sql.Open("postgres", adminURL)
 	if err != nil {
 		t.Fatalf("Failed to connect to PostgreSQL: %v", err)
@@ -141,4 +141,3 @@ func getIntEnv(key string, defaultValue int) int {
 	}
 	return intValue
 }
-

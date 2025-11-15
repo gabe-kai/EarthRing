@@ -15,11 +15,11 @@ func SetupAuthRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	jwtService := auth.NewJWTService(cfg)
 	passwordService := auth.NewPasswordService(cfg)
 	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-	
+
 	// Rate limit configuration for auth endpoints
 	// 5 requests per minute per IP for authentication endpoints
 	authRateLimit := RateLimitMiddleware(5, 1*time.Minute)
-	
+
 	// Register routes with rate limiting
 	mux.Handle("/api/auth/register", authRateLimit(http.HandlerFunc(authHandlers.Register)))
 	mux.Handle("/api/auth/login", authRateLimit(http.HandlerFunc(authHandlers.Login)))
@@ -31,4 +31,3 @@ func SetupAuthRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return auth.SecurityHeadersMiddleware(next)
 }
-

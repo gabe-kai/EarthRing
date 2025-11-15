@@ -69,4 +69,3 @@ func (f *TestFixtures) NewTestZone() TestZoneData {
 		Floor:       0,
 	}
 }
-

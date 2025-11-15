@@ -92,4 +92,3 @@ func AssertJSONResponse(t interface{}, body *bytes.Buffer, expected interface{})
 
 	return nil
 }
-

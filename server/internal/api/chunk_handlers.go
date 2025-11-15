@@ -16,9 +16,9 @@ import (
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {
-	db                *sql.DB
-	config            *config.Config
-	proceduralClient  *procedural.ProceduralClient
+	db               *sql.DB
+	config           *config.Config
+	proceduralClient *procedural.ProceduralClient
 }
 
 // NewChunkHandlers creates a new instance of ChunkHandlers.
@@ -117,6 +117,7 @@ func (h *ChunkHandlers) GetChunkMetadata(w http.ResponseWriter, r *http.Request)
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(metadata)
+	if err := json.NewEncoder(w).Encode(metadata); err != nil {
+		log.Printf("Failed to encode chunk metadata: %v", err)
+	}
 }
-

@@ -29,29 +29,29 @@ func (h *AuthHandlers) AuthMiddleware(next http.Handler) http.Handler {
 			h.sendError(w, http.StatusUnauthorized, "MissingToken", "Authorization header required")
 			return
 		}
-		
+
 		// Extract token from "Bearer <token>"
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			h.sendError(w, http.StatusUnauthorized, "InvalidToken", "Invalid authorization header format")
 			return
 		}
-		
+
 		tokenString := parts[1]
-		
+
 		// Validate token
 		claims, err := h.jwtService.ValidateAccessToken(tokenString)
 		if err != nil {
 			h.sendError(w, http.StatusUnauthorized, "InvalidToken", "Invalid or expired token")
 			return
 		}
-		
+
 		// Add user info to context
 		ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
 		ctx = context.WithValue(ctx, UsernameKey, claims.Username)
 		ctx = context.WithValue(ctx, RoleKey, claims.Role)
 		ctx = context.WithValue(ctx, ClaimsKey, claims)
-		
+
 		// Call next handler with updated context
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -94,4 +94,3 @@ func GetClaims(r *http.Request) (*Claims, bool) {
 	claims, ok := r.Context().Value(ClaimsKey).(*Claims)
 	return claims, ok
 }
-

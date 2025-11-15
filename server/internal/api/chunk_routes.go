@@ -21,7 +21,7 @@ func SetupChunkRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 
 	// Apply authentication middleware to all chunk routes
 	authMiddleware := authHandlers.AuthMiddleware
-	
+
 	// Apply per-user rate limiting (100 requests per minute per user for chunk requests)
 	userRateLimit := UserRateLimitMiddleware(100, 1*time.Minute)
 
@@ -46,4 +46,3 @@ func SetupChunkRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/api/chunks/", rateLimitedHandler)
 	mux.Handle("/api/chunks", rateLimitedHandler) // Handle /api/chunks without trailing slash
 }
-

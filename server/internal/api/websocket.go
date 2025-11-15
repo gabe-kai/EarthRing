@@ -18,13 +18,13 @@ import (
 const (
 	// Supported WebSocket protocol versions
 	ProtocolVersion1 = "earthring-v1"
-	
+
 	// Default ping interval (30 seconds)
 	defaultPingInterval = 30 * time.Second
-	
+
 	// Pong wait timeout (60 seconds)
 	pongWait = 60 * time.Second
-	
+
 	// Write timeout (10 seconds)
 	writeTimeout = 10 * time.Second
 )
@@ -38,7 +38,6 @@ type WebSocketConnection struct {
 	version  string
 	send     chan []byte
 	hub      *WebSocketHub
-	mu       sync.Mutex
 }
 
 // WebSocketHub manages all active WebSocket connections
@@ -119,7 +118,7 @@ func (h *WebSocketHub) Broadcast(message []byte) {
 func (h *WebSocketHub) SendToUser(userID int64, message []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	
+
 	for conn := range h.connections {
 		if conn.userID == userID {
 			select {
@@ -134,17 +133,17 @@ func (h *WebSocketHub) SendToUser(userID int64, message []byte) {
 
 // WebSocketHandlers handles WebSocket connections
 type WebSocketHandlers struct {
-	hub      *WebSocketHub
-	db       *sql.DB
-	config   *config.Config
+	hub        *WebSocketHub
+	db         *sql.DB
+	config     *config.Config
 	jwtService *auth.JWTService
-	upgrader websocket.Upgrader
+	upgrader   websocket.Upgrader
 }
 
 // NewWebSocketHandlers creates a new WebSocket handlers instance
 func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 	jwtService := auth.NewJWTService(cfg)
-	
+
 	// Get allowed origins from config or use defaults
 	allowedOrigins := []string{
 		"http://localhost:3000",
@@ -152,7 +151,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 		"http://127.0.0.1:3000",
 		"http://127.0.0.1:5173",
 	}
-	
+
 	return &WebSocketHandlers{
 		hub:        NewWebSocketHub(),
 		db:         db,
@@ -286,9 +285,13 @@ func (c *WebSocketConnection) readPump(handlers *WebSocketHandlers) {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		log.Printf("Failed to set read deadline: %v", err)
+	}
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			log.Printf("Failed to set read deadline in pong handler: %v", err)
+		}
 		return nil
 	})
 
@@ -324,9 +327,12 @@ func (c *WebSocketConnection) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				log.Printf("Failed to set write deadline: %v", err)
+				return
+			}
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
@@ -334,13 +340,22 @@ func (c *WebSocketConnection) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				_ = w.Close()
+				return
+			}
 
 			// Send queued messages
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
+				if _, err := w.Write([]byte{'\n'}); err != nil {
+					_ = w.Close()
+					return
+				}
+				if _, err := w.Write(<-c.send); err != nil {
+					_ = w.Close()
+					return
+				}
 			}
 
 			if err := w.Close(); err != nil {
@@ -348,7 +363,10 @@ func (c *WebSocketConnection) writePump() {
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				log.Printf("Failed to set write deadline for ping: %v", err)
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -365,7 +383,7 @@ func (c *WebSocketConnection) sendError(id, errorMsg, code string) {
 		Message: errorMsg,
 		Code:    code,
 	}
-	
+
 	messageBytes, err := json.Marshal(errorResp)
 	if err != nil {
 		log.Printf("Failed to marshal error message: %v", err)
@@ -399,7 +417,7 @@ func (h *WebSocketHandlers) handlePing(conn *WebSocketConnection, msg *WebSocket
 		Type: "pong",
 		ID:   msg.ID,
 	}
-	
+
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
 		log.Printf("Failed to marshal pong response: %v", err)
@@ -427,7 +445,7 @@ func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *Web
 		Type: "player_move_ack",
 		ID:   msg.ID,
 	}
-	
+
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
 		log.Printf("Failed to marshal player_move_ack: %v", err)
@@ -445,4 +463,3 @@ func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *Web
 func (h *WebSocketHandlers) GetHub() *WebSocketHub {
 	return h.hub
 }
-

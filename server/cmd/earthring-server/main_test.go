@@ -30,4 +30,3 @@ func TestHealthHandler(t *testing.T) {
 			rr.Body.String(), expected)
 	}
 }
-

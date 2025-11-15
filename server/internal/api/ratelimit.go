@@ -14,15 +14,15 @@ import (
 // RateLimitConfig holds rate limit configuration
 type RateLimitConfig struct {
 	// Global rate limit (all endpoints)
-	GlobalLimit int
+	GlobalLimit  int
 	GlobalWindow time.Duration
-	
+
 	// Per-user rate limit (authenticated endpoints)
-	UserLimit int
+	UserLimit  int
 	UserWindow time.Duration
-	
+
 	// Per-endpoint rate limits
-	AuthLimit int      // Authentication endpoints (register, login)
+	AuthLimit  int // Authentication endpoints (register, login)
 	AuthWindow time.Duration
 }
 
@@ -46,14 +46,14 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 		Period: window,
 		Limit:  int64(limit),
 	}
-	
+
 	instance := limiter.New(store, rate)
-	
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Get client identifier (IP address)
 			key := getClientIP(r)
-			
+
 			// Check rate limit
 			context, err := instance.Get(r.Context(), key)
 			if err != nil {
@@ -63,27 +63,30 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Set rate limit headers
 			w.Header().Set("X-RateLimit-Limit", strconv.FormatInt(context.Limit, 10))
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(context.Remaining, 10))
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(context.Reset, 10))
-			
+
 			// Check if rate limit exceeded
 			if context.Reached {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				
+
 				retryAfter := int(time.Until(time.Unix(context.Reset, 0)).Seconds())
 				if retryAfter < 0 {
 					retryAfter = 0
 				}
-				
+
 				// Write JSON response
-				fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter)
+				if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+					// Error writing response - connection may be closed
+					return
+				}
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -98,9 +101,9 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 		Period: window,
 		Limit:  int64(limit),
 	}
-	
+
 	instance := limiter.New(store, rate)
-	
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try to get user ID from context
@@ -113,11 +116,11 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					next.ServeHTTP(w, r)
 					return
 				}
-				
+
 				w.Header().Set("X-RateLimit-Limit", strconv.FormatInt(context.Limit, 10))
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(context.Remaining, 10))
 				w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(context.Reset, 10))
-				
+
 				if context.Reached {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusTooManyRequests)
@@ -128,14 +131,14 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter)
 					return
 				}
-				
+
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Use user ID as key for authenticated users
 			key := fmt.Sprintf("user:%d", userID)
-			
+
 			// Check rate limit
 			context, err := instance.Get(r.Context(), key)
 			if err != nil {
@@ -143,26 +146,26 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Set rate limit headers
 			w.Header().Set("X-RateLimit-Limit", strconv.FormatInt(context.Limit, 10))
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(context.Remaining, 10))
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(context.Reset, 10))
-			
+
 			// Check if rate limit exceeded
 			if context.Reached {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				
+
 				retryAfter := int(time.Until(time.Unix(context.Reset, 0)).Seconds())
 				if retryAfter < 0 {
 					retryAfter = 0
 				}
-				
+
 				fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter)
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -177,13 +180,13 @@ func getClientIP(r *http.Request) string {
 		// X-Forwarded-For can contain multiple IPs, take the first one
 		return forwarded
 	}
-	
+
 	// Check X-Real-IP header (alternative proxy header)
 	realIP := r.Header.Get("X-Real-IP")
 	if realIP != "" {
 		return realIP
 	}
-	
+
 	// Fall back to RemoteAddr
 	ip := r.RemoteAddr
 	// Remove port if present (e.g., "127.0.0.1:12345" -> "127.0.0.1")
@@ -192,7 +195,6 @@ func getClientIP(r *http.Request) string {
 			return ip[:i]
 		}
 	}
-	
+
 	return ip
 }
-

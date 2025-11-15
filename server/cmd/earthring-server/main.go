@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/earthring/server/internal/api"
 	"github.com/earthring/server/internal/config"
+	_ "github.com/lib/pq"
 )
 
 // main starts the EarthRing game server.
@@ -36,39 +36,39 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	
+
 	// Set up WebSocket handlers
 	wsHandlers := api.NewWebSocketHandlers(db, cfg)
 	go wsHandlers.GetHub().Run()
-	
+
 	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ws", wsHandlers.HandleWebSocket)
-	
+
 	// Set up authentication routes (includes rate limiting)
 	api.SetupAuthRoutes(mux, db, cfg)
-	
+
 	// Set up player management routes
 	api.SetupPlayerRoutes(mux, db, cfg)
-	
+
 	// Set up chunk metadata routes
 	api.SetupChunkRoutes(mux, db, cfg)
-	
+
 	// Apply global rate limiting (1000 requests per minute per IP)
 	// This applies to all routes after auth routes are set up
 	globalRateLimit := api.RateLimitMiddleware(1000, 1*time.Minute)
 	handler := globalRateLimit(mux)
-	
+
 	// Apply CORS middleware (must be before security headers for OPTIONS requests)
 	handler = api.CORSMiddleware(handler)
-	
+
 	// Apply security headers to all routes
 	server.Handler = api.SecurityHeadersMiddleware(handler)
 
-	log.Printf("EarthRing server starting on %s:%s (environment: %s)", 
+	log.Printf("EarthRing server starting on %s:%s (environment: %s)",
 		cfg.Server.Host, cfg.Server.Port, cfg.Server.Environment)
-	
+
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
@@ -82,24 +82,22 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`)
 }
 
-
 // setupDatabase creates a database connection using configuration
 func setupDatabase(cfg *config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.Database.DatabaseURL())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	
+
 	// Test connection
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-	
+
 	// Set connection pool settings
 	db.SetMaxOpenConns(cfg.Database.MaxConnections)
 	db.SetMaxIdleConns(cfg.Database.MaxIdleConns)
 	db.SetConnMaxLifetime(cfg.Database.ConnMaxLifetime)
-	
+
 	return db, nil
 }
-

@@ -39,25 +39,25 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusBadRequest, "InvalidRequest", "Invalid request body")
 		return
 	}
-	
+
 	// Validate input
 	if err := h.validator.Struct(req); err != nil {
 		h.sendValidationError(w, err)
 		return
 	}
-	
+
 	// Validate username format (alphanumeric, underscore, hyphen, 3-32 chars)
 	if len(req.Username) < 3 || len(req.Username) > 32 {
 		h.sendError(w, http.StatusBadRequest, "InvalidUsername", "Username must be between 3 and 32 characters")
 		return
 	}
-	
+
 	// Validate password strength
 	if err := h.passwordService.ValidatePasswordStrength(req.Password); err != nil {
 		h.sendError(w, http.StatusBadRequest, "InvalidPassword", err.Error())
 		return
 	}
-	
+
 	// Check if username already exists
 	var existingID int64
 	err := h.db.QueryRow("SELECT id FROM players WHERE username = $1", req.Username).Scan(&existingID)
@@ -69,7 +69,7 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to check username")
 		return
 	}
-	
+
 	// Check if email already exists
 	err = h.db.QueryRow("SELECT id FROM players WHERE email = $1", req.Email).Scan(&existingID)
 	if err == nil {
@@ -80,7 +80,7 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to check email")
 		return
 	}
-	
+
 	// Hash password
 	passwordHash, err := h.passwordService.HashPassword(req.Password)
 	if err != nil {
@@ -88,7 +88,7 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to process password")
 		return
 	}
-	
+
 	// Create user (role column doesn't exist yet, will default to "player" in code)
 	now := time.Now()
 	var userID int64
@@ -103,7 +103,7 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to create user")
 		return
 	}
-	
+
 	// Generate tokens
 	accessToken, err := h.jwtService.GenerateAccessToken(userID, req.Username, "player")
 	if err != nil {
@@ -111,14 +111,14 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate token")
 		return
 	}
-	
+
 	refreshToken, err := h.jwtService.GenerateRefreshToken(userID)
 	if err != nil {
 		log.Printf("Error generating refresh token: %v", err)
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate refresh token")
 		return
 	}
-	
+
 	// Send response
 	expiresAt := time.Now().Add(h.jwtService.GetTokenExpiration())
 	h.sendTokenResponse(w, http.StatusCreated, TokenResponse{
@@ -139,13 +139,13 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusBadRequest, "InvalidRequest", "Invalid request body")
 		return
 	}
-	
+
 	// Validate input
 	if err := h.validator.Struct(req); err != nil {
 		h.sendValidationError(w, err)
 		return
 	}
-	
+
 	// Get user from database (role defaults to "player" since column doesn't exist yet)
 	var user User
 	user.Role = "player" // Default role until role column is added
@@ -153,7 +153,7 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		"SELECT id, username, email, password_hash FROM players WHERE username = $1",
 		req.Username,
 	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash)
-	
+
 	if err == sql.ErrNoRows {
 		h.sendError(w, http.StatusUnauthorized, "InvalidCredentials", "Invalid username or password")
 		return
@@ -162,13 +162,13 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to authenticate")
 		return
 	}
-	
+
 	// Verify password
 	if !h.passwordService.VerifyPassword(req.Password, user.PasswordHash) {
 		h.sendError(w, http.StatusUnauthorized, "InvalidCredentials", "Invalid username or password")
 		return
 	}
-	
+
 	// Generate tokens
 	accessToken, err := h.jwtService.GenerateAccessToken(user.ID, user.Username, user.Role)
 	if err != nil {
@@ -176,14 +176,14 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate token")
 		return
 	}
-	
+
 	refreshToken, err := h.jwtService.GenerateRefreshToken(user.ID)
 	if err != nil {
 		log.Printf("Error generating refresh token: %v", err)
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate refresh token")
 		return
 	}
-	
+
 	// Send response
 	expiresAt := time.Now().Add(h.jwtService.GetTokenExpiration())
 	h.sendTokenResponse(w, http.StatusOK, TokenResponse{
@@ -201,7 +201,7 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Get refresh token from Authorization header or body
 	var refreshToken string
-	
+
 	// Try Authorization header first
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
@@ -210,7 +210,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 			refreshToken = parts[1]
 		}
 	}
-	
+
 	// If not in header, try body
 	if refreshToken == "" {
 		var req RefreshRequest
@@ -218,19 +218,19 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 			refreshToken = req.RefreshToken
 		}
 	}
-	
+
 	if refreshToken == "" {
 		h.sendError(w, http.StatusBadRequest, "InvalidRequest", "Refresh token required")
 		return
 	}
-	
+
 	// Validate refresh token
 	claims, err := h.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		h.sendError(w, http.StatusUnauthorized, "InvalidToken", "Invalid or expired refresh token")
 		return
 	}
-	
+
 	// Get user from database to ensure still exists (role defaults to "player")
 	var user User
 	user.Role = "player" // Default role until role column is added
@@ -238,7 +238,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		"SELECT id, username FROM players WHERE id = $1",
 		claims.UserID,
 	).Scan(&user.ID, &user.Username)
-	
+
 	if err == sql.ErrNoRows {
 		h.sendError(w, http.StatusUnauthorized, "UserNotFound", "User no longer exists")
 		return
@@ -247,7 +247,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to refresh token")
 		return
 	}
-	
+
 	// Generate new access token
 	accessToken, err := h.jwtService.GenerateAccessToken(user.ID, user.Username, user.Role)
 	if err != nil {
@@ -255,7 +255,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate token")
 		return
 	}
-	
+
 	// Generate new refresh token (rotation)
 	newRefreshToken, err := h.jwtService.GenerateRefreshToken(user.ID)
 	if err != nil {
@@ -263,7 +263,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, http.StatusInternalServerError, "InternalError", "Failed to generate refresh token")
 		return
 	}
-	
+
 	// Send response
 	expiresAt := time.Now().Add(h.jwtService.GetTokenExpiration())
 	h.sendTokenResponse(w, http.StatusOK, TokenResponse{
@@ -282,7 +282,7 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 	// For stateless JWT, logout is primarily client-side
 	// Server can optionally blacklist tokens (requires Redis/database)
 	// For now, just return success - client should discard tokens
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -316,7 +316,7 @@ func (h *AuthHandlers) sendValidationError(w http.ResponseWriter, err error) {
 			validationErrors = append(validationErrors, fmt.Sprintf("%s: %s", fe.Field(), getValidationMessage(fe)))
 		}
 	}
-	
+
 	h.sendError(w, http.StatusBadRequest, "ValidationError", strings.Join(validationErrors, "; "))
 }
 
@@ -336,4 +336,3 @@ func getValidationMessage(fe validator.FieldError) string {
 		return fmt.Sprintf("failed validation: %s", fe.Tag())
 	}
 }
-

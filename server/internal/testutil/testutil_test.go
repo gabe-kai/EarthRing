@@ -74,4 +74,3 @@ func TestNewTestZone(t *testing.T) {
 		t.Error("Zone description should not be empty")
 	}
 }
-

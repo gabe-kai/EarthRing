@@ -14,7 +14,7 @@ import (
 // Claims represents JWT claims structure
 type Claims struct {
 	jwt.RegisteredClaims
-	
+
 	// Custom claims
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
@@ -43,13 +43,13 @@ func NewJWTService(cfg *config.Config) *JWTService {
 func (s *JWTService) GenerateAccessToken(userID int64, username, role string) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(s.accessExpiry)
-	
+
 	// Generate unique token ID
 	tokenID, err := generateTokenID()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token ID: %w", err)
 	}
-	
+
 	claims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "earthring-server",
@@ -62,7 +62,7 @@ func (s *JWTService) GenerateAccessToken(userID int64, username, role string) (s
 		Username: username,
 		Role:     role,
 	}
-	
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.accessSecret)
 }
@@ -71,13 +71,13 @@ func (s *JWTService) GenerateAccessToken(userID int64, username, role string) (s
 func (s *JWTService) GenerateRefreshToken(userID int64) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(s.refreshExpiry)
-	
+
 	// Generate unique token ID
 	tokenID, err := generateTokenID()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token ID: %w", err)
 	}
-	
+
 	claims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "earthring-server",
@@ -88,7 +88,7 @@ func (s *JWTService) GenerateRefreshToken(userID int64) (string, error) {
 		},
 		UserID: userID,
 	}
-	
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.refreshSecret)
 }
@@ -112,21 +112,21 @@ func (s *JWTService) validateToken(tokenString string, secret []byte) (*Claims, 
 		}
 		return secret, nil
 	})
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
-	
+
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, errors.New("invalid token claims")
 	}
-	
+
 	// Validate issuer
 	if claims.Issuer != "earthring-server" {
 		return nil, errors.New("invalid token issuer")
 	}
-	
+
 	return claims, nil
 }
 
@@ -143,4 +143,3 @@ func generateTokenID() (string, error) {
 func (s *JWTService) GetTokenExpiration() time.Duration {
 	return s.accessExpiry
 }
-

@@ -12,11 +12,11 @@ import (
 
 // Config holds all configuration for the EarthRing server
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Auth     AuthConfig
+	Server     ServerConfig
+	Database   DatabaseConfig
+	Auth       AuthConfig
 	Procedural ProceduralConfig
-	Logging  LoggingConfig
+	Logging    LoggingConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -196,4 +196,3 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	}
 	return duration
 }
-

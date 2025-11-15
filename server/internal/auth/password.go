@@ -27,12 +27,12 @@ func (s *PasswordService) HashPassword(password string) (string, error) {
 	if err := s.ValidatePasswordStrength(password); err != nil {
 		return "", err
 	}
-	
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	return string(hash), nil
 }
 
@@ -53,14 +53,14 @@ func (s *PasswordService) ValidatePasswordStrength(password string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters long")
 	}
-	
+
 	var (
 		hasUpper   = false
 		hasLower   = false
 		hasNumber  = false
 		hasSpecial = false
 	)
-	
+
 	for _, char := range password {
 		switch {
 		case unicode.IsUpper(char):
@@ -73,7 +73,7 @@ func (s *PasswordService) ValidatePasswordStrength(password string) error {
 			hasSpecial = true
 		}
 	}
-	
+
 	if !hasUpper {
 		return errors.New("password must contain at least one uppercase letter")
 	}
@@ -86,7 +86,6 @@ func (s *PasswordService) ValidatePasswordStrength(password string) error {
 	if !hasSpecial {
 		return errors.New("password must contain at least one special character")
 	}
-	
+
 	return nil
 }
-

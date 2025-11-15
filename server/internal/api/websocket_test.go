@@ -21,16 +21,16 @@ func TestWebSocketHandlers_NewWebSocketHandlers(t *testing.T) {
 			RefreshSecret: "test-refresh-secret-key-for-testing-only",
 		},
 	}
-	
+
 	handlers := NewWebSocketHandlers(nil, cfg)
 	if handlers == nil {
 		t.Fatal("NewWebSocketHandlers returned nil")
 	}
-	
+
 	if handlers.hub == nil {
 		t.Error("WebSocket hub is nil")
 	}
-	
+
 	if handlers.jwtService == nil {
 		t.Error("JWT service is nil")
 	}
@@ -43,20 +43,20 @@ func TestWebSocketHandlers_negotiateVersion(t *testing.T) {
 			RefreshSecret: "test-refresh-secret-key-for-testing-only",
 		},
 	}
-	
+
 	handlers := NewWebSocketHandlers(nil, cfg)
-	
+
 	tests := []struct {
-		name     string
+		name      string
 		requested string
-		expected string
+		expected  string
 	}{
 		{"empty string defaults to v1", "", ProtocolVersion1},
 		{"v1 requested", ProtocolVersion1, ProtocolVersion1},
 		{"multiple versions", "earthring-v2, earthring-v1", ProtocolVersion1},
 		{"unsupported version", "earthring-v99", ""},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := handlers.negotiateVersion(tt.requested)
@@ -69,14 +69,14 @@ func TestWebSocketHandlers_negotiateVersion(t *testing.T) {
 
 func TestWebSocketHub_Run(t *testing.T) {
 	hub := NewWebSocketHub()
-	
+
 	// Start hub in goroutine
 	go hub.Run()
 	defer func() {
 		// Give hub time to process any pending operations
 		time.Sleep(10 * time.Millisecond)
 	}()
-	
+
 	// Test that hub is running (can't easily test without a real connection)
 	// This is a basic smoke test
 	if hub.connections == nil {
@@ -91,9 +91,9 @@ func TestWebSocketHandlers_extractToken(t *testing.T) {
 			RefreshSecret: "test-refresh-secret-key-for-testing-only",
 		},
 	}
-	
+
 	handlers := NewWebSocketHandlers(nil, cfg)
-	
+
 	tests := []struct {
 		name    string
 		request *http.Request
@@ -122,7 +122,7 @@ func TestWebSocketHandlers_extractToken(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			token, err := handlers.extractToken(tt.request)
@@ -146,7 +146,7 @@ func TestWebSocketHub_Broadcast(t *testing.T) {
 
 	message := []byte(`{"type":"test","data":{}}`)
 	hub.Broadcast(message)
-	
+
 	// Test passes if no panic occurs
 }
 
@@ -159,7 +159,7 @@ func TestWebSocketHub_SendToUser(t *testing.T) {
 
 	message := []byte(`{"type":"test","data":{}}`)
 	hub.SendToUser(123, message)
-	
+
 	// Test passes if no panic occurs (no connections, so nothing to send)
 }
 
@@ -190,9 +190,9 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:         "test-secret-key-for-testing-only",
-			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
-			JWTExpiration:     15 * time.Minute, // Ensure token is valid
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTExpiration: 15 * time.Minute, // Ensure token is valid
 		},
 	}
 
@@ -204,7 +204,7 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 	hashedPassword, _ := passwordService.HashPassword("password123")
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
-	
+
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
@@ -265,9 +265,9 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:         "test-secret-key-for-testing-only",
-			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
-			JWTExpiration:     15 * time.Minute, // Ensure token is valid
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTExpiration: 15 * time.Minute, // Ensure token is valid
 		},
 	}
 
@@ -279,7 +279,7 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 	hashedPassword, _ := passwordService.HashPassword("password123")
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
-	
+
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
@@ -318,7 +318,7 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 	}
 
 	handlers := NewWebSocketHandlers(db, cfg)
-	
+
 	// Create a mock connection
 	conn := &WebSocketConnection{
 		userID:   1,
@@ -385,7 +385,7 @@ func TestWebSocketHandlers_handlePing(t *testing.T) {
 	}
 
 	handlers := NewWebSocketHandlers(db, cfg)
-	
+
 	conn := &WebSocketConnection{
 		userID:   1,
 		username: "testuser",
@@ -477,9 +477,9 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:         "test-secret-key-for-testing-only",
-			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
-			JWTExpiration:     15 * time.Minute, // Ensure token is valid
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTExpiration: 15 * time.Minute, // Ensure token is valid
 		},
 	}
 
@@ -491,7 +491,7 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 	hashedPassword, _ := passwordService.HashPassword("password123")
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
-	
+
 	var playerID int64
 	err = db.QueryRow(`
 		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)

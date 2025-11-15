@@ -21,7 +21,7 @@ func SetupPlayerRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 
 	// Apply authentication middleware to all player routes
 	authMiddleware := authHandlers.AuthMiddleware
-	
+
 	// Apply per-user rate limiting (500 requests per minute per user)
 	userRateLimit := UserRateLimitMiddleware(500, 1*time.Minute)
 
@@ -56,4 +56,3 @@ func SetupPlayerRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/api/players/", rateLimitedHandler)
 	mux.Handle("/api/players", rateLimitedHandler) // Handle /api/players without trailing slash
 }
-
