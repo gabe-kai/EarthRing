@@ -68,10 +68,14 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: earthring_test
         run: |
+          # List migration files to verify they're found
+          echo "Migration files found:"
+          ls -la database/migrations/*_up.sql | sort
+          echo ""
           # Apply all migrations in order
           for file in $(ls database/migrations/*_up.sql | sort); do
             echo "Applying migration: $file"
-            if psql -f "$file"; then
+            if psql -v ON_ERROR_STOP=1 -f "$file" 2>&1; then
               echo "✅ Successfully applied: $file"
             else
               echo "❌ Failed to apply: $file"
@@ -79,6 +83,7 @@ jobs:
               psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
               exit 1
             fi
+            echo ""
           done
           echo "✅ All migrations applied successfully"
 
