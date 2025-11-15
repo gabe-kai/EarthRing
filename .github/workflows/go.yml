@@ -86,7 +86,15 @@ jobs:
           DB_SSLMODE: disable
           JWT_SECRET: test_jwt_secret_for_ci
           REFRESH_SECRET: test_refresh_secret_for_ci
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: |
+          go test -v -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.log
+          exit_code=${PIPESTATUS[0]}
+          if [ $exit_code -ne 0 ]; then
+            echo "Tests failed with exit code $exit_code"
+            echo "Last 100 lines of test output:"
+            tail -n 100 test-output.log
+            exit $exit_code
+          fi
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
