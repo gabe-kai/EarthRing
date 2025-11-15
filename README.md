@@ -132,6 +132,15 @@ npm run dev
 - CORS middleware configured for web client development
 - Allowed origins: `http://localhost:3000`, `http://localhost:5173`, and localhost variants
 
+**WebSocket:**
+- WebSocket endpoint: `ws://localhost:8080/ws` (or `wss://` for HTTPS)
+- Protocol version negotiation via `Sec-WebSocket-Protocol` header (`earthring-v1`)
+- Authentication via JWT token (query parameter `?token=<jwt>` or `Authorization: Bearer <jwt>` header)
+- Message format: JSON with `type`, `id`, and `data` fields
+- Supported message types: `ping`, `pong`, `chunk_request`, `player_move`
+- Automatic reconnection with exponential backoff
+- Heartbeat/ping-pong mechanism (30s interval)
+
 **Player Management:**
 - Get current profile: `GET http://localhost:8080/api/players/me` (requires authentication)
 - Get player profile: `GET http://localhost:8080/api/players/{player_id}` (requires authentication, own profile only)

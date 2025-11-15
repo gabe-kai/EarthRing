@@ -81,11 +81,11 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 
 **Priority Order:**
 1. ✅ Database setup and migrations (PostgreSQL + PostGIS) - **COMPLETE**
-2. ✅ Go main server structure (HTTP server, middleware, REST API) - **COMPLETE** (WebSocket handler pending)
+2. ✅ Go main server structure (HTTP server, middleware, REST API, WebSocket) - **COMPLETE**
 3. ⏳ Python procedural generation service setup (REST/gRPC interface, basic endpoints)
 4. ✅ Authentication system (JWT-based, token refresh, security headers, rate limiting) - **COMPLETE**
 5. ✅ Basic REST API endpoints (player management, health checks, chunk metadata) - **COMPLETE**
-6. ⏳ WebSocket connection handling (with version negotiation via `Sec-WebSocket-Protocol`)
+6. ✅ WebSocket connection handling (with version negotiation via `Sec-WebSocket-Protocol`) - **COMPLETE**
 7. ⏳ Basic client structure (Three.js setup, coordinate conversion layer)
 8. ⏳ Coordinate system conversion layer (EarthRing ↔ Three.js ↔ Unreal)
 
@@ -95,9 +95,9 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Rate limiting middleware (global, per-user, per-endpoint) - **COMPLETE**
 - ✅ CORS middleware for web client - **COMPLETE**
 - ✅ Basic REST API endpoints (player management, chunk metadata) - **COMPLETE**
-- ✅ Go server starts and accepts HTTP connections - **COMPLETE** (WebSocket pending)
+- ✅ Go server starts and accepts HTTP/WebSocket connections - **COMPLETE**
 - ⏳ Python procedural generation service runs and communicates with Go server
-- ⏳ Client can connect via WebSocket with version negotiation (`earthring-v1`)
+- ✅ Client can connect via WebSocket with version negotiation (`earthring-v1`) - **COMPLETE**
 - ✅ Client can authenticate via REST API (register, login, token refresh) - **COMPLETE**
 - ✅ Client can retrieve player profile and update position via REST API - **COMPLETE**
 - ✅ Client can retrieve chunk metadata via REST API - **COMPLETE**

@@ -464,10 +464,13 @@ Response: {
 
 ## WebSocket Protocol
 
+**Status**: ✅ **IMPLEMENTED** (Phase 1)
+
 ### Connection
 
 ```
-WebSocket URL: wss://api.earthring.game/ws
+WebSocket URL: ws://localhost:8080/ws (development)
+WebSocket URL: wss://api.earthring.game/ws (production)
 Handshake: Include JWT token in query parameter or header
 ```
 
