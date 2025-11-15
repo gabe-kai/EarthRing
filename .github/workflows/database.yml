@@ -83,7 +83,7 @@ jobs:
           PGDATABASE: earthring_test
         run: |
           # Check that all expected tables exist
-          psql -c "\dt" | grep -E "(players|zones|structures|chunks|roads|npcs|racing_events)" || exit 1
+          psql -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events');" | grep -E "(players|zones|structures|chunks|roads|npcs|racing_events)" || exit 1
           echo "✅ All tables created successfully"
 
       - name: Test migrations down (optional)
