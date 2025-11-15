@@ -477,8 +477,9 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:     "test-secret-key-for-testing-only",
-			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTSecret:         "test-secret-key-for-testing-only",
+			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
+			JWTExpiration:     15 * time.Minute, // Ensure token is valid
 		},
 	}
 
