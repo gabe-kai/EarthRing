@@ -28,15 +28,16 @@ def test_postgis_extension(db_connection):
 def test_database_cleanup(clean_db, db_connection):
     """Test that database cleanup works."""
     cursor = db_connection.cursor()
-    
+
     # Try to query a table that should not exist after cleanup
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = 'public' 
         AND table_name = 'players'
-    """)
+    """
+    )
     result = cursor.fetchone()
     assert result is None  # Table should not exist after cleanup
     cursor.close()
-
