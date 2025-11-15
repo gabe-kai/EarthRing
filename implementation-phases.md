@@ -107,7 +107,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 **Dependencies**: Phase 0 complete
 
 **Key Technologies:**
-- Go 1.21+ (main server)
+- Go 1.24.0 (main server, CI uses 1.24)
 - Python 3.11+ (procedural generation service)
 - PostgreSQL 14+ with PostGIS
 - Three.js (web client)
@@ -445,7 +445,7 @@ All critical architectural decisions have been made and documented:
    - Database GUI (pgAdmin, DBeaver, etc.)
 
 2. **Server Development**
-   - Go 1.21+ (main server)
+   - Go 1.24.0 (main server, CI uses 1.24)
    - Python 3.11+ (procedural generation service)
    - IDE/editor setup (VS Code recommended)
    - Linting and formatting tools (`golangci-lint`, `black`, `flake8`)

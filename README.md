@@ -13,7 +13,7 @@ EarthRing is set on a massive orbital ring structure:
 ## Prerequisites
 
 **Verified Versions** (as of project setup):
-- **Go**: 1.25.3 (required: 1.21+)
+- **Go**: 1.24.0 (required: 1.21+, CI uses 1.24)
 - **Python**: 3.14.0 (required: 3.11+)
 - **PostgreSQL**: 16.3 with PostGIS 3.5 (required: 14+ with PostGIS)
 - **Node.js**: v24.11.0 (required: 18+)
@@ -137,7 +137,7 @@ npm run dev
 - Protocol version negotiation via `Sec-WebSocket-Protocol` header (`earthring-v1`)
 - Authentication via JWT token (query parameter `?token=<jwt>` or `Authorization: Bearer <jwt>` header)
 - Message format: JSON with `type`, `id`, and `data` fields
-- Supported message types: `ping`, `pong`, `chunk_request`, `player_move`
+- Supported message types: `ping`, `pong`, `chunk_request`, `player_move`, `player_move_ack`, `error`
 - Automatic reconnection with exponential backoff
 - Heartbeat/ping-pong mechanism (30s interval)
 
@@ -211,6 +211,7 @@ EarthRing/
 │   ├── src/                           # Source code (network, state, rendering, input, chunks, ui)
 │   │   ├── api/                       # API service modules (player, chunk)
 │   │   ├── auth/                      # Authentication UI and service
+│   │   ├── network/                   # WebSocket client and network utilities
 │   │   ├── ui/                        # UI components (player panel, chunk panel)
 │   │   ├── config.js                  # Client configuration
 │   │   └── test-utils.js              # Test utilities and mocks
