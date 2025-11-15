@@ -227,7 +227,7 @@ func TestUpdatePlayerPosition(t *testing.T) {
 	// Verify position was updated in database
 	var posX, posY sql.NullFloat64
 	var floor int
-	err = db.QueryRow("SELECT (current_position).x, (current_position).y, current_floor FROM players WHERE id = $1", player.ID).Scan(&posX, &posY, &floor)
+	err = db.QueryRow("SELECT CASE WHEN current_position IS NULL THEN NULL ELSE ST_X(current_position::geometry) END, CASE WHEN current_position IS NULL THEN NULL ELSE ST_Y(current_position::geometry) END, current_floor FROM players WHERE id = $1", player.ID).Scan(&posX, &posY, &floor)
 	if err != nil {
 		t.Fatalf("Failed to query updated position: %v", err)
 	}
