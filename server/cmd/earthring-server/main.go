@@ -10,7 +10,6 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/earthring/server/internal/api"
 	"github.com/earthring/server/internal/config"
-	"github.com/gorilla/websocket"
 )
 
 // main starts the EarthRing game server.
@@ -38,10 +37,14 @@ func main() {
 	}
 	defer db.Close()
 	
+	// Set up WebSocket handlers
+	wsHandlers := api.NewWebSocketHandlers(db, cfg)
+	go wsHandlers.GetHub().Run()
+	
 	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/ws", websocketHandler)
+	mux.HandleFunc("/ws", wsHandlers.HandleWebSocket)
 	
 	// Set up authentication routes (includes rate limiting)
 	api.SetupAuthRoutes(mux, db, cfg)
@@ -79,27 +82,6 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`)
 }
 
-// websocketHandler handles WebSocket connection upgrades.
-// Currently accepts all origins (TODO: implement proper origin checking in Phase 1).
-// Connection is established but message handling is not yet implemented (TODO: Phase 1).
-func websocketHandler(w http.ResponseWriter, r *http.Request) {
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			// TODO: Implement proper origin checking (Phase 1)
-			return true
-		},
-	}
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	log.Printf("WebSocket connection established")
-	// TODO: Implement WebSocket message handling (Phase 1)
-}
 
 // setupDatabase creates a database connection using configuration
 func setupDatabase(cfg *config.Config) (*sql.DB, error) {
