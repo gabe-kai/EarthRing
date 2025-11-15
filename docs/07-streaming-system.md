@@ -754,9 +754,12 @@ CREATE TABLE chunk_data (
    - Monitor generation performance and optimize as needed
 
 3. **Generation Service**
-   - Procedural generation handled by separate Python service
-   - Main server (Go) requests generation when chunk needed
-   - Generated chunks stored in database with PostGIS geometry
+   - Procedural generation handled by separate Python service (FastAPI)
+   - **Status**: ✅ Implemented (Phase 1: basic service with empty chunk generation)
+   - Main server (Go) requests generation via REST API (`POST /api/v1/chunks/generate`)
+   - Go client (`server/internal/procedural/client.go`) handles communication with retries
+   - Service runs on port 8081 (configurable via `PROCEDURAL_SERVICE_PORT`)
+   - Generated chunks stored in database with PostGIS geometry (Phase 2)
    - Can scale generation service independently based on workload
 
 4. **Background Generation** (Optional Optimization)
