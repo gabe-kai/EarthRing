@@ -70,7 +70,7 @@ jobs:
         run: |
           # Verify database connection
           echo "Testing database connection..."
-          psql -c "SELECT current_database();" || exit 1
+          psql -d earthring_test -c "SELECT current_database();" || exit 1
           echo ""
           # List migration files to verify they're found
           echo "Migration files found:"
