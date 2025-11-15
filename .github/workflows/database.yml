@@ -98,6 +98,9 @@ jobs:
             echo ""
           done
           echo "✅ All $MIGRATION_COUNT migrations applied successfully"
+          echo ""
+          echo "Tables after migrations:"
+          psql -d earthring_test -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
 
       - name: Verify schema
         env:
@@ -109,11 +112,11 @@ jobs:
         run: |
           # Show all tables for debugging
           echo "Current tables in database:"
-          psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+          psql -d earthring_test -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
           echo ""
           # Check that all expected tables exist
           # Use -t flag for tuples-only (no headers) and -A for unaligned output
-          TABLES=$(psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events') ORDER BY tablename;")
+          TABLES=$(psql -d earthring_test -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('players', 'zones', 'structures', 'chunks', 'roads', 'npcs', 'racing_events') ORDER BY tablename;")
           EXPECTED_TABLES="chunks npcs players racing_events roads structures zones"
           MISSING_TABLES=""
           for table in $EXPECTED_TABLES; do
