@@ -1,10 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
+	_ "github.com/lib/pq"
+	"github.com/earthring/server/internal/api"
 	"github.com/earthring/server/internal/config"
 	"github.com/gorilla/websocket"
 )
@@ -27,9 +31,31 @@ func main() {
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
+	// Set up database connection
+	db, err := setupDatabase(cfg)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+	
 	// Set up routes
-	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/ws", websocketHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/ws", websocketHandler)
+	
+	// Set up authentication routes (includes rate limiting)
+	api.SetupAuthRoutes(mux, db, cfg)
+	
+	// Apply global rate limiting (1000 requests per minute per IP)
+	// This applies to all routes after auth routes are set up
+	globalRateLimit := api.RateLimitMiddleware(1000, 1*time.Minute)
+	handler := globalRateLimit(mux)
+	
+	// Apply CORS middleware (must be before security headers for OPTIONS requests)
+	handler = api.CORSMiddleware(handler)
+	
+	// Apply security headers to all routes
+	server.Handler = api.SecurityHeadersMiddleware(handler)
 
 	log.Printf("EarthRing server starting on %s:%s (environment: %s)", 
 		cfg.Server.Host, cfg.Server.Port, cfg.Server.Environment)
@@ -67,5 +93,25 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("WebSocket connection established")
 	// TODO: Implement WebSocket message handling (Phase 1)
+}
+
+// setupDatabase creates a database connection using configuration
+func setupDatabase(cfg *config.Config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", cfg.Database.DatabaseURL())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	
+	// Test connection
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+	
+	// Set connection pool settings
+	db.SetMaxOpenConns(cfg.Database.MaxConnections)
+	db.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+	db.SetConnMaxLifetime(cfg.Database.ConnMaxLifetime)
+	
+	return db, nil
 }
 

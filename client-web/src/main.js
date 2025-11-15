@@ -4,6 +4,8 @@
  */
 
 import * as THREE from 'three';
+import { showAuthUI, hideAuthUI, showUserInfo } from './auth/auth-ui.js';
+import { isAuthenticated } from './auth/auth-service.js';
 
 // Initialize scene
 const scene = new THREE.Scene();
@@ -39,6 +41,29 @@ function animate() {
 
 animate();
 
+// Authentication initialization
+if (isAuthenticated()) {
+  showUserInfo();
+  console.log('User is authenticated');
+} else {
+  showAuthUI();
+  console.log('Showing authentication UI');
+}
+
+// Listen for authentication events
+window.addEventListener('auth:login', () => {
+  console.log('User logged in');
+  showUserInfo();
+});
+
+window.addEventListener('auth:register', () => {
+  console.log('User registered');
+  showUserInfo();
+});
+
+window.addEventListener('auth:logout', () => {
+  console.log('User logged out');
+});
+
 // Client initialization complete
-// TODO: Remove console.log before production build
 

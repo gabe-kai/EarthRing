@@ -88,6 +88,8 @@ This document specifies the authentication and security implementation for Earth
 
 ## JWT Implementation
 
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/auth/jwt.go`)
+
 ### JWT Library Choice
 
 **Decision**: Use `github.com/golang-jwt/jwt/v5` for Go server
@@ -193,6 +195,8 @@ token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token)
 
 ## Token Refresh Strategy
 
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/auth/handlers.go`)
+
 ### Refresh Token Mechanism
 
 **Decision**: Automatic refresh with refresh tokens
@@ -281,41 +285,52 @@ Response: {
    - **WebSocket Messages**: 1000 messages per minute per connection
 
 **Rate Limit Algorithm:**
-- **Algorithm**: Token bucket
+- **Algorithm**: Token bucket (via `github.com/ulule/limiter/v3`)
 - **Window**: Sliding window (more accurate than fixed window)
-- **Storage**: Redis with TTL
+- **Storage**: Memory store (in-memory, per-server instance)
+
+**Implementation Status:** ✅ **IMPLEMENTED**
 
 **Implementation:**
 ```go
-// Rate limiter middleware
-func RateLimitMiddleware(limit int, window time.Duration) gin.HandlerFunc {
+// Rate limiter middleware (server/internal/api/ratelimit.go)
+func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) http.Handler {
     store := memory.NewStore()
     rate := limiter.Rate{
-        Limit:  int64(limit),
         Period: window,
+        Limit:  int64(limit),
     }
     instance := limiter.New(store, rate)
     
-    return func(c *gin.Context) {
-        key := getUserKey(c) // IP or user ID
-        context, err := instance.Get(c, key)
-        if err != nil {
-            c.AbortWithStatus(500)
-            return
-        }
-        
-        if context.Reached {
-            c.Header("X-RateLimit-Limit", strconv.FormatInt(context.Limit, 10))
-            c.Header("X-RateLimit-Remaining", "0")
-            c.Header("X-RateLimit-Reset", strconv.FormatInt(context.Reset, 10))
-            c.AbortWithStatusJSON(429, gin.H{"error": "Rate limit exceeded"})
-            return
-        }
-        
-        c.Next()
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            key := getClientIP(r) // IP address
+            context, err := instance.Get(r.Context(), key)
+            if err != nil {
+                // Allow request if rate limiter fails (fail-open)
+                next.ServeHTTP(w, r)
+                return
+            }
+            
+            // Set rate limit headers
+            w.Header().Set("X-RateLimit-Limit", strconv.FormatInt(context.Limit, 10))
+            w.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(context.Remaining, 10))
+            w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(context.Reset, 10))
+            
+            if context.Reached {
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusTooManyRequests)
+                // Return JSON error response
+                return
+            }
+            
+            next.ServeHTTP(w, r)
+        })
     }
 }
 ```
+
+**Note**: Currently using memory store. For distributed systems, Redis store can be configured (see `github.com/ulule/limiter/v3/drivers/store/redis`).
 
 ### Rate Limit Headers
 
@@ -348,6 +363,8 @@ Content-Type: application/json
 ```
 
 ## Input Validation
+
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/auth/models.go` and `server/internal/auth/handlers.go`)
 
 ### Validation Rules
 
@@ -715,6 +732,8 @@ func ValidateWebSocketMessage(msg WebSocketMessage) error {
 
 ## Password Security
 
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/auth/password.go`)
+
 ### Password Hashing
 
 **Algorithm**: bcrypt
@@ -828,6 +847,8 @@ func IsTokenRevoked(tokenID string) (bool, error) {
 ```
 
 ## Security Headers
+
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/auth/security_headers.go`)
 
 **HTTP Security Headers:**
 ```
