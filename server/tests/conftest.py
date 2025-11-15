@@ -9,6 +9,7 @@ import pytest
 try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
+
     PSYCOPG2_AVAILABLE = True
 except ImportError:
     PSYCOPG2_AVAILABLE = False
@@ -47,7 +48,7 @@ def db_cursor(db_connection):
 def clean_db(db_connection):
     """Clean the database before each test."""
     cursor = db_connection.cursor()
-    
+
     # Drop all tables in reverse order of dependencies
     tables = [
         "player_actions",
@@ -62,15 +63,15 @@ def clean_db(db_connection):
         "zones",
         "players",
     ]
-    
+
     for table in tables:
         cursor.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-    
+
     db_connection.commit()
     cursor.close()
-    
+
     yield
-    
+
     # Cleanup after test
     cursor = db_connection.cursor()
     for table in tables:
@@ -84,16 +85,16 @@ def test_data():
     """Generate test data."""
     import random
     import string
-    
+
     def random_string(length=10):
-        return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
-    
+        return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
     def random_username():
         return f"testuser_{random_string(8)}"
-    
+
     def random_email():
         return f"test_{random_string(8)}@example.com"
-    
+
     return {
         "random_string": random_string,
         "random_username": random_username,
