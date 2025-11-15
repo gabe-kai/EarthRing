@@ -49,39 +49,70 @@ All API requests require authentication except for public endpoints.
    Body: {
      "username": "player1",
      "email": "player@example.com",
-     "password": "securepassword"
+     "password": "SecurePass123!"
    }
    Response: {
+     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "expires_at": "2024-01-01T00:15:00Z",
      "user_id": 123,
-     "token": "jwt_token_here"
+     "username": "player1",
+     "role": "player"
    }
    ```
+   **Rate Limit**: 5 requests per minute per IP
 
 2. **Login**
    ```
    POST /api/auth/login
    Body: {
      "username": "player1",
-     "password": "securepassword"
+     "password": "SecurePass123!"
    }
    Response: {
+     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "expires_at": "2024-01-01T00:15:00Z",
      "user_id": 123,
-     "token": "jwt_token_here",
-     "expires_at": "2024-01-01T00:00:00Z"
+     "username": "player1",
+     "role": "player"
    }
    ```
+   **Rate Limit**: 5 requests per minute per IP
 
 3. **Token Refresh**
    ```
    POST /api/auth/refresh
    Headers: {
-     "Authorization": "Bearer <token>"
+     "Authorization": "Bearer <refresh_token>"
+   }
+   Body (optional): {
+     "refresh_token": "<refresh_token>"
    }
    Response: {
-     "token": "new_jwt_token",
-     "expires_at": "2024-01-01T00:00:00Z"
+     "access_token": "new_jwt_token",
+     "refresh_token": "new_refresh_token",
+     "expires_at": "2024-01-01T00:15:00Z",
+     "user_id": 123,
+     "username": "player1",
+     "role": "player"
    }
    ```
+   **Rate Limit**: 5 requests per minute per IP
+   **Note**: Refresh tokens are rotated on each refresh
+
+4. **Logout**
+   ```
+   POST /api/auth/logout
+   Headers: {
+     "Authorization": "Bearer <access_token>"
+   }
+   Response: {
+     "message": "Logged out successfully"
+   }
+   ```
+   **Rate Limit**: 5 requests per minute per IP
+   **Note**: Client should discard tokens locally
 
 ### Authorization
 
@@ -685,19 +716,54 @@ All WebSocket messages use JSON:
 
 ## Rate Limiting
 
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/api/ratelimit.go`)
+
 ### Limits
 
-- REST API: 100 requests per minute per client
-- WebSocket: 1000 messages per minute per connection
-- Chunk requests: 50 chunks per request, 10 requests per minute
+**Multi-tier rate limiting:**
+
+1. **Global Rate Limit** (All endpoints)
+   - **Limit**: 1000 requests per minute per IP
+   - **Purpose**: Prevent DoS attacks
+   - **Status**: ✅ Implemented
+
+2. **Authentication Endpoints** (register, login, refresh, logout)
+   - **Limit**: 5 requests per minute per IP
+   - **Status**: ✅ Implemented
+
+3. **Per-User Rate Limit** (Authenticated endpoints)
+   - **Limit**: 500 requests per minute per user
+   - **Status**: ✅ Implemented (middleware available)
+
+4. **Future Endpoints** (to be implemented)
+   - Zone Creation: 10 requests per minute per user
+   - Structure Placement: 20 requests per minute per user
+   - Chunk Requests: 100 requests per minute per user
+   - WebSocket: 1000 messages per minute per connection
 
 ### Rate Limit Headers
 
+All responses include rate limit headers:
+
 ```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
 X-RateLimit-Reset: 1640995200
 ```
+
+### Rate Limit Exceeded Response
+
+When rate limit is exceeded, returns `429 Too Many Requests`:
+
+```json
+{
+  "error": "Rate limit exceeded",
+  "message": "Too many requests. Please try again later.",
+  "retry_after": 60
+}
+```
+
+See `docs/05-authentication-security.md` for detailed rate limiting specification.
 
 ## Versioning
 

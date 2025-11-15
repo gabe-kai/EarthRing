@@ -98,14 +98,35 @@ EarthRing is set on a massive orbital ring structure:
 # Terminal 1: Go server
 cd server
 # Make sure .env file exists with required configuration
+# Required: DB_PASSWORD, JWT_SECRET, REFRESH_SECRET
 go run cmd/earthring-server/main.go
 # Runs on http://localhost:8080 (or port specified in SERVER_PORT)
+# Provides REST API endpoints and WebSocket connections
 
 # Terminal 2: Web client
 cd client-web
 npm run dev
-# Runs on http://localhost:3000 (proxies /api and /ws to server)
+# Runs on http://localhost:3000
+# Authentication UI will appear on first load
 ```
+
+**Authentication:**
+- Register: `POST http://localhost:8080/api/auth/register`
+- Login: `POST http://localhost:8080/api/auth/login`
+- Refresh Token: `POST http://localhost:8080/api/auth/refresh` (with `Authorization: Bearer <refresh_token>` header)
+- Logout: `POST http://localhost:8080/api/auth/logout`
+- All authentication endpoints are protected by rate limiting (5 requests per minute per IP)
+
+**Rate Limiting:**
+- **Authentication endpoints**: 5 requests per minute per IP (register, login, refresh, logout)
+- **Global limit**: 1000 requests per minute per IP (applied to all routes)
+- **Per-user limit**: 500 requests per minute per user (for authenticated endpoints)
+- All responses include rate limit headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`)
+- Rate limit exceeded returns `429 Too Many Requests` with retry-after information
+
+**CORS:**
+- CORS middleware configured for web client development
+- Allowed origins: `http://localhost:3000`, `http://localhost:5173`, and localhost variants
 
 **Run tests:**
 ```bash
@@ -140,11 +161,11 @@ EarthRing/
 ├── server/                            # Go main server + Python procedural service
 │   ├── cmd/earthring-server/         # Server entry point
 │   ├── internal/                      # Private application code
-│   │   ├── api/                       # REST and WebSocket handlers
+│   │   ├── api/                       # REST and WebSocket handlers, rate limiting, CORS
 │   │   ├── database/                  # Database access layer
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
 │   │   ├── procedural/                # Procedural generation (Python)
-│   │   ├── auth/                      # Authentication
+│   │   ├── auth/                      # Authentication (JWT, password hashing, middleware)
 │   │   ├── config/                    # Configuration management
 │   │   └── testutil/                  # Test utilities and helpers
 │   ├── pkg/                           # Public library code
@@ -230,6 +251,23 @@ The project includes comprehensive testing utilities:
 - **JavaScript**: Test utilities in `client-web/src/test-utils.js` (mocks, fixtures)
 
 See `server/internal/testutil/README.md` and `server/tests/README.md` for detailed usage.
+
+### Authentication and Security
+
+The server includes a complete authentication and security system:
+
+- **JWT Authentication**: Access tokens (15 min expiration) and refresh tokens (7 days expiration)
+- **Password Security**: bcrypt hashing (cost 12) with strong password requirements (8+ chars, uppercase, lowercase, number, special)
+- **Rate Limiting**: Multi-tier rate limiting:
+  - Global: 1000 requests/minute per IP
+  - Authentication endpoints: 5 requests/minute per IP
+  - Per-user: 500 requests/minute per user (for authenticated endpoints)
+- **Security Headers**: HSTS, XSS protection, content type options, frame options, referrer policy
+- **CORS Support**: Configured for web client development (localhost:3000, localhost:5173)
+- **Input Validation**: Server-side validation for all inputs using `validator/v10`
+- **Token Refresh**: Automatic token refresh with rotation for enhanced security
+
+See `server/internal/auth/README.md` and `server/internal/api/README.md` for detailed documentation.
 
 ## Documentation
 
