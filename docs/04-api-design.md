@@ -711,7 +711,17 @@ All WebSocket messages use JSON:
    }
    ```
 
-5. **player_moved**
+5. **player_move_ack** (Acknowledgment)
+   ```json
+   {
+     "type": "player_move_ack",
+     "id": "req_124" // Matches player_move request ID
+   }
+   ```
+   - Acknowledgment response to `player_move` messages
+   - Currently returns immediately (full implementation pending Phase 2)
+
+6. **player_moved** (Broadcast)
    ```json
    {
      "type": "player_moved",
@@ -722,8 +732,9 @@ All WebSocket messages use JSON:
      }
    }
    ```
+   - Broadcast to other players when a player moves (not yet implemented)
 
-6. **racing_started**
+7. **racing_started**
    ```json
    {
      "type": "racing_started",
@@ -740,7 +751,7 @@ All WebSocket messages use JSON:
    }
    ```
 
-7. **racing_update**
+8. **racing_update**
    ```json
    {
      "type": "racing_update",
@@ -754,19 +765,6 @@ All WebSocket messages use JSON:
            "time": "00:03:45.123"
          }
        ]
-     }
-   }
-   ```
-
-8. **error**
-   ```json
-   {
-     "type": "error",
-     "id": "req_123", // If applicable
-     "data": {
-       "code": "INVALID_ZONE",
-       "message": "Zone geometry is invalid",
-       "details": {...}
      }
    }
    ```
