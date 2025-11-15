@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Config files
+vite.config.js
+
+# Test coverage
+coverage/
+
+# Cache
+.cache/
+.vite/
+

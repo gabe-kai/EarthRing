@@ -128,10 +128,30 @@ npm run dev
 - CORS middleware configured for web client development
 - Allowed origins: `http://localhost:3000`, `http://localhost:5173`, and localhost variants
 
+**Player Management:**
+- Get current profile: `GET http://localhost:8080/api/players/me` (requires authentication)
+- Get player profile: `GET http://localhost:8080/api/players/{player_id}` (requires authentication, own profile only)
+- Update position: `PUT http://localhost:8080/api/players/{player_id}/position` (requires authentication, own profile only)
+- Rate limit: 500 requests per minute per user
+
+**Chunk Metadata:**
+- Get chunk metadata: `GET http://localhost:8080/api/chunks/{chunk_id}` (format: "floor_chunk_index", e.g., "0_12345")
+- Rate limit: 100 requests per minute per user
+- Returns default metadata if chunk doesn't exist yet
+
+**Testing UI:**
+- After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints
+- UI panels provide forms to test all endpoints with JSON result display
+
 **Run tests:**
 ```bash
 cd server && go test ./... && python -m pytest
 cd ../client-web && npm test
+```
+
+**Lint code:**
+```bash
+cd client-web && npm run lint
 ```
 
 **Build for production:**
@@ -161,7 +181,7 @@ EarthRing/
 ├── server/                            # Go main server + Python procedural service
 │   ├── cmd/earthring-server/         # Server entry point
 │   ├── internal/                      # Private application code
-│   │   ├── api/                       # REST and WebSocket handlers, rate limiting, CORS
+│   │   ├── api/                       # REST and WebSocket handlers, rate limiting, CORS, player/chunk endpoints
 │   │   ├── database/                  # Database access layer
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
 │   │   ├── procedural/                # Procedural generation (Python)
@@ -176,6 +196,9 @@ EarthRing/
 │   └── requirements.txt               # Python dependencies
 ├── client-web/                        # Three.js web client
 │   ├── src/                           # Source code (network, state, rendering, input, chunks, ui)
+│   │   ├── api/                       # API service modules (player, chunk)
+│   │   ├── auth/                      # Authentication UI and service
+│   │   ├── ui/                        # UI components (player panel, chunk panel)
 │   │   ├── config.js                  # Client configuration
 │   │   └── test-utils.js              # Test utilities and mocks
 │   ├── assets/                        # Game assets (models, textures, shaders)

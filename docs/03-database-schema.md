@@ -180,6 +180,35 @@ CREATE INDEX idx_players_username ON players(username);
 CREATE INDEX idx_players_email ON players(email);
 ```
 
+**Note on POINT Type Queries:**
+PostgreSQL's native `POINT` type is **not a composite type**, so you cannot use dot notation like `(current_position).x` or `(current_position).y`. To extract coordinates from a POINT type:
+
+- **Use PostGIS functions** (recommended, since PostGIS is installed):
+  ```sql
+  SELECT ST_X(current_position::geometry) AS x,
+         ST_Y(current_position::geometry) AS y
+  FROM players
+  WHERE id = $1;
+  ```
+  
+- **Handle NULL values** properly:
+  ```sql
+  SELECT CASE WHEN current_position IS NULL 
+         THEN NULL 
+         ELSE ST_X(current_position::geometry) 
+       END AS x
+  FROM players;
+  ```
+
+- **Insert/Update POINT values**:
+  ```sql
+  UPDATE players 
+  SET current_position = POINT($1, $2)
+  WHERE id = $3;
+  ```
+
+**Common Mistake:** Using `(current_position).x` will produce error: `column notation .x applied to type point, which is not a composite type`
+
 ### Zones
 
 Stores zone definitions as polygons. Zones can be player-defined or system-defined (elevator stations, maglev tracks, etc.).
