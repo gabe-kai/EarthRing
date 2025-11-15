@@ -21,6 +21,21 @@ jobs:
     name: Python Tests
     runs-on: ubuntu-latest
     
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: earthring_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
     strategy:
       matrix:
         python-version: ['3.11', '3.12']
@@ -42,6 +57,28 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 1
+          done
+
+      - name: Set up PostGIS extension
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          psql -c "CREATE EXTENSION IF NOT EXISTS postgis;" || echo "PostGIS extension already exists"
+
       - name: Install dependencies
         working-directory: ./server
         run: |
@@ -50,6 +87,12 @@ jobs:
 
       - name: Run tests with pytest
         working-directory: ./server
+        env:
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5432
+          TEST_DB_USER: postgres
+          TEST_DB_PASSWORD: postgres
+          TEST_DB_NAME: earthring_test
         run: pytest -v --tb=short
 
   lint:

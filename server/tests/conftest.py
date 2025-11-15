@@ -4,8 +4,15 @@ Pytest configuration and fixtures for EarthRing tests.
 
 import os
 import pytest
-import psycopg2
-from psycopg2.extras import RealDictCursor
+
+# Import psycopg2 with graceful handling if not available
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+    pytest.skip("psycopg2 not available", allow_module_level=True)
 
 
 @pytest.fixture(scope="session")
