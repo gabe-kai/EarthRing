@@ -8,9 +8,10 @@ scipy>=1.12.0
 # Database
 psycopg2-binary>=2.9.9
 
-# API framework (choose one)
-# FastAPI>=0.109.0
-# Flask>=3.0.0
+# API framework
+FastAPI>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
 
 # Testing
 pytest>=8.0.0

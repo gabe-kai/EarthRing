@@ -107,7 +107,15 @@ go run cmd/earthring-server/main.go
 # Runs on http://localhost:8080 (or port specified in SERVER_PORT)
 # Provides REST API endpoints and WebSocket connections
 
-# Terminal 2: Web client
+# Terminal 2: Python procedural generation service (optional for Phase 1)
+cd server
+# Install Python dependencies first: pip install -r requirements.txt
+python -m uvicorn internal.procedural.main:app --host 0.0.0.0 --port 8081 --reload
+# Or use the script: ./scripts/run-procedural-service.ps1 (Windows) or ./scripts/run-procedural-service.sh (Linux/Mac)
+# Runs on http://localhost:8081
+# Go server will call this service for chunk generation
+
+# Terminal 3: Web client
 cd client-web
 npm run dev
 # Runs on http://localhost:3000
@@ -197,10 +205,20 @@ EarthRing/
 │   │   ├── api/                       # REST and WebSocket handlers, rate limiting, CORS, player/chunk endpoints
 │   │   ├── database/                  # Database access layer
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
-│   │   ├── procedural/                # Procedural generation (Python)
+│   │   ├── procedural/                # Procedural generation service
+│   │   │   ├── main.py                # FastAPI application and endpoints
+│   │   │   ├── config.py              # Configuration management
+│   │   │   ├── seeds.py               # Seed generation utilities
+│   │   │   ├── generation.py         # Chunk generation functions
+│   │   │   ├── client.go              # Go client for calling Python service
+│   │   │   ├── tests/                 # Python service tests
+│   │   │   └── README.md              # Procedural service documentation
 │   │   ├── auth/                      # Authentication (JWT, password hashing, middleware)
 │   │   ├── config/                    # Configuration management
 │   │   └── testutil/                  # Test utilities and helpers
+│   ├── scripts/                       # Utility scripts
+│   │   ├── run-procedural-service.sh  # Run Python service (Linux/Mac)
+│   │   └── run-procedural-service.ps1 # Run Python service (Windows)
 │   ├── pkg/                           # Public library code
 │   ├── migrations/                    # Database migrations
 │   ├── config/                        # Configuration files

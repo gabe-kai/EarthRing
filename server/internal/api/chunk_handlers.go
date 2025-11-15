@@ -11,19 +11,22 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/procedural"
 )
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {
-	db     *sql.DB
-	config *config.Config
+	db                *sql.DB
+	config            *config.Config
+	proceduralClient  *procedural.ProceduralClient
 }
 
 // NewChunkHandlers creates a new instance of ChunkHandlers.
 func NewChunkHandlers(db *sql.DB, cfg *config.Config) *ChunkHandlers {
 	return &ChunkHandlers{
-		db:     db,
-		config: cfg,
+		db:               db,
+		config:           cfg,
+		proceduralClient: procedural.NewProceduralClient(cfg),
 	}
 }
 

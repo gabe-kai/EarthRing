@@ -11,6 +11,7 @@
   - [Zone Management](#zone-management)
   - [Structure Management](#structure-management)
   - [Chunk Management](#chunk-management)
+  - [Procedural Generation Service API](#procedural-generation-service-api)
   - [Racing](#racing)
 - [WebSocket Protocol](#websocket-protocol)
   - [Connection](#connection)
@@ -382,6 +383,78 @@ Response: {
 }
 ```
 **Status**: ⏳ **PENDING** (Phase 2: Map System Foundation)
+
+### Procedural Generation Service API
+
+**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with empty chunk generation)
+
+The Python procedural generation service exposes a REST API for chunk generation. This is an internal service API called by the Go server, not directly exposed to clients.
+
+**Base URL**: `http://localhost:8081` (configurable via `PROCEDURAL_BASE_URL`)
+
+#### Health Check
+```
+GET /health
+Response: {
+  "status": "ok",
+  "service": "earthring-procedural-service",
+  "version": "0.1.0"
+}
+```
+
+#### Generate Chunk
+```
+POST /api/v1/chunks/generate
+Content-Type: application/json
+
+Request: {
+  "floor": 0,
+  "chunk_index": 12345,
+  "lod_level": "medium",  // "low", "medium", "high"
+  "world_seed": 12345     // Optional, uses default if not provided
+}
+
+Response: {
+  "success": true,
+  "chunk": {
+    "chunk_id": "0_12345",
+    "floor": 0,
+    "chunk_index": 12345,
+    "width": 400.0,
+    "version": 1
+  },
+  "geometry": null,        // Empty for Phase 1
+  "structures": [],        // Empty for Phase 1
+  "zones": [],            // Empty for Phase 1
+  "message": "Empty chunk generated (full generation pending Phase 2)"
+}
+```
+
+**Note**: For Phase 1, this endpoint returns empty chunks with metadata only. Full generation (buildings, zones, geometry) will be implemented in Phase 2.
+
+#### Get Chunk Seed
+```
+GET /api/v1/chunks/seed/{floor}/{chunk_index}?world_seed=12345
+Response: {
+  "floor": 0,
+  "chunk_index": 12345,
+  "world_seed": 12345,
+  "chunk_seed": 1234567890
+}
+```
+
+**Use Case**: Useful for debugging and ensuring deterministic seed generation.
+
+**Configuration**:
+- Default port: `8081` (via `PROCEDURAL_SERVICE_PORT`)
+- Default timeout: `30s` (via `PROCEDURAL_TIMEOUT`)
+- Default retry count: `3` (via `PROCEDURAL_RETRY_COUNT`)
+- Default world seed: `12345` (via `WORLD_SEED`)
+
+**Go Server Integration**:
+- Go server includes a `ProceduralClient` in `server/internal/procedural/client.go`
+- Client handles retries with exponential backoff
+- Client is integrated into `ChunkHandlers` for future chunk generation requests
 
 ### Racing
 
