@@ -68,13 +68,23 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: earthring_test
         run: |
+          # Debug: Show current directory and check if migrations directory exists
+          echo "Current working directory:"
+          pwd
+          echo ""
+          echo "Checking for database/migrations directory:"
+          ls -la database/ || echo "database/ directory not found"
+          echo ""
+          echo "Checking for database/migrations directory:"
+          ls -la database/migrations/ || echo "database/migrations/ directory not found"
+          echo ""
           # Verify database connection
           echo "Testing database connection..."
           psql -d earthring_test -c "SELECT current_database();" || exit 1
           echo ""
           # List migration files to verify they're found
           echo "Migration files found:"
-          ls -la database/migrations/*_up.sql | sort
+          ls -la database/migrations/*_up.sql 2>&1 | sort || echo "No migration files found"
           echo ""
           # Apply all migrations in order
           MIGRATION_COUNT=0
