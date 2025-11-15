@@ -3,7 +3,7 @@
  * Simple overlay UI for login and registration
  */
 
-import { register, login, storeTokens, logout, isAuthenticated, getCurrentUser } from './auth-service.js';
+import { register, login, storeTokens, logout, getCurrentUser } from './auth-service.js';
 
 let authContainer = null;
 let currentView = 'login'; // 'login' or 'register'
@@ -428,12 +428,20 @@ export function showUserInfo() {
     return;
   }
   
+  // Remove existing user bar if present
+  const existingBar = document.getElementById('user-info-bar');
+  if (existingBar) {
+    existingBar.remove();
+  }
+  
   // Create user info bar
   const userBar = document.createElement('div');
   userBar.id = 'user-info-bar';
   userBar.innerHTML = `
-    <div style="position: fixed; top: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #333; z-index: 9999; display: flex; align-items: center; gap: 1rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+    <div style="position: fixed; top: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #333; z-index: 9999; display: flex; align-items: center; gap: 1rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; flex-wrap: wrap;">
       <span style="color: #00ff00; font-weight: 500;">Logged in as: ${user.username}</span>
+      <button id="player-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Player</button>
+      <button id="chunk-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Chunks</button>
       <button id="logout-button" style="background: #ff4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Logout</button>
     </div>
   `;
@@ -447,5 +455,21 @@ export function showUserInfo() {
     showAuthUI();
     window.dispatchEvent(new CustomEvent('auth:logout'));
   });
+  
+  // Set up panel buttons (will be imported in main.js)
+  const playerBtn = document.getElementById('player-panel-btn');
+  const chunkBtn = document.getElementById('chunk-panel-btn');
+  
+  if (playerBtn) {
+    playerBtn.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('show:player-panel'));
+    });
+  }
+  
+  if (chunkBtn) {
+    chunkBtn.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('show:chunk-panel'));
+    });
+  }
 }
 

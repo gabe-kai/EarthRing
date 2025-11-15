@@ -46,6 +46,12 @@ func main() {
 	// Set up authentication routes (includes rate limiting)
 	api.SetupAuthRoutes(mux, db, cfg)
 	
+	// Set up player management routes
+	api.SetupPlayerRoutes(mux, db, cfg)
+	
+	// Set up chunk metadata routes
+	api.SetupChunkRoutes(mux, db, cfg)
+	
 	// Apply global rate limiting (1000 requests per minute per IP)
 	// This applies to all routes after auth routes are set up
 	globalRateLimit := api.RateLimitMiddleware(1000, 1*time.Minute)

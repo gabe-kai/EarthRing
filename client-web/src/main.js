@@ -4,8 +4,10 @@
  */
 
 import * as THREE from 'three';
-import { showAuthUI, hideAuthUI, showUserInfo } from './auth/auth-ui.js';
+import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
+import { showPlayerPanel } from './ui/player-ui.js';
+import { showChunkPanel } from './ui/chunk-ui.js';
 
 // Initialize scene
 const scene = new THREE.Scene();
@@ -63,6 +65,15 @@ window.addEventListener('auth:register', () => {
 
 window.addEventListener('auth:logout', () => {
   console.log('User logged out');
+});
+
+// Listen for panel show events
+window.addEventListener('show:player-panel', () => {
+  showPlayerPanel();
+});
+
+window.addEventListener('show:chunk-panel', () => {
+  showChunkPanel();
 });
 
 // Client initialization complete

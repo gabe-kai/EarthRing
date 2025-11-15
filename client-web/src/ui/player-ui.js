@@ -1,0 +1,297 @@
+/**
+ * Player Management UI Component
+ * Provides UI for testing player API endpoints
+ */
+
+import { getCurrentPlayerProfile, updatePlayerPosition } from '../api/player-service.js';
+import { getCurrentUser } from '../auth/auth-service.js';
+
+let playerPanel = null;
+
+/**
+ * Show player management panel
+ */
+export function showPlayerPanel() {
+  if (playerPanel) {
+    return; // Already shown
+  }
+
+  const user = getCurrentUser();
+  if (!user) {
+    alert('Please log in first');
+    return;
+  }
+
+  playerPanel = document.createElement('div');
+  playerPanel.id = 'player-panel';
+  playerPanel.innerHTML = `
+    <div class="player-panel-content">
+      <div class="player-panel-header">
+        <h2>Player Management</h2>
+        <button id="player-panel-close" class="close-button">×</button>
+      </div>
+      
+      <div class="player-panel-body">
+        <div class="player-section">
+          <h3>Player Profile</h3>
+          <button id="load-profile-btn" class="action-button">Load My Profile</button>
+          <div id="profile-display" class="result-display"></div>
+        </div>
+        
+        <div class="player-section">
+          <h3>Update Position</h3>
+          <form id="position-form" class="position-form">
+            <div class="form-group">
+              <label>X Position (0-264000000)</label>
+              <input type="number" id="position-x" value="12345" min="0" max="264000000" step="1" required />
+            </div>
+            <div class="form-group">
+              <label>Y Position</label>
+              <input type="number" id="position-y" value="0" step="0.1" required />
+            </div>
+            <div class="form-group">
+              <label>Floor (-2 to 15)</label>
+              <input type="number" id="position-floor" value="0" min="-2" max="15" step="1" required />
+            </div>
+            <button type="submit" class="action-button">Update Position</button>
+          </form>
+          <div id="position-result" class="result-display"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add styles
+  const style = document.createElement('style');
+  style.textContent = `
+    #player-panel {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #1a1a1a;
+      border: 2px solid #00ff00;
+      border-radius: 12px;
+      padding: 0;
+      width: 90%;
+      max-width: 600px;
+      max-height: 90vh;
+      overflow-y: auto;
+      z-index: 10001;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      box-shadow: 0 8px 32px rgba(0, 255, 0, 0.3);
+    }
+    
+    .player-panel-content {
+      padding: 1.5rem;
+    }
+    
+    .player-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #333;
+    }
+    
+    .player-panel-header h2 {
+      color: #00ff00;
+      margin: 0;
+      font-size: 1.5rem;
+    }
+    
+    .close-button {
+      background: #ff4444;
+      color: white;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 1.5rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .close-button:hover {
+      background: #cc0000;
+    }
+    
+    .player-section {
+      margin-bottom: 2rem;
+    }
+    
+    .player-section h3 {
+      color: #ccc;
+      margin-bottom: 1rem;
+      font-size: 1.1rem;
+    }
+    
+    .action-button {
+      padding: 0.75rem 1.5rem;
+      background: #00ff00;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 1rem;
+    }
+    
+    .action-button:hover {
+      background: #00cc00;
+    }
+    
+    .action-button:disabled {
+      background: #444;
+      color: #888;
+      cursor: not-allowed;
+    }
+    
+    .position-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    
+    .form-group label {
+      color: #ccc;
+      font-size: 0.9rem;
+    }
+    
+    .form-group input {
+      padding: 0.75rem;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 1rem;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #00ff00;
+    }
+    
+    .result-display {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 1rem;
+      color: #ccc;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+    
+    .result-display.show {
+      display: block;
+    }
+    
+    .result-display.success {
+      border-color: #00ff00;
+      color: #88ff88;
+    }
+    
+    .result-display.error {
+      border-color: #ff4444;
+      color: #ff8888;
+    }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(playerPanel);
+
+  // Set up event listeners
+  setupPlayerPanelListeners(user.id);
+}
+
+/**
+ * Hide player management panel
+ */
+export function hidePlayerPanel() {
+  if (playerPanel) {
+    playerPanel.remove();
+    playerPanel = null;
+  }
+}
+
+/**
+ * Set up event listeners for player panel
+ */
+function setupPlayerPanelListeners(playerID) {
+  // Close button
+  document.getElementById('player-panel-close').addEventListener('click', () => {
+    hidePlayerPanel();
+  });
+
+  // Load profile button
+  document.getElementById('load-profile-btn').addEventListener('click', async () => {
+    const display = document.getElementById('profile-display');
+    display.textContent = 'Loading...';
+    display.className = 'result-display show';
+    
+    try {
+      // Debug: Check if token exists
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        throw new Error('No access token found. Please log in again.');
+      }
+      
+      const profile = await getCurrentPlayerProfile();
+      display.textContent = JSON.stringify(profile, null, 2);
+      display.className = 'result-display show success';
+    } catch (error) {
+      display.textContent = `Error: ${error.message}`;
+      display.className = 'result-display show error';
+    }
+  });
+
+  // Position form
+  document.getElementById('position-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const resultDisplay = document.getElementById('position-result');
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    
+    const x = document.getElementById('position-x').value;
+    const y = document.getElementById('position-y').value;
+    const floor = document.getElementById('position-floor').value;
+    
+    resultDisplay.textContent = 'Updating position...';
+    resultDisplay.className = 'result-display show';
+    submitButton.disabled = true;
+    
+    try {
+      const result = await updatePlayerPosition(playerID, { x, y }, floor);
+      resultDisplay.textContent = JSON.stringify(result, null, 2);
+      resultDisplay.className = 'result-display show success';
+      
+      // Reload profile to show updated position
+      setTimeout(() => {
+        document.getElementById('load-profile-btn').click();
+      }, 500);
+    } catch (error) {
+      resultDisplay.textContent = `Error: ${error.message}`;
+      resultDisplay.className = 'result-display show error';
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+

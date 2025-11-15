@@ -124,10 +124,12 @@ All API requests require authentication except for public endpoints.
 
 ### Player Management
 
-#### Get Player Profile
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/api/player_handlers.go`)
+
+#### Get Current Player Profile
 ```
-GET /api/players/{player_id}
-Headers: Authorization
+GET /api/players/me
+Headers: Authorization: Bearer <access_token>
 Response: {
   "id": 123,
   "username": "player1",
@@ -135,23 +137,52 @@ Response: {
   "experience_points": 10000,
   "currency_amount": 50000,
   "current_position": {"x": 12345, "y": 0},
-  "current_floor": 0
+  "current_floor": 0,
+  "created_at": "2024-01-01T00:00:00Z",
+  "last_login": "2024-01-01T12:00:00Z"
 }
 ```
+**Rate Limit**: 500 requests per minute per user
+
+#### Get Player Profile
+```
+GET /api/players/{player_id}
+Headers: Authorization: Bearer <access_token>
+Response: {
+  "id": 123,
+  "username": "player1",
+  "level": 5,
+  "experience_points": 10000,
+  "currency_amount": 50000,
+  "current_position": {"x": 12345, "y": 0},
+  "current_floor": 0,
+  "created_at": "2024-01-01T00:00:00Z",
+  "last_login": "2024-01-01T12:00:00Z"
+}
+```
+**Rate Limit**: 500 requests per minute per user
+**Note**: Users can only view their own profile (403 Forbidden if requesting another player's profile)
 
 #### Update Player Position
 ```
 PUT /api/players/{player_id}/position
-Headers: Authorization
+Headers: Authorization: Bearer <access_token>
 Body: {
   "position": {"x": 12345, "y": 0},
   "floor": 0
 }
 Response: {
   "success": true,
-  "position": {"x": 12345, "y": 0}
+  "position": {"x": 12345, "y": 0},
+  "floor": 0
 }
 ```
+**Rate Limit**: 500 requests per minute per user
+**Validation**:
+- X position: 0 to 264,000,000 meters (ring circumference)
+- Y position: Any valid float (ring width)
+- Floor: -2 to 15
+**Note**: Users can only update their own position (403 Forbidden if updating another player's position)
 
 ### Zone Management
 
@@ -310,10 +341,30 @@ Response: {
 
 ### Chunk Management
 
-#### Request Chunks
+**Implementation Status:** ✅ **PARTIALLY IMPLEMENTED** (metadata endpoint implemented, chunk request endpoint pending)
+
+#### Get Chunk Metadata
+```
+GET /api/chunks/{chunk_id}
+Headers: Authorization: Bearer <access_token>
+Response: {
+  "id": "0_12345",
+  "floor": 0,
+  "chunk_index": 12345,
+  "version": 1,
+  "last_modified": "2024-01-01T00:00:00Z",
+  "is_dirty": false
+}
+```
+**Rate Limit**: 100 requests per minute per user
+**chunk_id Format**: `"floor_chunk_index"` (e.g., `"0_12345"` for floor 0, chunk index 12345)
+**chunk_index Range**: 0 to 263,999
+**Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated)
+
+#### Request Chunks (To Be Implemented)
 ```
 POST /api/chunks/request
-Headers: Authorization
+Headers: Authorization: Bearer <access_token>
 Body: {
   "chunks": ["0_12345", "0_12346"],
   "lod_level": "medium"
@@ -330,19 +381,7 @@ Response: {
   ]
 }
 ```
-
-#### Get Chunk Metadata
-```
-GET /api/chunks/{chunk_id}
-Headers: Authorization
-Response: {
-  "id": "0_12345",
-  "floor": 0,
-  "chunk_index": 12345,
-  "version": 2,
-  "last_modified": "2024-01-01T00:00:00Z"
-}
-```
+**Status**: ⏳ **PENDING** (Phase 2: Map System Foundation)
 
 ### Racing
 
