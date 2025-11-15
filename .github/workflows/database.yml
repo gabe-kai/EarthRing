@@ -84,11 +84,11 @@ jobs:
           echo ""
           # List migration files to verify they're found
           echo "Migration files found:"
-          ls -la database/migrations/*_up.sql 2>&1 | sort || echo "No migration files found"
+          find database/migrations -name "*_up.sql" -type f | sort
           echo ""
           # Apply all migrations in order
           MIGRATION_COUNT=0
-          for file in $(ls database/migrations/*_up.sql | sort); do
+          for file in $(find database/migrations -name "*_up.sql" -type f | sort); do
             echo "=========================================="
             echo "Applying migration: $file"
             echo "=========================================="
