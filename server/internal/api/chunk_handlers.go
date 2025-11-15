@@ -3,9 +3,9 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,12 +59,14 @@ func (h *ChunkHandlers) GetChunkMetadata(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var floor, chunkIndex int
-	if _, err := fmt.Sscanf(chunkParts[0], "%d", &floor); err != nil {
+	floor, err := strconv.Atoi(chunkParts[0])
+	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid floor in chunk ID")
 		return
 	}
-	if _, err := fmt.Sscanf(chunkParts[1], "%d", &chunkIndex); err != nil {
+	var chunkIndex int
+	chunkIndex, err = strconv.Atoi(chunkParts[1])
+	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid chunk_index in chunk ID")
 		return
 	}
@@ -82,7 +84,7 @@ func (h *ChunkHandlers) GetChunkMetadata(w http.ResponseWriter, r *http.Request)
 		FROM chunks
 		WHERE floor = $1 AND chunk_index = $2
 	`
-	err := h.db.QueryRow(query, floor, chunkIndex).Scan(
+	err = h.db.QueryRow(query, floor, chunkIndex).Scan(
 		&metadata.Floor,
 		&metadata.ChunkIndex,
 		&metadata.Version,
