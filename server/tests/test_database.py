@@ -3,7 +3,6 @@ Database integration tests for EarthRing.
 """
 
 import pytest
-from conftest import db_connection, db_cursor, clean_db
 
 
 def test_database_connection(db_connection):
