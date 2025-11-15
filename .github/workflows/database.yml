@@ -75,7 +75,8 @@ jobs:
               echo "✅ Successfully applied: $file"
             else
               echo "❌ Failed to apply: $file"
-              psql -c "\dt"  # Show current tables for debugging
+              echo "Current tables in database:"
+              psql -t -A -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
               exit 1
             fi
           done
