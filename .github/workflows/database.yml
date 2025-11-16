@@ -84,14 +84,14 @@ jobs:
           echo ""
           # List migration files to verify they're found
           echo "Migration files found:"
-          # Use find with *.sql and filter for _up.sql files (more reliable than *_up.sql pattern)
-          FILES=$(find database/migrations -name "*.sql" -type f | grep "_up.sql$" | sort)
+          # Use find with *.sql and filter for .up.sql files (migration files end in .up.sql, not _up.sql)
+          FILES=$(find database/migrations -name "*.sql" -type f | grep "\.up\.sql$" | sort)
           if [ -z "$FILES" ]; then
             echo "ERROR: No migration files found!"
             echo "Debug: Testing find command..."
             find database/migrations -name "*.sql" -type f | head -10
             echo "Debug: Testing grep filter..."
-            find database/migrations -name "*.sql" -type f | grep "_up.sql$" | head -5
+            find database/migrations -name "*.sql" -type f | grep "\.up\.sql$" | head -5
             exit 1
           else
             echo "$FILES"
