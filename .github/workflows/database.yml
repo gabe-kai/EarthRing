@@ -84,11 +84,23 @@ jobs:
           echo ""
           # List migration files to verify they're found
           echo "Migration files found:"
-          find database/migrations -name "*_up.sql" -type f | sort
+          FILES=$(find database/migrations -name "*_up.sql" -type f 2>&1 | sort)
+          if [ -z "$FILES" ]; then
+            echo "ERROR: No migration files found!"
+            echo "Debug: Testing find command..."
+            find database/migrations -name "*.sql" -type f | head -5
+            echo "Debug: Testing with ls..."
+            ls -1 database/migrations/*_up.sql 2>&1 | head -5
+            exit 1
+          else
+            echo "$FILES"
+          fi
           echo ""
           # Apply all migrations in order
           MIGRATION_COUNT=0
-          for file in $(find database/migrations -name "*_up.sql" -type f | sort); do
+          # Use here-string to avoid subshell issues with MIGRATION_COUNT
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue  # Skip empty lines
             echo "=========================================="
             echo "Applying migration: $file"
             echo "=========================================="
@@ -106,7 +118,7 @@ jobs:
               exit 1
             fi
             echo ""
-          done
+          done <<< "$FILES"
           echo "✅ All $MIGRATION_COUNT migrations applied successfully"
           echo ""
           echo "Verifying migrations were applied..."
