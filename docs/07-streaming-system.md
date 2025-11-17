@@ -132,32 +132,55 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
 
 ### Server-Side Management
 
-#### Chunk Request Handling
+#### Chunk Request Handling ✅ **IMPLEMENTED** (Phase 1: Basic handler with empty chunks)
 
-1. **Request Format**
+**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional. Returns empty chunks with metadata for Phase 1. Full geometry generation will be added in Phase 2.
+
+1. **Request Format** (via WebSocket)
    ```json
    {
      "type": "chunk_request",
-     "chunks": ["0_12345", "0_12346", "0_12347"],
-     "lod_level": "high"
+     "id": "req_123",
+     "data": {
+       "chunks": ["0_12345", "0_12346", "0_12347"],
+       "lod_level": "high"
+     }
    }
    ```
+   - Maximum 10 chunks per request
+   - Validates chunk ID format ("floor_chunk_index")
+   - Validates chunk index range (0-263,999)
+   - Validates LOD level ("low", "medium", "high")
 
-2. **Response Format**
+2. **Response Format** (via WebSocket)
    ```json
    {
      "type": "chunk_data",
-     "chunks": [
-       {
-         "id": "0_12345",
-         "geometry": "...", // Compressed geometry data
-         "structures": [...],
-         "zones": [...],
-         "metadata": {...}
-       }
-     ]
+     "id": "req_123",
+     "data": {
+       "chunks": [
+         {
+           "id": "0_12345",
+           "geometry": null, // Empty for Phase 1, will contain compressed geometry in Phase 2
+           "structures": [], // Empty for Phase 1
+           "zones": [], // Empty for Phase 1
+           "metadata": {
+             "id": "0_12345",
+             "floor": 0,
+             "chunk_index": 12345,
+             "version": 1,
+             "last_modified": "2024-01-01T00:00:00Z",
+             "is_dirty": false
+           }
+         }
+       ]
+     }
    }
    ```
+   - Checks database for existing chunks
+   - Generates new chunks via procedural service if not found
+   - Returns empty chunks with metadata for Phase 1
+   - Full geometry will be populated in Phase 2
 
 #### Chunk Caching
 

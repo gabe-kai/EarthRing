@@ -342,7 +342,7 @@ Response: {
 
 ### Chunk Management
 
-**Implementation Status:** ✅ **PARTIALLY IMPLEMENTED** (metadata endpoint implemented, chunk request endpoint pending)
+**Implementation Status:** ✅ **PARTIALLY IMPLEMENTED** (metadata endpoint and WebSocket chunk requests implemented, REST chunk request endpoint pending)
 
 #### Get Chunk Metadata
 ```
@@ -362,7 +362,11 @@ Response: {
 **chunk_index Range**: 0 to 263,999
 **Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated)
 
-#### Request Chunks (To Be Implemented)
+#### Request Chunks via WebSocket ✅ **IMPLEMENTED**
+
+Chunk requests are implemented via WebSocket using the `chunk_request` message type (see WebSocket Protocol section above). This provides real-time bidirectional communication for chunk loading.
+
+#### Request Chunks via REST (To Be Implemented)
 ```
 POST /api/chunks/request
 Headers: Authorization: Bearer <access_token>
@@ -383,6 +387,7 @@ Response: {
 }
 ```
 **Status**: ⏳ **PENDING** (Phase 2: Map System Foundation)
+**Note**: WebSocket chunk requests are already implemented and recommended for real-time chunk loading.
 
 ### Procedural Generation Service API
 
@@ -621,7 +626,7 @@ All WebSocket messages use JSON:
    - Recommended interval: 30 seconds
    - Server also sends automatic ping frames every 30 seconds
 
-2. **chunk_request**
+2. **chunk_request** ✅ **IMPLEMENTED**
    ```json
    {
      "type": "chunk_request",
@@ -632,6 +637,12 @@ All WebSocket messages use JSON:
      }
    }
    ```
+   - Request chunks via WebSocket (up to 10 chunks per request)
+   - Validates chunk IDs (format: "floor_chunk_index", range: 0-263,999)
+   - Validates LOD level ("low", "medium", "high", default: "medium")
+   - Returns `chunk_data` response with requested chunks
+   - Generates chunks via procedural service if they don't exist in database
+   - Server responds with `chunk_data` message
 
 2. **player_move**
    ```json
@@ -724,7 +735,7 @@ All WebSocket messages use JSON:
    - Sent when an error occurs processing a message
    - Common error codes: `InvalidMessageFormat`, `UnknownMessageType`, `NotImplemented`, `Unauthorized`
 
-3. **chunk_data**
+3. **chunk_data** ✅ **IMPLEMENTED**
    ```json
    {
      "type": "chunk_data",
@@ -733,14 +744,25 @@ All WebSocket messages use JSON:
        "chunks": [
          {
            "id": "0_12345",
-           "geometry": "...",
-           "structures": [...],
-           "zones": [...]
+           "geometry": null, // Empty for Phase 1, will contain geometry in Phase 2
+           "structures": [], // Empty for Phase 1
+           "zones": [], // Empty for Phase 1
+           "metadata": {
+             "id": "0_12345",
+             "floor": 0,
+             "chunk_index": 12345,
+             "version": 1,
+             "last_modified": "2024-01-01T00:00:00Z",
+             "is_dirty": false
+           }
          }
        ]
      }
    }
    ```
+   - Response to `chunk_request` messages
+   - Returns empty chunks with metadata for Phase 1
+   - Geometry, structures, and zones will be populated in Phase 2
 
 2. **chunk_updated**
    ```json

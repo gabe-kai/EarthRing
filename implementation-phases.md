@@ -101,7 +101,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Client can authenticate via REST API (register, login, token refresh) - **COMPLETE**
 - ✅ Client can retrieve player profile and update position via REST API - **COMPLETE**
 - ✅ Client can retrieve chunk metadata via REST API - **COMPLETE**
-- ⏳ Basic chunk request/response working (empty chunks, metadata only)
+- ✅ Basic chunk request/response working (empty chunks, metadata only) - **COMPLETE**
 - ⏳ Coordinate conversions working correctly (EarthRing ↔ Three.js)
 
 **Dependencies**: Phase 0 complete

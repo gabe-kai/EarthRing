@@ -145,7 +145,8 @@ npm run dev
 - Protocol version negotiation via `Sec-WebSocket-Protocol` header (`earthring-v1`)
 - Authentication via JWT token (query parameter `?token=<jwt>` or `Authorization: Bearer <jwt>` header)
 - Message format: JSON with `type`, `id`, and `data` fields
-- Supported message types: `ping`, `pong`, `chunk_request`, `player_move`, `player_move_ack`, `error`
+- Supported message types: `ping`, `pong`, `chunk_request`, `chunk_data`, `player_move`, `player_move_ack`, `error`
+- Chunk requests: Send `chunk_request` with chunk IDs and LOD level, receive `chunk_data` response (up to 10 chunks per request)
 - Automatic reconnection with exponential backoff
 - Heartbeat/ping-pong mechanism (30s interval)
 
