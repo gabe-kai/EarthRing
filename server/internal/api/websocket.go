@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/procedural"
 	"github.com/gorilla/websocket"
 )
 
@@ -133,16 +135,18 @@ func (h *WebSocketHub) SendToUser(userID int64, message []byte) {
 
 // WebSocketHandlers handles WebSocket connections
 type WebSocketHandlers struct {
-	hub        *WebSocketHub
-	db         *sql.DB
-	config     *config.Config
-	jwtService *auth.JWTService
-	upgrader   websocket.Upgrader
+	hub              *WebSocketHub
+	db               *sql.DB
+	config           *config.Config
+	jwtService       *auth.JWTService
+	proceduralClient *procedural.ProceduralClient
+	upgrader         websocket.Upgrader
 }
 
 // NewWebSocketHandlers creates a new WebSocket handlers instance
 func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 	jwtService := auth.NewJWTService(cfg)
+	proceduralClient := procedural.NewProceduralClient(cfg)
 
 	// Get allowed origins from config or use defaults
 	allowedOrigins := []string{
@@ -153,10 +157,11 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 	}
 
 	return &WebSocketHandlers{
-		hub:        NewWebSocketHub(),
-		db:         db,
-		config:     cfg,
-		jwtService: jwtService,
+		hub:              NewWebSocketHub(),
+		db:               db,
+		config:           cfg,
+		jwtService:       jwtService,
+		proceduralClient: proceduralClient,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -433,10 +438,207 @@ func (h *WebSocketHandlers) handlePing(conn *WebSocketConnection, msg *WebSocket
 	}
 }
 
-// handleChunkRequest handles chunk request messages (placeholder for Phase 2)
+// ChunkRequestData represents the data payload for a chunk_request message
+type ChunkRequestData struct {
+	Chunks   []string `json:"chunks"`              // Array of chunk IDs in format "floor_chunk_index"
+	LODLevel string   `json:"lod_level,omitempty"` // Optional LOD level: "low", "medium", "high"
+}
+
+// ChunkData represents a single chunk in the chunk_data response
+type ChunkData struct {
+	ID         string         `json:"id"`                 // Format: "floor_chunk_index"
+	Geometry   interface{}    `json:"geometry,omitempty"` // Geometry data (can be nil for empty chunks)
+	Structures []interface{}  `json:"structures"`         // Array of structures (empty for Phase 1)
+	Zones      []interface{}  `json:"zones"`              // Array of zones (empty for Phase 1)
+	Metadata   *ChunkMetadata `json:"metadata,omitempty"` // Chunk metadata
+}
+
+// ChunkDataResponse represents the data payload for a chunk_data message
+type ChunkDataResponse struct {
+	Chunks []ChunkData `json:"chunks"`
+}
+
+// handleChunkRequest handles chunk request messages
 func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *WebSocketMessage) {
-	// TODO: Implement in Phase 2
-	conn.sendError(msg.ID, "Chunk requests not yet implemented", "NotImplemented")
+	// Parse request data
+	var requestData ChunkRequestData
+	if err := json.Unmarshal(msg.Data, &requestData); err != nil {
+		conn.sendError(msg.ID, "Invalid chunk request format", "InvalidMessageFormat")
+		return
+	}
+
+	// Validate chunks array
+	if len(requestData.Chunks) == 0 {
+		conn.sendError(msg.ID, "Chunks array cannot be empty", "InvalidMessageFormat")
+		return
+	}
+
+	// Limit number of chunks per request (prevent abuse)
+	maxChunks := 10
+	if len(requestData.Chunks) > maxChunks {
+		conn.sendError(msg.ID, fmt.Sprintf("Too many chunks requested (max %d)", maxChunks), "InvalidMessageFormat")
+		return
+	}
+
+	// Default LOD level
+	lodLevel := requestData.LODLevel
+	if lodLevel == "" {
+		lodLevel = "medium"
+	}
+
+	// Validate LOD level
+	if lodLevel != "low" && lodLevel != "medium" && lodLevel != "high" {
+		conn.sendError(msg.ID, "Invalid LOD level (must be 'low', 'medium', or 'high')", "InvalidMessageFormat")
+		return
+	}
+
+	// Process each chunk
+	var chunks []ChunkData
+	for _, chunkID := range requestData.Chunks {
+		// Parse chunk ID format: "floor_chunk_index"
+		chunkParts := strings.Split(chunkID, "_")
+		if len(chunkParts) != 2 {
+			log.Printf("Invalid chunk ID format: %s", chunkID)
+			continue
+		}
+
+		floor, err := strconv.Atoi(chunkParts[0])
+		if err != nil {
+			log.Printf("Invalid floor in chunk ID %s: %v", chunkID, err)
+			continue
+		}
+
+		chunkIndex, err := strconv.Atoi(chunkParts[1])
+		if err != nil {
+			log.Printf("Invalid chunk_index in chunk ID %s: %v", chunkID, err)
+			continue
+		}
+
+		// Validate chunk_index range (0 to 263,999)
+		if chunkIndex < 0 || chunkIndex > 263999 {
+			log.Printf("Chunk index out of range: %d", chunkIndex)
+			continue
+		}
+
+		// Check if chunk exists in database
+		var metadata ChunkMetadata
+		query := `
+			SELECT floor, chunk_index, version, last_modified, is_dirty
+			FROM chunks
+			WHERE floor = $1 AND chunk_index = $2
+		`
+		err = h.db.QueryRow(query, floor, chunkIndex).Scan(
+			&metadata.Floor,
+			&metadata.ChunkIndex,
+			&metadata.Version,
+			&metadata.LastModified,
+			&metadata.IsDirty,
+		)
+
+		var chunk ChunkData
+		if err == sql.ErrNoRows {
+			// Chunk doesn't exist - generate it using procedural service
+			// Pass nil for world seed (procedural service will use default)
+			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+			if err != nil {
+				log.Printf("Failed to generate chunk %s: %v", chunkID, err)
+				// Return empty chunk on generation failure
+				chunk = ChunkData{
+					ID:         chunkID,
+					Geometry:   nil,
+					Structures: []interface{}{},
+					Zones:      []interface{}{},
+					Metadata: &ChunkMetadata{
+						ID:           chunkID,
+						Floor:        floor,
+						ChunkIndex:   chunkIndex,
+						Version:      1,
+						LastModified: time.Time{},
+						IsDirty:      false,
+					},
+				}
+			} else {
+				// Convert procedural service response to chunk data
+				chunk = ChunkData{
+					ID:         chunkID,
+					Geometry:   genResponse.Geometry,
+					Structures: genResponse.Structures,
+					Zones:      genResponse.Zones,
+					Metadata: &ChunkMetadata{
+						ID:           chunkID,
+						Floor:        floor,
+						ChunkIndex:   chunkIndex,
+						Version:      genResponse.Chunk.Version,
+						LastModified: time.Time{}, // Will be set when chunk is saved
+						IsDirty:      false,
+					},
+				}
+			}
+		} else if err != nil {
+			log.Printf("Error querying chunk %s: %v", chunkID, err)
+			// Return empty chunk on database error
+			chunk = ChunkData{
+				ID:         chunkID,
+				Geometry:   nil,
+				Structures: []interface{}{},
+				Zones:      []interface{}{},
+				Metadata: &ChunkMetadata{
+					ID:           chunkID,
+					Floor:        floor,
+					ChunkIndex:   chunkIndex,
+					Version:      1,
+					LastModified: time.Time{},
+					IsDirty:      false,
+				},
+			}
+		} else {
+			// Chunk exists in database - load it
+			// For Phase 1, we'll return empty chunks even if they exist in DB
+			// In Phase 2, we'll load actual chunk data from the database
+			metadata.ID = chunkID
+			chunk = ChunkData{
+				ID:         chunkID,
+				Geometry:   nil, // Will be loaded from database in Phase 2
+				Structures: []interface{}{},
+				Zones:      []interface{}{},
+				Metadata:   &metadata,
+			}
+		}
+
+		chunks = append(chunks, chunk)
+	}
+
+	// Send chunk_data response
+	response := WebSocketMessage{
+		Type: "chunk_data",
+		ID:   msg.ID,
+	}
+
+	responseData := ChunkDataResponse{
+		Chunks: chunks,
+	}
+
+	responseDataBytes, err := json.Marshal(responseData)
+	if err != nil {
+		log.Printf("Failed to marshal chunk data response: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare chunk data", "InternalError")
+		return
+	}
+
+	response.Data = responseDataBytes
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal chunk_data response: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare response", "InternalError")
+		return
+	}
+
+	select {
+	case conn.send <- responseBytes:
+	default:
+		log.Printf("Failed to send chunk_data: channel full")
+	}
 }
 
 // handlePlayerMove handles player movement updates

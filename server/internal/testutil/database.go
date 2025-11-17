@@ -3,11 +3,70 @@ package testutil
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
+
+var (
+	envLoaded  bool
+	envLoadMux sync.Mutex
+)
+
+// loadEnv loads .env file if not already loaded
+// This ensures .env is loaded before reading environment variables
+// Tries multiple common locations: current directory, server/, and ../server/
+func loadEnv() {
+	envLoadMux.Lock()
+	defer envLoadMux.Unlock()
+
+	if envLoaded {
+		return
+	}
+
+	// Try multiple paths for .env file
+	// Get current working directory (tests may run from various locations)
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+
+	envPaths := []string{
+		".env",                                 // Current directory
+		filepath.Join(cwd, ".env"),             // Absolute path from current directory
+		"../../.env",                           // From server/internal/api or server/internal/...
+		"../../../server/.env",                 // From server/internal/api to server/
+		filepath.Join(cwd, "..", "..", ".env"), // From server/internal/... to server/
+		filepath.Join(cwd, "..", "..", "..", "server", ".env"), // From any subdirectory to server/
+		"server/.env",    // Relative from project root
+		"../server/.env", // Relative from subdirectories
+	}
+
+	var loaded bool
+	var lastErr error
+	for _, path := range envPaths {
+		if err := godotenv.Load(path); err == nil {
+			loaded = true
+			log.Printf("Loaded .env file from: %s", path)
+			break
+		} else {
+			lastErr = err
+		}
+	}
+
+	if !loaded {
+		// Log a warning if .env doesn't exist, but continue
+		// Environment variables can still be set directly
+		log.Printf("Warning: .env file not found for tests (tried: %v, last error: %v). Using environment variables or defaults.", envPaths, lastErr)
+	}
+
+	envLoaded = true
+}
 
 // TestDBConfig holds test database configuration
 type TestDBConfig struct {
@@ -20,7 +79,10 @@ type TestDBConfig struct {
 }
 
 // DefaultTestDBConfig returns a default test database configuration
+// Automatically loads .env file if present
 func DefaultTestDBConfig() TestDBConfig {
+	loadEnv() // Ensure .env is loaded before reading environment variables
+
 	return TestDBConfig{
 		Host:     getEnv("TEST_DB_HOST", "localhost"),
 		Port:     getIntEnv("TEST_DB_PORT", 5432),

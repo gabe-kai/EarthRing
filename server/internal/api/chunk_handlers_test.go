@@ -35,6 +35,9 @@ func TestGetChunkMetadata(t *testing.T) {
 		t.Fatalf("Failed to create chunks table: %v", err)
 	}
 
+	// Clean up any existing test chunk first
+	_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12345)
+
 	// Create test chunk
 	var chunkID int64
 	err = db.QueryRow(`
