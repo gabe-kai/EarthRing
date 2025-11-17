@@ -17,6 +17,7 @@
   - [Technology Stack Decision](#technology-stack-decision)
   - [Technology Stack](#technology-stack)
   - [Project Structure](#project-structure)
+  - [Utility Modules](#utility-modules-implemented)
   - [Rendering Pipeline](#rendering-pipeline)
   - [Performance Optimization](#performance-optimization)
 - [Graphics Abstraction Layer](#graphics-abstraction-layer)
@@ -380,6 +381,57 @@ web-client/
 └── package.json
 ```
 
+### Utility Modules ✅ **IMPLEMENTED**
+
+#### Coordinate Conversion Utilities
+
+**Location**: `client-web/src/utils/coordinates.js`
+
+Coordinate conversion utilities handle conversion between EarthRing's coordinate system and various rendering engine coordinate systems.
+
+**Available Functions**:
+
+1. **EarthRing ↔ Three.js Conversion**:
+   - `toThreeJS(earthringPoint, floorHeight?)` - Convert EarthRing to Three.js coordinates
+   - `fromThreeJS(threeJSPoint, floorHeight?)` - Convert Three.js to EarthRing coordinates
+
+2. **EarthRing ↔ Unreal Engine Conversion** (for future use):
+   - `toUnreal(earthringPoint, floorHeight?)` - Convert EarthRing to Unreal coordinates
+   - `fromUnreal(unrealPoint, floorHeight?)` - Convert Unreal to EarthRing coordinates
+
+3. **Ring Position Utilities**:
+   - `positionToChunkIndex(ringPosition)` - Convert ring position to chunk index (0-263,999)
+   - `chunkIndexToPositionRange(chunkIndex)` - Get position range for a chunk
+   - `wrapRingPosition(ringPosition)` - Wrap position around 264,000 km ring
+
+4. **Distance Calculations**:
+   - `distance(point1, point2)` - Calculate distance accounting for ring wrapping
+
+5. **Validation**:
+   - `validateEarthRingPoint(point)` - Validate EarthRing coordinate point
+
+**Usage Example**:
+```javascript
+import { toThreeJS, fromThreeJS, positionToChunkIndex } from './utils/coordinates.js';
+
+// Convert EarthRing coordinates to Three.js for rendering
+const earthringPos = { x: 1000, y: 100, z: 2 };
+const threeJSPos = toThreeJS(earthringPos);
+// Result: { x: 1000, y: 40, z: 100 }
+
+// Convert back from Three.js to EarthRing
+const backToEarthRing = fromThreeJS(threeJSPos);
+// Result: { x: 1000, y: 100, z: 2 }
+
+// Get chunk index from position
+const chunkIndex = positionToChunkIndex(1000);
+// Result: 1
+```
+
+**Default Floor Height**: 20 meters per level (configurable via optional parameter)
+
+**Testing**: Comprehensive test suite in `client-web/src/utils/coordinates.test.js` (30 tests, all passing)
+
 ### Rendering Pipeline
 
 1. **Initialization**
@@ -436,10 +488,16 @@ web-client/
 
 Abstract graphics operations to support multiple rendering backends (Three.js, Unreal, etc.). This layer also handles coordinate system conversion between EarthRing's convention (X=ring, Y=width, Z=floor) and each rendering engine's native convention.
 
-**Coordinate Conversion**: See [Map System Design](../docs/02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements. The graphics abstraction layer must convert coordinates when interfacing with rendering engines:
-- **Three.js**: Y-up, Z-forward (conversion required)
-- **Unreal Engine**: Z-up, Y-forward (conversion required)
-- Conversion happens transparently within the abstraction layer
+**Coordinate Conversion**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js`. See [Map System Design](../docs/02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements.
+
+The coordinate conversion utilities provide:
+- **EarthRing ↔ Three.js**: `toThreeJS()` and `fromThreeJS()` functions (Y-up, Z-forward)
+- **EarthRing ↔ Unreal Engine**: `toUnreal()` and `fromUnreal()` functions (Z-up, Y-forward) for future use
+- **Ring Position Utilities**: `positionToChunkIndex()`, `chunkIndexToPositionRange()`, `wrapRingPosition()`
+- **Distance Calculations**: `distance()` function accounting for ring wrapping
+- **Validation**: `validateEarthRingPoint()` for coordinate validation
+
+Conversion happens transparently within the abstraction layer. All game logic, database, and API use EarthRing convention (X=ring, Y=width, Z=floor). Conversion only occurs at the rendering layer boundary.
 
 ### Interface
 

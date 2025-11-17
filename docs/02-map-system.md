@@ -169,6 +169,8 @@ Different 3D rendering engines use different coordinate conventions, requiring c
 - Conversion functions should be centralized and well-documented
 - Consider using a coordinate transform matrix for efficiency
 
+**Implementation Status**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js`. See [Client Architecture](../docs/06-client-architecture.md#utility-modules) for details.
+
 **Important**: This conversion is **only** for rendering. All game logic, database queries, API responses, and internal calculations use the EarthRing convention (X=ring position, Y=width, Z=floor).
 
 ### Station System
