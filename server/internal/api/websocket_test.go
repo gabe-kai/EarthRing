@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -588,4 +589,241 @@ func TestWebSocketHub_RegisterUnregister(t *testing.T) {
 	if exists {
 		t.Error("Connection was not unregistered")
 	}
+}
+
+func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	// Create chunks table
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			PRIMARY KEY (floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	// Create mock procedural service
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/chunks/generate" {
+			t.Errorf("Expected path /api/v1/chunks/generate, got %s", r.URL.Path)
+		}
+
+		var req struct {
+			Floor      int    `json:"floor"`
+			ChunkIndex int    `json:"chunk_index"`
+			LODLevel   string `json:"lod_level"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("Failed to decode request: %v", err)
+		}
+
+		response := map[string]interface{}{
+			"success": true,
+			"chunk": map[string]interface{}{
+				"chunk_id":    fmt.Sprintf("%d_%d", req.Floor, req.ChunkIndex),
+				"floor":       req.Floor,
+				"chunk_index": req.ChunkIndex,
+				"width":       400.0,
+				"version":     1,
+			},
+			"geometry":   nil,
+			"structures": []interface{}{},
+			"zones":      []interface{}{},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer mockServer.Close()
+
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+		Procedural: config.ProceduralConfig{
+			BaseURL:    mockServer.URL,
+			Timeout:    5 * time.Second,
+			RetryCount: 0,
+		},
+	}
+
+	handlers := NewWebSocketHandlers(db, cfg)
+	go handlers.GetHub().Run()
+	defer func() {
+		time.Sleep(10 * time.Millisecond)
+	}()
+
+	// Create a mock connection
+	conn := &WebSocketConnection{
+		userID:   1,
+		username: "testuser",
+		role:     "player",
+		version:  ProtocolVersion1,
+		send:     make(chan []byte, 256),
+		hub:      handlers.GetHub(),
+	}
+
+	// Register connection
+	handlers.GetHub().register <- conn
+	time.Sleep(10 * time.Millisecond)
+
+	tests := []struct {
+		name           string
+		message        *WebSocketMessage
+		expectError    bool
+		errorCode      string
+		expectedChunks int
+	}{
+		{
+			name: "valid chunk request",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-1",
+				Data: json.RawMessage(`{"chunks":["0_12345","0_12346"]}`),
+			},
+			expectError:    false,
+			expectedChunks: 2,
+		},
+		{
+			name: "chunk request with LOD level",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-2",
+				Data: json.RawMessage(`{"chunks":["0_100"],"lod_level":"high"}`),
+			},
+			expectError:    false,
+			expectedChunks: 1,
+		},
+		{
+			name: "empty chunks array",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-3",
+				Data: json.RawMessage(`{"chunks":[]}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "too many chunks",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-4",
+				Data: json.RawMessage(`{"chunks":["0_1","0_2","0_3","0_4","0_5","0_6","0_7","0_8","0_9","0_10","0_11"]}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "invalid LOD level",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-5",
+				Data: json.RawMessage(`{"chunks":["0_100"],"lod_level":"invalid"}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "invalid chunk request format",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-6",
+				Data: json.RawMessage(`{"invalid":"data"}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "invalid chunk ID format",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-7",
+				Data: json.RawMessage(`{"chunks":["invalid"]}`),
+			},
+			expectError:    false, // Invalid chunks are skipped, not an error
+			expectedChunks: 0,
+		},
+		{
+			name: "chunk index out of range",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-8",
+				Data: json.RawMessage(`{"chunks":["0_300000"]}`),
+			},
+			expectError:    false, // Out of range chunks are skipped
+			expectedChunks: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear send channel
+			for len(conn.send) > 0 {
+				<-conn.send
+			}
+
+			handlers.handleChunkRequest(conn, tt.message)
+
+			// Wait for response
+			select {
+			case responseBytes := <-conn.send:
+				var response WebSocketMessage
+				if err := json.Unmarshal(responseBytes, &response); err != nil {
+					t.Fatalf("Failed to unmarshal response: %v", err)
+				}
+
+				if tt.expectError {
+					// Should receive error message
+					var errorMsg WebSocketError
+					if err := json.Unmarshal(responseBytes, &errorMsg); err != nil {
+						t.Fatalf("Failed to unmarshal error: %v", err)
+					}
+					if errorMsg.Type != "error" {
+						t.Errorf("Expected error message, got type %s", response.Type)
+					}
+					if errorMsg.Code != tt.errorCode {
+						t.Errorf("Expected error code %s, got %s", tt.errorCode, errorMsg.Code)
+					}
+					if errorMsg.ID != tt.message.ID {
+						t.Errorf("Expected error ID %s, got %s", tt.message.ID, errorMsg.ID)
+					}
+				} else {
+					// Should receive chunk_data message
+					if response.Type != "chunk_data" {
+						t.Errorf("Expected chunk_data message, got type %s", response.Type)
+					}
+					if response.ID != tt.message.ID {
+						t.Errorf("Expected response ID %s, got %s", tt.message.ID, response.ID)
+					}
+
+					var chunkData ChunkDataResponse
+					if err := json.Unmarshal(response.Data, &chunkData); err != nil {
+						t.Fatalf("Failed to unmarshal chunk data: %v", err)
+					}
+
+					if len(chunkData.Chunks) != tt.expectedChunks {
+						t.Errorf("Expected %d chunks, got %d", tt.expectedChunks, len(chunkData.Chunks))
+					}
+				}
+			case <-time.After(1 * time.Second):
+				if !tt.expectError {
+					t.Error("Timeout waiting for response")
+				}
+			}
+		})
+	}
+
+	// Unregister connection
+	handlers.GetHub().unregister <- conn
+	time.Sleep(10 * time.Millisecond)
 }

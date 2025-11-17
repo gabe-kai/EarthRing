@@ -67,6 +67,8 @@ func TestPlayer(t *testing.T) {
 
 ## Environment Variables
 
+Test utilities automatically load `.env` files from the current working directory (typically the `server/` directory). Environment variables set directly take precedence over `.env` file values.
+
 Test utilities use the following environment variables (with defaults):
 
 - `TEST_DB_HOST` (default: `localhost`)
@@ -74,6 +76,23 @@ Test utilities use the following environment variables (with defaults):
 - `TEST_DB_USER` (default: `postgres`)
 - `TEST_DB_PASSWORD` (default: `postgres`)
 - `TEST_DB_NAME` (default: `earthring_test`)
+- `TEST_DB_SSLMODE` (default: `disable`)
+
+### Using .env Files
+
+Create a `.env` file in the `server/` directory with your test database credentials:
+
+```bash
+# server/.env
+TEST_DB_PASSWORD=your_postgres_password
+TEST_DB_USER=postgres
+TEST_DB_HOST=localhost
+TEST_DB_PORT=5432
+TEST_DB_NAME=earthring_test
+TEST_DB_SSLMODE=disable
+```
+
+The `.env` file is automatically loaded when `DefaultTestDBConfig()` is called. If the `.env` file doesn't exist, the utilities will fall back to environment variables or defaults.
 
 ## Best Practices
 
