@@ -3,78 +3,140 @@
  * Main entry point for the Three.js-based web client
  */
 
-import * as THREE from 'three';
 import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
-import { setCameraPositionFromEarthRing, createMeshAtEarthRingPosition } from './utils/rendering.js';
+import * as THREE from 'three';
+import { SceneManager } from './rendering/scene-manager.js';
+import { CameraController } from './input/camera-controller.js';
+import { GameStateManager } from './state/game-state.js';
+import { ChunkManager } from './chunks/chunk-manager.js';
+import { wsClient } from './network/websocket-client.js';
+import { createMeshAtEarthRingPosition } from './utils/rendering.js';
 
-// Initialize scene
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  10000
+// Initialize game state manager
+const gameStateManager = new GameStateManager();
+
+// Initialize scene manager
+const sceneManager = new SceneManager();
+
+// Initialize camera controller
+const cameraController = new CameraController(
+  sceneManager.getCamera(),
+  sceneManager.getRenderer(),
+  sceneManager
 );
-const renderer = new THREE.WebGLRenderer({ antialias: true });
 
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
+// Initialize chunk manager
+const chunkManager = new ChunkManager(sceneManager, gameStateManager);
 
-// Basic test: Add a cube at EarthRing position (0, 0, 0) = ring start, center width, floor 0
-// Using rendering utility that handles coordinate conversion
+// Add a test cube at EarthRing position (0, 0, 0) for demonstration
+const scene = sceneManager.getScene();
+
 const earthringPosition = { x: 0, y: 0, z: 0 };
-const geometry = new THREE.BoxGeometry(1, 1, 1);
+const geometry = new THREE.BoxGeometry(2, 2, 2); // Make cube bigger (2x2x2)
 const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 const cube = createMeshAtEarthRingPosition(geometry, material, earthringPosition);
 scene.add(cube);
 
-// Position camera using EarthRing coordinates (1000m along ring, 0 width, floor 0)
-// Using rendering utility that handles coordinate conversion
-const cameraEarthRingPos = { x: 1000, y: 0, z: 0 };
-setCameraPositionFromEarthRing(camera, cameraEarthRingPos);
-// Offset camera slightly for better view
-camera.position.y += 10;
-camera.position.z += 10;
-camera.lookAt(cube.position.x, cube.position.y, cube.position.z);
+// Set camera to look at the cube and set OrbitControls target
+const cubeThreeJSPos = cube.position;
+cameraController.setTargetFromEarthRing(earthringPosition);
+const camera = sceneManager.getCamera();
 
-/**
- * Animation loop that continuously renders the scene.
- * Updates cube rotation and renders each frame using requestAnimationFrame.
- */
-function animate() {
-  requestAnimationFrame(animate);
+// Position camera closer to cube for better view
+// EarthRing position: 5m along ring, 0 width, floor 0
+const cameraEarthRingPos = { x: 5, y: 0, z: 0 };
+cameraController.setPositionFromEarthRing(cameraEarthRingPos);
+// Adjust camera to be above and behind the cube
+camera.position.y += 5;
+camera.position.z += 5;
+camera.lookAt(cubeThreeJSPos.x, cubeThreeJSPos.y, cubeThreeJSPos.z);
+
+// Add grid helper for better visibility
+const gridHelper = new THREE.GridHelper(100, 10, 0x444444, 0x222222);
+scene.add(gridHelper);
+
+// Add axes helper for reference
+const axesHelper = new THREE.AxesHelper(10);
+scene.add(axesHelper);
+
+// Set up render loop to update camera controls
+sceneManager.onRender(() => {
+  cameraController.update();
+  
+  // Rotate test cube
   cube.rotation.x += 0.01;
   cube.rotation.y += 0.01;
-  renderer.render(scene, camera);
-}
+});
 
-animate();
+// Start rendering loop
+sceneManager.start();
 
 // Authentication initialization
 if (isAuthenticated()) {
   showUserInfo();
   console.log('User is authenticated');
+  
+  // Update game state
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    gameStateManager.updateConnectionState('api', { authenticated: true });
+  }
 } else {
   showAuthUI();
   console.log('Showing authentication UI');
 }
 
 // Listen for authentication events
-window.addEventListener('auth:login', () => {
+window.addEventListener('auth:login', async () => {
   console.log('User logged in');
   showUserInfo();
+  gameStateManager.updateConnectionState('api', { authenticated: true });
+  
+  // Connect WebSocket after authentication
+  try {
+    await wsClient.connect();
+    gameStateManager.updateConnectionState('websocket', { connected: true });
+    console.log('WebSocket connected');
+  } catch (error) {
+    console.error('Failed to connect WebSocket:', error);
+    gameStateManager.updateConnectionState('websocket', { 
+      connected: false, 
+      lastError: error.message 
+    });
+  }
 });
 
-window.addEventListener('auth:register', () => {
+window.addEventListener('auth:register', async () => {
   console.log('User registered');
   showUserInfo();
+  gameStateManager.updateConnectionState('api', { authenticated: true });
+  
+  // Connect WebSocket after registration
+  try {
+    await wsClient.connect();
+    gameStateManager.updateConnectionState('websocket', { connected: true });
+    console.log('WebSocket connected');
+  } catch (error) {
+    console.error('Failed to connect WebSocket:', error);
+    gameStateManager.updateConnectionState('websocket', { 
+      connected: false, 
+      lastError: error.message 
+    });
+  }
 });
 
 window.addEventListener('auth:logout', () => {
   console.log('User logged out');
+  wsClient.disconnect();
+  gameStateManager.reset();
+  gameStateManager.updateConnectionState('websocket', { 
+    connected: false, 
+    connecting: false 
+  });
+  gameStateManager.updateConnectionState('api', { authenticated: false });
 });
 
 // Listen for panel show events
@@ -86,5 +148,39 @@ window.addEventListener('show:chunk-panel', () => {
   showChunkPanel();
 });
 
-// Client initialization complete
+// WebSocket connection event handlers
+wsClient.onOpen(() => {
+  console.log('WebSocket opened');
+  gameStateManager.updateConnectionState('websocket', { 
+    connected: true, 
+    connecting: false 
+  });
+});
 
+wsClient.onClose(() => {
+  console.log('WebSocket closed');
+  gameStateManager.updateConnectionState('websocket', { 
+    connected: false, 
+    connecting: false 
+  });
+});
+
+wsClient.onError((error) => {
+  console.error('WebSocket error:', error);
+  gameStateManager.updateConnectionState('websocket', { 
+    connected: false, 
+    lastError: error?.message || 'Unknown error' 
+  });
+});
+
+// Export managers for debugging/development
+window.earthring = {
+  sceneManager,
+  cameraController,
+  gameStateManager,
+  chunkManager,
+  wsClient,
+};
+
+// Client initialization complete
+console.log('EarthRing client initialized');
