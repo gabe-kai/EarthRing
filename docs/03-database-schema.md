@@ -291,6 +291,13 @@ Stores actual chunk geometry and content. Separated from metadata for performanc
 
 **Decision**: Use PostGIS geometry types for chunk storage to enable efficient spatial queries and operations.
 
+**Implementation Status**: ✅ **IMPLEMENTED**
+- Storage layer (`server/internal/database/chunks.go`) provides full CRUD operations
+- Chunks automatically stored after generation via procedural service
+- Geometry stored as PostGIS POLYGON for spatial queries
+- Client-friendly geometry format stored in `terrain_data` JSONB field
+- Transaction-safe operations ensure data consistency
+
 ```sql
 CREATE TABLE chunk_data (
     chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,

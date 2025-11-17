@@ -342,7 +342,7 @@ Response: {
 
 ### Chunk Management
 
-**Implementation Status:** ✅ **PARTIALLY IMPLEMENTED** (metadata endpoint and WebSocket chunk requests implemented, REST chunk request endpoint pending)
+**Implementation Status:** ✅ **MOSTLY IMPLEMENTED** (metadata endpoint, WebSocket chunk requests with database persistence implemented, REST chunk request endpoint pending)
 
 #### Get Chunk Metadata
 ```
@@ -365,6 +365,14 @@ Response: {
 #### Request Chunks via WebSocket ✅ **IMPLEMENTED**
 
 Chunk requests are implemented via WebSocket using the `chunk_request` message type (see WebSocket Protocol section above). This provides real-time bidirectional communication for chunk loading.
+
+**Database Persistence**: ✅ **IMPLEMENTED**
+- Chunks are automatically stored in database after generation
+- Chunks are loaded from database when they exist (avoids regeneration)
+- Storage layer (`server/internal/database/chunks.go`) handles persistence
+- PostGIS geometry stored for spatial queries
+- JSONB terrain_data stores client-friendly geometry format
+- Transaction-safe operations ensure data consistency
 
 #### Request Chunks via REST (To Be Implemented)
 ```
@@ -391,11 +399,12 @@ Response: {
 
 ### Procedural Generation Service API
 
-**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with empty chunk generation)
+**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with ring floor geometry generation)
 
 The Python procedural generation service exposes a REST API for chunk generation. This is an internal service API called by the Go server, not directly exposed to clients.
 
-**Base URL**: `http://localhost:8081` (configurable via `PROCEDURAL_BASE_URL`)
+**Base URL**: `http://127.0.0.1:8081` (default, configurable via `PROCEDURAL_BASE_URL`)
+**Note**: Default uses `127.0.0.1` instead of `localhost` for better Windows compatibility (avoids IPv6 resolution issues)
 
 #### Health Check
 ```
@@ -428,14 +437,21 @@ Response: {
     "width": 400.0,
     "version": 1
   },
-  "geometry": null,        // Empty for Phase 1
+  "geometry": {
+    "type": "ring_floor",
+    "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+    "faces": [[v1, v2, v3], ...],
+    "normals": [[nx1, ny1, nz1], ...],
+    "width": 400.0,
+    "length": 1000.0
+  },
   "structures": [],        // Empty for Phase 1
   "zones": [],            // Empty for Phase 1
-  "message": "Empty chunk generated (full generation pending Phase 2)"
+  "message": "Chunk generated with basic ring floor geometry (full generation with buildings pending Phase 2)"
 }
 ```
 
-**Note**: For Phase 1, this endpoint returns empty chunks with metadata only. Full generation (buildings, zones, geometry) will be implemented in Phase 2.
+**Note**: For Phase 1, this endpoint returns chunks with basic ring floor geometry. Full generation (buildings, zones, structures) will be implemented in Phase 2.
 
 #### Get Chunk Seed
 ```
@@ -744,14 +760,21 @@ All WebSocket messages use JSON:
        "chunks": [
          {
            "id": "0_12345",
-           "geometry": null, // Empty for Phase 1, will contain geometry in Phase 2
+           "geometry": {
+             "type": "ring_floor",
+             "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+             "faces": [[v1, v2, v3], ...],
+             "normals": [[nx1, ny1, nz1], ...],
+             "width": 400.0,
+             "length": 1000.0
+           },
            "structures": [], // Empty for Phase 1
            "zones": [], // Empty for Phase 1
            "metadata": {
              "id": "0_12345",
              "floor": 0,
              "chunk_index": 12345,
-             "version": 1,
+             "version": 2,
              "last_modified": "2024-01-01T00:00:00Z",
              "is_dirty": false
            }
@@ -761,8 +784,9 @@ All WebSocket messages use JSON:
    }
    ```
    - Response to `chunk_request` messages
-   - Returns empty chunks with metadata for Phase 1
-   - Geometry, structures, and zones will be populated in Phase 2
+   - Returns chunks with basic ring floor geometry for Phase 1
+   - Ring floor geometry is visible in client (gray rectangular planes)
+   - Structures and zones will be populated in Phase 2
 
 2. **chunk_updated**
    ```json

@@ -13,6 +13,7 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
 	"github.com/gorilla/websocket"
 )
@@ -140,6 +141,7 @@ type WebSocketHandlers struct {
 	config           *config.Config
 	jwtService       *auth.JWTService
 	proceduralClient *procedural.ProceduralClient
+	chunkStorage     *database.ChunkStorage
 	upgrader         websocket.Upgrader
 }
 
@@ -162,6 +164,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 		config:           cfg,
 		jwtService:       jwtService,
 		proceduralClient: proceduralClient,
+		chunkStorage:     database.NewChunkStorage(db),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -520,23 +523,28 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 			continue
 		}
 
-		// Check if chunk exists in database
-		var metadata ChunkMetadata
-		query := `
-			SELECT floor, chunk_index, version, last_modified, is_dirty
-			FROM chunks
-			WHERE floor = $1 AND chunk_index = $2
-		`
-		err = h.db.QueryRow(query, floor, chunkIndex).Scan(
-			&metadata.Floor,
-			&metadata.ChunkIndex,
-			&metadata.Version,
-			&metadata.LastModified,
-			&metadata.IsDirty,
-		)
-
+		// Check if chunk exists in database using storage layer
+		storedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
 		var chunk ChunkData
-		if err == sql.ErrNoRows {
+
+		if err != nil {
+			log.Printf("Error querying chunk %s: %v", chunkID, err)
+			// Return empty chunk on database error
+			chunk = ChunkData{
+				ID:         chunkID,
+				Geometry:   nil,
+				Structures: []interface{}{},
+				Zones:      []interface{}{},
+				Metadata: &ChunkMetadata{
+					ID:           chunkID,
+					Floor:        floor,
+					ChunkIndex:   chunkIndex,
+					Version:      1,
+					LastModified: time.Time{},
+					IsDirty:      false,
+				},
+			}
+		} else if storedMetadata == nil {
 			// Chunk doesn't exist - generate it using procedural service
 			// Pass nil for world seed (procedural service will use default)
 			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
@@ -558,6 +566,12 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 					},
 				}
 			} else {
+				// Store the generated chunk in the database
+				if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
+					log.Printf("Failed to store chunk %s: %v", chunkID, err)
+					// Continue anyway - we'll return the chunk data even if storage fails
+				}
+
 				// Convert procedural service response to chunk data
 				chunk = ChunkData{
 					ID:         chunkID,
@@ -569,38 +583,35 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 						Floor:        floor,
 						ChunkIndex:   chunkIndex,
 						Version:      genResponse.Chunk.Version,
-						LastModified: time.Time{}, // Will be set when chunk is saved
+						LastModified: time.Now(), // Use current time since chunk was just generated
 						IsDirty:      false,
 					},
 				}
 			}
-		} else if err != nil {
-			log.Printf("Error querying chunk %s: %v", chunkID, err)
-			// Return empty chunk on database error
-			chunk = ChunkData{
-				ID:         chunkID,
-				Geometry:   nil,
-				Structures: []interface{}{},
-				Zones:      []interface{}{},
-				Metadata: &ChunkMetadata{
-					ID:           chunkID,
-					Floor:        floor,
-					ChunkIndex:   chunkIndex,
-					Version:      1,
-					LastModified: time.Time{},
-					IsDirty:      false,
-				},
-			}
 		} else {
 			// Chunk exists in database - load it
-			// For Phase 1, we'll return empty chunks even if they exist in DB
-			// In Phase 2, we'll load actual chunk data from the database
-			metadata.ID = chunkID
+			// Load geometry from terrain_data JSONB field
+			geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
+			if err != nil {
+				log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
+				// Continue with nil geometry - chunk metadata is still valid
+			}
+
+			// Convert stored metadata to API format
+			metadata := ChunkMetadata{
+				ID:           chunkID,
+				Floor:        storedMetadata.Floor,
+				ChunkIndex:   storedMetadata.ChunkIndex,
+				Version:      storedMetadata.Version,
+				LastModified: storedMetadata.LastModified,
+				IsDirty:      storedMetadata.IsDirty,
+			}
+
 			chunk = ChunkData{
 				ID:         chunkID,
-				Geometry:   nil, // Will be loaded from database in Phase 2
-				Structures: []interface{}{},
-				Zones:      []interface{}{},
+				Geometry:   geometry,        // Loaded from database
+				Structures: []interface{}{}, // Empty for Phase 1
+				Zones:      []interface{}{}, // Empty for Phase 1
 				Metadata:   &metadata,
 			}
 		}
