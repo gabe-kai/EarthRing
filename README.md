@@ -231,6 +231,14 @@ EarthRing/
 │   │   ├── api/                       # API service modules (player, chunk)
 │   │   ├── auth/                      # Authentication UI and service
 │   │   ├── network/                   # WebSocket client and network utilities
+│   │   ├── rendering/                 # Rendering engine
+│   │   │   └── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
+│   │   ├── input/                     # Input handling
+│   │   │   └── camera-controller.js   # Camera controller (OrbitControls integration)
+│   │   ├── state/                     # Game state management
+│   │   │   └── game-state.js          # Game state manager (chunks, player, connection)
+│   │   ├── chunks/                    # Chunk management
+│   │   │   └── chunk-manager.js       # Chunk manager (loading, caching, rendering)
 │   │   ├── ui/                        # UI components (player panel, chunk panel)
 │   │   ├── utils/                     # Utility modules
 │   │   │   ├── coordinates.js         # Coordinate conversion utilities (EarthRing ↔ Three.js ↔ Unreal)
