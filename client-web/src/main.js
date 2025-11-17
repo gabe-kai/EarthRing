@@ -8,6 +8,7 @@ import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
+import { setCameraPositionFromEarthRing, createMeshAtEarthRingPosition } from './utils/rendering.js';
 
 // Initialize scene
 const scene = new THREE.Scene();
@@ -22,13 +23,22 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// Basic test: Add a cube
+// Basic test: Add a cube at EarthRing position (0, 0, 0) = ring start, center width, floor 0
+// Using rendering utility that handles coordinate conversion
+const earthringPosition = { x: 0, y: 0, z: 0 };
 const geometry = new THREE.BoxGeometry(1, 1, 1);
 const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-const cube = new THREE.Mesh(geometry, material);
+const cube = createMeshAtEarthRingPosition(geometry, material, earthringPosition);
 scene.add(cube);
 
-camera.position.z = 5;
+// Position camera using EarthRing coordinates (1000m along ring, 0 width, floor 0)
+// Using rendering utility that handles coordinate conversion
+const cameraEarthRingPos = { x: 1000, y: 0, z: 0 };
+setCameraPositionFromEarthRing(camera, cameraEarthRingPos);
+// Offset camera slightly for better view
+camera.position.y += 10;
+camera.position.z += 10;
+camera.lookAt(cube.position.x, cube.position.y, cube.position.z);
 
 /**
  * Animation loop that continuously renders the scene.

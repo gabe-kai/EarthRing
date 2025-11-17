@@ -4,6 +4,7 @@
  */
 
 import { getChunkMetadata } from '../api/chunk-service.js';
+import { positionToChunkIndex, chunkIndexToPositionRange } from '../utils/coordinates.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 
 let chunkPanel = null;
@@ -46,6 +47,19 @@ export function showChunkPanel() {
             <button type="submit" class="action-button">Get Metadata</button>
           </form>
           <div id="chunk-result" class="result-display"></div>
+        </div>
+        
+        <div class="chunk-section">
+          <h3>Position to Chunk</h3>
+          <p class="help-text">Convert ring position (meters) to chunk index</p>
+          <form id="position-to-chunk-form" class="chunk-form">
+            <div class="form-group">
+              <label>Ring Position (meters, 0-264000000)</label>
+              <input type="number" id="position-input" value="12345000" min="0" max="264000000" step="1000" required />
+            </div>
+            <button type="submit" class="action-button">Get Chunk Index</button>
+          </form>
+          <div id="position-to-chunk-result" class="result-display"></div>
         </div>
         
         <div class="chunk-section">
@@ -294,6 +308,48 @@ async function handleChunkRequest() {
 }
 
 /**
+ * Handle position to chunk index conversion
+ */
+function handlePositionToChunk() {
+  const resultDisplay = document.getElementById('position-to-chunk-result');
+  const submitButton = document.querySelector('#position-to-chunk-form button[type="submit"]');
+  
+  const positionInput = document.getElementById('position-input');
+  const ringPosition = parseFloat(positionInput.value);
+  
+  if (isNaN(ringPosition) || ringPosition < 0 || ringPosition > 264000000) {
+    resultDisplay.textContent = 'Error: Invalid position. Must be between 0 and 264,000,000 meters.';
+    resultDisplay.className = 'result-display show error';
+    return;
+  }
+  
+  submitButton.disabled = true;
+  
+  try {
+    const chunkIndex = positionToChunkIndex(ringPosition);
+    const positionRange = chunkIndexToPositionRange(chunkIndex);
+    
+    const result = {
+      ringPosition: ringPosition,
+      chunkIndex: chunkIndex,
+      positionRange: {
+        min: positionRange.min,
+        max: positionRange.max,
+      },
+      chunkID: `0_${chunkIndex}`, // Default to floor 0 for display
+    };
+    
+    resultDisplay.textContent = JSON.stringify(result, null, 2);
+    resultDisplay.className = 'result-display show success';
+  } catch (error) {
+    resultDisplay.textContent = `Error: ${error.message}`;
+    resultDisplay.className = 'result-display show error';
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+/**
  * Set up event listeners for chunk panel
  */
 function setupChunkPanelListeners() {
@@ -306,6 +362,12 @@ function setupChunkPanelListeners() {
   document.getElementById('chunk-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     await handleChunkRequest();
+  });
+
+  // Position to chunk form
+  document.getElementById('position-to-chunk-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    handlePositionToChunk();
   });
 
   // Quick example buttons

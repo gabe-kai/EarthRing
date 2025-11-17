@@ -432,6 +432,42 @@ const chunkIndex = positionToChunkIndex(1000);
 
 **Testing**: Comprehensive test suite in `client-web/src/utils/coordinates.test.js` (30 tests, all passing)
 
+#### Rendering Utilities ✅ **IMPLEMENTED**
+
+**Location**: `client-web/src/utils/rendering.js`
+
+Rendering utilities provide helper functions for Three.js operations that automatically handle coordinate conversion between EarthRing and Three.js coordinate systems.
+
+**Available Functions**:
+
+1. **Object Positioning**:
+   - `setObjectPositionFromEarthRing(object, earthringPosition, floorHeight?)` - Position Three.js object from EarthRing coordinates
+   - `getEarthRingPositionFromObject(object, floorHeight?)` - Get EarthRing position from Three.js object
+
+2. **Camera Positioning**:
+   - `setCameraPositionFromEarthRing(camera, earthringPosition, floorHeight?)` - Position camera from EarthRing coordinates
+   - `getEarthRingPositionFromCamera(camera, floorHeight?)` - Get EarthRing position from camera
+
+3. **Mesh Creation**:
+   - `createMeshAtEarthRingPosition(geometry, material, earthringPosition, floorHeight?)` - Create Three.js mesh at EarthRing position
+
+**Usage Example**:
+```javascript
+import { setCameraPositionFromEarthRing, createMeshAtEarthRingPosition } from './utils/rendering.js';
+import * as THREE from 'three';
+
+// Create a mesh at EarthRing position (0, 0, 0)
+const geometry = new THREE.BoxGeometry(1, 1, 1);
+const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+const mesh = createMeshAtEarthRingPosition(geometry, material, { x: 0, y: 0, z: 0 });
+scene.add(mesh);
+
+// Position camera using EarthRing coordinates
+setCameraPositionFromEarthRing(camera, { x: 1000, y: 0, z: 0 });
+```
+
+**Integration Status**: ✅ **IMPLEMENTED** - Rendering utilities are integrated into `main.js` for camera and object positioning. Chunk UI includes position-to-chunk conversion tools.
+
 ### Rendering Pipeline
 
 1. **Initialization**
@@ -488,7 +524,7 @@ const chunkIndex = positionToChunkIndex(1000);
 
 Abstract graphics operations to support multiple rendering backends (Three.js, Unreal, etc.). This layer also handles coordinate system conversion between EarthRing's convention (X=ring, Y=width, Z=floor) and each rendering engine's native convention.
 
-**Coordinate Conversion**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js`. See [Map System Design](../docs/02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements.
+**Coordinate Conversion**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js` and rendering utilities in `client-web/src/utils/rendering.js`. See [Map System Design](../docs/02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements.
 
 The coordinate conversion utilities provide:
 - **EarthRing ↔ Three.js**: `toThreeJS()` and `fromThreeJS()` functions (Y-up, Z-forward)
@@ -496,6 +532,13 @@ The coordinate conversion utilities provide:
 - **Ring Position Utilities**: `positionToChunkIndex()`, `chunkIndexToPositionRange()`, `wrapRingPosition()`
 - **Distance Calculations**: `distance()` function accounting for ring wrapping
 - **Validation**: `validateEarthRingPoint()` for coordinate validation
+
+**Rendering Utilities** provide helper functions that automatically handle coordinate conversion:
+- `setObjectPositionFromEarthRing()`, `setCameraPositionFromEarthRing()` - Position objects/camera from EarthRing coordinates
+- `createMeshAtEarthRingPosition()` - Create meshes at EarthRing positions
+- `getEarthRingPositionFromObject()`, `getEarthRingPositionFromCamera()` - Get EarthRing positions from Three.js objects
+
+**Integration Status**: ✅ **IMPLEMENTED** - Coordinate conversion is integrated into the main client code (`main.js`) for camera and object positioning. Chunk UI includes position-to-chunk conversion tools.
 
 Conversion happens transparently within the abstraction layer. All game logic, database, and API use EarthRing convention (X=ring, Y=width, Z=floor). Conversion only occurs at the rendering layer boundary.
 
