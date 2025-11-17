@@ -164,7 +164,7 @@ Response: {
 **Rate Limit**: 500 requests per minute per user
 **Note**: Users can only view their own profile (403 Forbidden if requesting another player's profile)
 
-#### Update Player Position
+#### Update Player Position ✅ **IMPLEMENTED**
 ```
 PUT /api/players/{player_id}/position
 Headers: Authorization: Bearer <access_token>
@@ -180,9 +180,16 @@ Response: {
 ```
 **Rate Limit**: 500 requests per minute per user
 **Validation**:
-- X position: 0 to 264,000,000 meters (ring circumference)
+- X position: Automatically wrapped to valid range [0, 264,000,000) meters
+  - Positions beyond circumference wrap around (e.g., 264,000,100 → 100)
+  - Negative positions wrap to end of ring (e.g., -1000 → 263,999,000)
 - Y position: Any valid float (ring width)
 - Floor: -2 to 15
+
+**Position Wrapping**: ✅ **IMPLEMENTED**
+- All positions are automatically wrapped to ensure seamless ring traversal
+- Wrapping handled by `ringmap.ValidatePosition()` utility
+
 **Note**: Users can only update their own position (403 Forbidden if updating another player's position)
 
 ### Zone Management
@@ -359,7 +366,11 @@ Response: {
 ```
 **Rate Limit**: 100 requests per minute per user
 **chunk_id Format**: `"floor_chunk_index"` (e.g., `"0_12345"` for floor 0, chunk index 12345)
-**chunk_index Range**: 0 to 263,999
+**chunk_index Range**: 0 to 263,999 (automatically wrapped if out of range)
+**Wrapping**: Chunk indices are automatically wrapped to valid range [0, 264,000)
+  - Example: `0_264000` wraps to `0_0`
+  - Example: `0_-1` wraps to `0_263999`
+  - This ensures seamless ring traversal (chunk 0 connects to chunk 263,999)
 **Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated)
 
 #### Request Chunks via WebSocket ✅ **IMPLEMENTED**
@@ -660,10 +671,11 @@ All WebSocket messages use JSON:
    - Generates chunks via procedural service if they don't exist in database
    - Server responds with `chunk_data` message
 
-2. **player_move**
+2. **player_move** ✅ **IMPLEMENTED**
    ```json
    {
      "type": "player_move",
+     "id": "req_124",
      "data": {
        "position": {"x": 12345, "y": 0},
        "floor": 0,
@@ -671,6 +683,12 @@ All WebSocket messages use JSON:
      }
    }
    ```
+   - Updates player's position via WebSocket
+   - Position X coordinate is automatically wrapped to valid range [0, 264,000,000)
+   - Floor must be between -2 and 15
+   - Rotation is optional (in degrees)
+   - Server responds with `player_move_ack` message
+   - Position is persisted to database
 
 3. **zone_create**
    ```json
@@ -830,15 +848,20 @@ All WebSocket messages use JSON:
    }
    ```
 
-5. **player_move_ack** (Acknowledgment)
+5. **player_move_ack** (Acknowledgment) ✅ **IMPLEMENTED**
    ```json
    {
      "type": "player_move_ack",
-     "id": "req_124" // Matches player_move request ID
+     "id": "req_124", // Matches player_move request ID
+     "data": {
+       "success": true
+     }
    }
    ```
    - Acknowledgment response to `player_move` messages
-   - Currently returns immediately (full implementation pending Phase 2)
+   - Sent after position is validated, wrapped, and updated in database
+   - Position wrapping ensures seamless ring traversal
+   - If position update fails, an `error` message is sent instead
 
 6. **player_moved** (Broadcast)
    ```json

@@ -15,6 +15,7 @@ import (
 	"github.com/earthring/server/internal/config"
 	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
+	"github.com/earthring/server/internal/ringmap"
 	"github.com/gorilla/websocket"
 )
 
@@ -517,11 +518,15 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 			continue
 		}
 
-		// Validate chunk_index range (0 to 263,999)
-		if chunkIndex < 0 || chunkIndex > 263999 {
-			log.Printf("Chunk index out of range: %d", chunkIndex)
+		// Wrap chunk index to valid range (handles wrapping around ring)
+		wrappedChunkIndex, err := ringmap.ValidateChunkIndex(chunkIndex)
+		if err != nil {
+			log.Printf("Chunk index %d cannot be wrapped: %v", chunkIndex, err)
 			continue
 		}
+
+		// Use wrapped chunk index for all operations
+		chunkIndex = wrappedChunkIndex
 
 		// Check if chunk exists in database using storage layer
 		storedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
@@ -668,13 +673,58 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 	}
 }
 
+// PlayerMoveData represents the data payload for a player_move message
+type PlayerMoveData struct {
+	Position Position `json:"position"`           // Ring position (X, Y)
+	Floor    int      `json:"floor"`              // Floor level
+	Rotation float64  `json:"rotation,omitempty"` // Optional rotation in degrees
+}
+
 // handlePlayerMove handles player movement updates
 func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *WebSocketMessage) {
-	// TODO: Implement player movement handling
-	// For now, just acknowledge receipt
+	// Parse request data
+	var moveData PlayerMoveData
+	if err := json.Unmarshal(msg.Data, &moveData); err != nil {
+		conn.sendError(msg.ID, "Invalid player_move format", "InvalidMessageFormat")
+		return
+	}
+
+	// Validate and wrap position
+	// X position wraps around the ring (0 to 264,000,000 meters)
+	wrappedX := ringmap.ValidatePosition(int64(moveData.Position.X))
+	moveData.Position.X = float64(wrappedX)
+
+	// Validate floor range (-2 to 15 based on schema)
+	if moveData.Floor < -2 || moveData.Floor > 15 {
+		conn.sendError(msg.ID, "Invalid floor (must be -2 to 15)", "InvalidMessageFormat")
+		return
+	}
+
+	// Update player position in database
+	query := `
+		UPDATE players
+		SET current_position = POINT($1, $2),
+		    current_floor = $3
+		WHERE id = $4
+		RETURNING id
+	`
+	var updatedID int64
+	err := h.db.QueryRow(query, moveData.Position.X, moveData.Position.Y, moveData.Floor, conn.userID).Scan(&updatedID)
+	if err == sql.ErrNoRows {
+		conn.sendError(msg.ID, "Player not found", "NotFound")
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to update player position: %v", err)
+		conn.sendError(msg.ID, "Failed to update position", "InternalError")
+		return
+	}
+
+	// Send acknowledgment
 	response := WebSocketMessage{
 		Type: "player_move_ack",
 		ID:   msg.ID,
+		Data: json.RawMessage(`{"success": true}`),
 	}
 
 	responseBytes, err := json.Marshal(response)
@@ -688,6 +738,9 @@ func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *Web
 	default:
 		log.Printf("Failed to send player_move_ack: channel full")
 	}
+
+	// TODO: Broadcast player_moved message to other players in the same area
+	// This will be implemented when we add spatial awareness/broadcasting
 }
 
 // GetHub returns the WebSocket hub (for use in other packages)

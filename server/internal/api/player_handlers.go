@@ -10,6 +10,7 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/ringmap"
 )
 
 // PlayerHandlers handles player-related HTTP requests.
@@ -218,12 +219,10 @@ func (h *PlayerHandlers) UpdatePlayerPosition(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Validate position
-	// X should be between 0 and 264,000,000 (ring circumference)
-	if req.Position.X < 0 || req.Position.X > 264000000 {
-		respondWithError(w, http.StatusBadRequest, "Invalid X position (must be 0-264000000)")
-		return
-	}
+	// Validate and wrap position
+	// X position wraps around the ring (0 to 264,000,000 meters)
+	wrappedX := ringmap.ValidatePosition(int64(req.Position.X))
+	req.Position.X = float64(wrappedX)
 	// Y should be reasonable (within ring width, but we'll be lenient for now)
 	// Floor should be reasonable (-2 to 15 based on schema)
 	if req.Floor < -2 || req.Floor > 15 {

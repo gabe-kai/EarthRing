@@ -164,6 +164,7 @@ npm run dev
 
 **Chunk Management:**
 - Get chunk metadata: `GET http://localhost:8080/api/chunks/{chunk_id}` (format: "floor_chunk_index", e.g., "0_12345")
+  - Note: Chunk indices are automatically wrapped (e.g., `0_264000` wraps to `0_0`, `0_-1` wraps to `0_263999`)
 - Rate limit: 100 requests per minute per user
 - Returns default metadata if chunk doesn't exist yet
 - **Chunk Storage**: ✅ Implemented - Generated chunks are automatically stored in database with PostGIS geometry
@@ -216,6 +217,11 @@ EarthRing/
 │   │   │   ├── chunks.go              # Chunk storage and retrieval (PostGIS geometry, persistence)
 │   │   │   ├── chunks_test.go         # Chunk storage tests
 │   │   │   └── README.md              # Database package documentation
+│   │   ├── ringmap/                   # Map wrapping and spatial query utilities
+│   │   │   ├── wrapping.go           # Position and chunk index wrapping logic
+│   │   │   ├── wrapping_test.go       # Wrapping tests
+│   │   │   ├── spatial.go             # Spatial query utilities (nearby players, chunks in range)
+│   │   │   └── spatial_test.go        # Spatial query tests
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
 │   │   ├── procedural/                # Procedural generation service
 │   │   │   ├── main.py                # FastAPI application and endpoints

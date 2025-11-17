@@ -788,14 +788,34 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 			expectedChunks: 0,
 		},
 		{
-			name: "chunk index out of range",
+			name: "chunk index wraps around ring (positive)",
 			message: &WebSocketMessage{
 				Type: "chunk_request",
 				ID:   "req-8",
 				Data: json.RawMessage(`{"chunks":["0_300000"]}`),
 			},
-			expectError:    false, // Out of range chunks are skipped
-			expectedChunks: 0,
+			expectError:    false, // Out of range chunks are wrapped (300000 % 264000 = 36000)
+			expectedChunks: 1,
+		},
+		{
+			name: "chunk index wraps around ring (negative)",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-9",
+				Data: json.RawMessage(`{"chunks":["0_-1"]}`),
+			},
+			expectError:    false, // Negative chunks wrap to end of ring (263999)
+			expectedChunks: 1,
+		},
+		{
+			name: "chunk index wraps to zero",
+			message: &WebSocketMessage{
+				Type: "chunk_request",
+				ID:   "req-10",
+				Data: json.RawMessage(`{"chunks":["0_264000"]}`),
+			},
+			expectError:    false, // Exactly at wrap boundary wraps to 0
+			expectedChunks: 1,
 		},
 	}
 

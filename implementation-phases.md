@@ -127,7 +127,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 **Priority Order:**
 1. Chunk generation system (procedural, using Python service) - **COMPLETE**
 2. Chunk storage and retrieval (PostGIS geometry types, compression) - **COMPLETE**
-3. Map wrapping logic (modulo 264,000 km, seamless boundaries)
+3. Map wrapping logic (modulo 264,000 km, seamless boundaries) - **COMPLETE**
 4. Basic coordinate system handling (X=ring, Y=width, Z=floor) - **COMPLETE** (from Phase 1)
 5. Station flare calculations (horizontal and vertical, dual-flare geometry)
 6. Client-side chunk loading and rendering (chunk request, decompression, rendering) - **PARTIALLY COMPLETE** (chunk request/response working, decompression pending)
@@ -137,7 +137,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Chunk generation system working (procedural service generates ring floor geometry) - **COMPLETE**
 - ✅ Chunk storage and retrieval working (PostGIS geometry types, database persistence) - **COMPLETE**
 - ✅ Chunks can be loaded and rendered in client (1 km chunks, variable width, ring floor geometry visible) - **COMPLETE**
-- ⏳ Map wrapping works correctly (seamless loop, no visible boundaries) - **PENDING**
+- ✅ Map wrapping works correctly (seamless loop, server-side wrapping for positions and chunk indices) - **COMPLETE**
 - ⏳ Station geometry renders correctly (flare shapes: 5km/16km/25km hubs) - **PENDING**
 - ⏳ Chunk compression/decompression working (gzip, MessagePack, WebP) - **PENDING**
 
