@@ -64,8 +64,14 @@ class GenerateChunkRequest(BaseModel):
 class ChunkGeometry(BaseModel):
     """Chunk geometry data"""
 
-    type: str = "Polygon"
-    coordinates: List[List[List[float]]]
+    # For Phase 2, geometry is a flexible dict structure
+    # Can contain vertices, faces, normals, etc.
+    type: str
+    vertices: List[List[float]]
+    faces: List[List[int]]
+    normals: List[List[float]]
+    width: float
+    length: float
 
 
 class ChunkMetadata(BaseModel):
@@ -118,14 +124,19 @@ async def generate_chunk(request: GenerateChunkRequest):
             request.floor, request.chunk_index, world_seed
         )
 
-        # For Phase 1, return empty chunk with metadata
-        # Full generation will be implemented in Phase 2
-        chunk_id = f"{request.floor}_{request.chunk_index}"
-
-        # Basic chunk metadata (1km base width, can vary)
-        chunk_width = generation.get_chunk_width(
+        # Generate chunk with geometry (Phase 2)
+        chunk_data = generation.generate_chunk(
             request.floor, request.chunk_index, chunk_seed
         )
+
+        chunk_id = chunk_data["chunk_id"]
+        chunk_width = chunk_data["metadata"]["chunk_width"]
+        geometry_data = chunk_data.get("geometry")
+
+        # Convert geometry dict to ChunkGeometry model if present
+        geometry_model = None
+        if geometry_data:
+            geometry_model = ChunkGeometry(**geometry_data)
 
         response = GenerateChunkResponse(
             success=True,
@@ -134,12 +145,12 @@ async def generate_chunk(request: GenerateChunkRequest):
                 floor=request.floor,
                 chunk_index=request.chunk_index,
                 width=chunk_width,
-                version=1,
+                version=chunk_data["metadata"]["version"],
             ),
-            geometry=None,  # Empty for Phase 1
-            structures=[],
-            zones=[],
-            message="Empty chunk generated (full generation pending Phase 2)",
+            geometry=geometry_model,
+            structures=chunk_data.get("structures", []),
+            zones=chunk_data.get("zones", []),
+            message="Chunk generated with ring floor geometry (Phase 2 MVP)",
         )
 
         return response

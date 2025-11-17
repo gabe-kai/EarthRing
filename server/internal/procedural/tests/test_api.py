@@ -39,7 +39,14 @@ def test_generate_chunk():
     assert data["chunk"]["floor"] == 0
     assert data["chunk"]["chunk_index"] == 12345
     assert data["chunk"]["width"] == 400.0
-    assert data["geometry"] is None
+    assert data["chunk"]["version"] == 2  # Phase 2 version
+    # Geometry should be present (Phase 2)
+    assert data["geometry"] is not None
+    assert data["geometry"]["type"] == "ring_floor"
+    assert len(data["geometry"]["vertices"]) == 4
+    assert len(data["geometry"]["faces"]) == 2
+    assert data["geometry"]["width"] == 400.0
+    assert data["geometry"]["length"] == 1000.0
     assert data["structures"] == []
     assert data["zones"] == []
 

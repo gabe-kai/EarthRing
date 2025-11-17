@@ -618,6 +618,22 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 		Chunks: chunks,
 	}
 
+	// Log chunk data being sent (for debugging)
+	for _, chunk := range chunks {
+		hasGeometry := chunk.Geometry != nil
+		geometryType := ""
+		if hasGeometry {
+			if geomMap, ok := chunk.Geometry.(map[string]interface{}); ok {
+				if gt, ok := geomMap["type"].(string); ok {
+					geometryType = gt
+				}
+			} else if geomPtr, ok := chunk.Geometry.(*procedural.ChunkGeometry); ok && geomPtr != nil {
+				geometryType = geomPtr.Type
+			}
+		}
+		log.Printf("Sending chunk %s: hasGeometry=%v, geometryType=%s", chunk.ID, hasGeometry, geometryType)
+	}
+
 	responseDataBytes, err := json.Marshal(responseData)
 	if err != nil {
 		log.Printf("Failed to marshal chunk data response: %v", err)

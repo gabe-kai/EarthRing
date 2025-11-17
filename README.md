@@ -107,13 +107,19 @@ go run cmd/earthring-server/main.go
 # Runs on http://localhost:8080 (or port specified in SERVER_PORT)
 # Provides REST API endpoints and WebSocket connections
 
-# Terminal 2: Python procedural generation service (optional for Phase 1)
+# Terminal 2: Python procedural generation service (required for Phase 2+)
 cd server
 # Install Python dependencies first: pip install -r requirements.txt
 python -m uvicorn internal.procedural.main:app --host 0.0.0.0 --port 8081 --reload
 # Or use the script: ./scripts/run-procedural-service.ps1 (Windows) or ./scripts/run-procedural-service.sh (Linux/Mac)
 # Runs on http://localhost:8081
 # Go server will call this service for chunk generation
+
+# Note for Windows users: If you encounter connection errors between Go server and Python service,
+# set the PROCEDURAL_BASE_URL environment variable to use 127.0.0.1 instead of localhost:
+# PowerShell: $env:PROCEDURAL_BASE_URL="http://127.0.0.1:8081"
+# This avoids IPv6 localhost resolution issues on Windows.
+# To make it permanent, add it to your system environment variables or create a .env file in the server directory.
 
 # Terminal 3: Web client
 cd client-web

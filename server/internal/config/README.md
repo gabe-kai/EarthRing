@@ -59,7 +59,8 @@ The `Config` struct contains:
 - `BCRYPT_COST` - Bcrypt hashing cost (default: `10`)
 
 #### Procedural Generation Service
-- `PROCEDURAL_BASE_URL` - Service base URL (default: `http://localhost:8081`)
+- `PROCEDURAL_BASE_URL` - Service base URL (default: `http://127.0.0.1:8081`)
+  - **Note**: Uses `127.0.0.1` instead of `localhost` for better Windows compatibility (avoids IPv6 resolution issues)
 - `PROCEDURAL_TIMEOUT` - Request timeout (default: `30s`)
 - `PROCEDURAL_RETRY_COUNT` - Retry attempts (default: `3`)
 

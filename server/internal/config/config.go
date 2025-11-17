@@ -105,7 +105,8 @@ func Load() (*Config, error) {
 			BCryptCost:        getIntEnv("BCRYPT_COST", 10),
 		},
 		Procedural: ProceduralConfig{
-			BaseURL:    getEnv("PROCEDURAL_BASE_URL", "http://localhost:8081"),
+			// Use 127.0.0.1 instead of localhost for better Windows compatibility (avoids IPv6 issues)
+			BaseURL:    getEnv("PROCEDURAL_BASE_URL", "http://127.0.0.1:8081"),
 			Timeout:    getDurationEnv("PROCEDURAL_TIMEOUT", 30*time.Second),
 			RetryCount: getIntEnv("PROCEDURAL_RETRY_COUNT", 3),
 		},

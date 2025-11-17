@@ -149,12 +149,22 @@ window.addEventListener('show:chunk-panel', () => {
 });
 
 // WebSocket connection event handlers
-wsClient.onOpen(() => {
+wsClient.onOpen(async () => {
   console.log('WebSocket opened');
   gameStateManager.updateConnectionState('websocket', { 
     connected: true, 
     connecting: false 
   });
+  
+  // Automatically load chunks around the camera position
+  try {
+    const cameraPos = cameraController.getEarthRingPosition();
+    // Load chunks at camera position (floor 0, radius 2 chunks)
+    await chunkManager.requestChunksAtPosition(cameraPos.x, 0, 2, 'medium');
+    console.log('Loaded chunks around camera position');
+  } catch (error) {
+    console.error('Failed to load initial chunks:', error);
+  }
 });
 
 wsClient.onClose(() => {
