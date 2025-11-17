@@ -162,10 +162,12 @@ npm run dev
 - Update position: `PUT http://localhost:8080/api/players/{player_id}/position` (requires authentication, own profile only)
 - Rate limit: 500 requests per minute per user
 
-**Chunk Metadata:**
+**Chunk Management:**
 - Get chunk metadata: `GET http://localhost:8080/api/chunks/{chunk_id}` (format: "floor_chunk_index", e.g., "0_12345")
 - Rate limit: 100 requests per minute per user
 - Returns default metadata if chunk doesn't exist yet
+- **Chunk Storage**: ✅ Implemented - Generated chunks are automatically stored in database with PostGIS geometry
+- **Database Persistence**: Chunks persist across server restarts and are loaded from database before generating
 
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints
@@ -211,6 +213,9 @@ EarthRing/
 │   ├── internal/                      # Private application code
 │   │   ├── api/                       # REST and WebSocket handlers, rate limiting, CORS, player/chunk endpoints
 │   │   ├── database/                  # Database access layer
+│   │   │   ├── chunks.go              # Chunk storage and retrieval (PostGIS geometry, persistence)
+│   │   │   ├── chunks_test.go         # Chunk storage tests
+│   │   │   └── README.md              # Database package documentation
 │   │   ├── game/                      # Core game logic (zones, structures, chunks, npcs, racing)
 │   │   ├── procedural/                # Procedural generation service
 │   │   │   ├── main.py                # FastAPI application and endpoints

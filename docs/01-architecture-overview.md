@@ -84,7 +84,7 @@ The system follows a **server-client architecture** with clear separation of con
 - Better suited for algorithmic work (terrain generation, NPC population distribution, city growth)
 - Can scale independently from main server
 - Communicates with main server via REST API (FastAPI framework)
-- **Status**: ✅ Implemented (Phase 1: empty chunks, full generation in Phase 2)
+- **Status**: ✅ Implemented (Phase 1: basic ring floor geometry, full generation with buildings in Phase 2)
 
 **Decision**: Use Go for the main game server (performance-critical real-time operations) and Python for the procedural generation service (algorithm-heavy work). This separation allows independent scaling and optimization of each service.
 
@@ -192,6 +192,11 @@ The system follows a **server-client architecture** with clear separation of con
    - Data access abstraction
    - Query optimization
    - Transaction management
+   - **Chunk Storage**: ✅ Implemented (`server/internal/database/chunks.go`)
+     - Chunk metadata and geometry persistence
+     - PostGIS geometry storage for spatial queries
+     - Automatic storage of generated chunks
+     - Database-first loading strategy
 
 5. **Procedural Generation Service** (Python)
    - Generates procedural structures
@@ -200,7 +205,7 @@ The system follows a **server-client architecture** with clear separation of con
    - Communicates with main server via REST API (FastAPI framework)
    - Runs on port 8081 (configurable via `PROCEDURAL_SERVICE_PORT`)
    - Can be scaled independently based on generation workload
-   - **Status**: ✅ Implemented (Phase 1: basic service with empty chunk generation)
+   - **Status**: ✅ Implemented (Phase 1: basic service with ring floor geometry generation)
 
 ### Client Components
 

@@ -595,19 +595,45 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	defer db.Close()
 
-	// Create chunks table
-	_, err := db.Exec(`
+	// Ensure PostGIS extension is available
+	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
+	if err != nil {
+		t.Skipf("PostGIS extension not available: %v", err)
+	}
+
+	// Create chunks table with full schema
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
 			floor INTEGER NOT NULL,
 			chunk_index INTEGER NOT NULL,
 			version INTEGER DEFAULT 1,
 			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			is_dirty BOOLEAN DEFAULT FALSE,
-			PRIMARY KEY (floor, chunk_index)
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
 		)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	// Create chunk_data table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunk_data (
+			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+			geometry GEOMETRY(POLYGON, 0) NOT NULL,
+			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
+			structure_ids INTEGER[],
+			zone_ids INTEGER[],
+			npc_data JSONB,
+			terrain_data JSONB,
+			last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunk_data table: %v", err)
 	}
 
 	// Create mock procedural service
@@ -625,6 +651,7 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 			t.Errorf("Failed to decode request: %v", err)
 		}
 
+		// Return geometry for ring floor
 		response := map[string]interface{}{
 			"success": true,
 			"chunk": map[string]interface{}{
@@ -632,9 +659,16 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 				"floor":       req.Floor,
 				"chunk_index": req.ChunkIndex,
 				"width":       400.0,
-				"version":     1,
+				"version":     2,
 			},
-			"geometry":   nil,
+			"geometry": map[string]interface{}{
+				"type":     "ring_floor",
+				"vertices": [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				"faces":    [][]int{{0, 1, 2}, {0, 2, 3}},
+				"normals":  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				"width":    400.0,
+				"length":   1000.0,
+			},
 			"structures": []interface{}{},
 			"zones":      []interface{}{},
 		}

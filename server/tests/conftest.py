@@ -3,7 +3,54 @@ Pytest configuration and fixtures for EarthRing tests.
 """
 
 import os
+import sys
+from pathlib import Path
+
 import pytest
+
+# Try to load .env file from multiple locations (similar to Go testutil)
+# Try multiple paths for .env file
+env_paths = [
+    ".env",  # Current directory
+    Path(__file__).parent.parent / ".env",  # server/.env
+    Path(__file__).parent.parent.parent / ".env",  # project root .env
+    Path(__file__).parent.parent
+    / "server"
+    / ".env",  # server/server/.env (if running from subdirectory)
+]
+
+# Try to load python-dotenv if available
+try:
+    from dotenv import load_dotenv
+
+    DOTENV_AVAILABLE = True
+    # Try to load .env from any of the paths
+    loaded = False
+    for env_path in env_paths:
+        if isinstance(env_path, Path):
+            env_path_str = str(env_path)
+        else:
+            env_path_str = env_path
+        if os.path.exists(env_path_str):
+            load_dotenv(env_path_str, override=False)
+            loaded = True
+            break
+    if not loaded:
+        # Try to load from any path even if it doesn't exist (dotenv will handle it)
+        for env_path in env_paths:
+            if isinstance(env_path, Path):
+                env_path_str = str(env_path)
+            else:
+                env_path_str = env_path
+            try:
+                load_dotenv(env_path_str, override=False)
+                loaded = True
+                break
+            except Exception:
+                pass
+except ImportError:
+    DOTENV_AVAILABLE = False
+    # Continue without dotenv - will use environment variables directly
 
 # Import psycopg2 with graceful handling if not available
 try:
@@ -19,6 +66,19 @@ except ImportError:
 @pytest.fixture(scope="session")
 def db_config():
     """Database configuration for tests."""
+    # Load .env if available (already done at module level, but ensure it's loaded)
+    if DOTENV_AVAILABLE:
+        for env_path in env_paths:
+            if isinstance(env_path, Path):
+                env_path_str = str(env_path)
+            else:
+                env_path_str = env_path
+            if os.path.exists(env_path_str):
+                from dotenv import load_dotenv
+
+                load_dotenv(env_path_str, override=False)
+                break
+
     return {
         "host": os.getenv("TEST_DB_HOST", "localhost"),
         "port": int(os.getenv("TEST_DB_PORT", "5432")),

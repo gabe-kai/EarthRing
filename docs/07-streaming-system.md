@@ -132,9 +132,9 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
 
 ### Server-Side Management
 
-#### Chunk Request Handling ✅ **IMPLEMENTED** (Phase 1: Basic handler with empty chunks)
+#### Chunk Request Handling ✅ **IMPLEMENTED** (Phase 2: Handler with database persistence)
 
-**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional. Returns empty chunks with metadata for Phase 1. Full geometry generation will be added in Phase 2.
+**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional with full database persistence. Chunks are automatically stored in database after generation and loaded from database when they exist. Returns chunks with basic ring floor geometry. Ring floor geometry is visible in client. Full generation with buildings and structures will be added in Phase 2.
 
 1. **Request Format** (via WebSocket)
    ```json
@@ -161,14 +161,21 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
        "chunks": [
          {
            "id": "0_12345",
-           "geometry": null, // Empty for Phase 1, will contain compressed geometry in Phase 2
+           "geometry": {
+             "type": "ring_floor",
+             "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+             "faces": [[v1, v2, v3], ...],
+             "normals": [[nx1, ny1, nz1], ...],
+             "width": 400.0,
+             "length": 1000.0
+           },
            "structures": [], // Empty for Phase 1
            "zones": [], // Empty for Phase 1
            "metadata": {
              "id": "0_12345",
              "floor": 0,
              "chunk_index": 12345,
-             "version": 1,
+             "version": 2,
              "last_modified": "2024-01-01T00:00:00Z",
              "is_dirty": false
            }
@@ -177,16 +184,43 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
      }
    }
    ```
-   - Checks database for existing chunks
+   - Checks database for existing chunks using storage layer
+   - Loads chunks from database if they exist (with geometry from terrain_data JSONB)
    - Generates new chunks via procedural service if not found
-   - Returns empty chunks with metadata for Phase 1
-   - Full geometry will be populated in Phase 2
+   - Automatically stores generated chunks in database (both `chunks` and `chunk_data` tables)
+   - Returns chunks with basic ring floor geometry
+   - Ring floor geometry is visible in client (gray rectangular planes)
+   - Full generation with buildings and structures will be populated in Phase 2
+
+#### Chunk Storage ✅ **IMPLEMENTED**
+
+**Status**: ✅ **IMPLEMENTED** - Chunk storage layer (`server/internal/database/chunks.go`) provides full persistence.
+
+**Storage Strategy:**
+- **Metadata Storage**: Chunks stored in `chunks` table (floor, chunk_index, version, is_dirty, procedural_seed, metadata)
+- **Geometry Storage**: Chunk geometry stored in `chunk_data` table with PostGIS POLYGON geometry and JSONB terrain_data
+- **Automatic Persistence**: Generated chunks are automatically stored after generation
+- **Database-First Loading**: Chunks are loaded from database before generating (avoids regeneration)
+- **PostGIS Integration**: Geometry stored as PostGIS POLYGON for spatial queries, JSONB for client format
+- **Transaction Safety**: All storage operations use database transactions for atomicity
+- **Error Handling**: Comprehensive error handling for PostGIS errors, invalid geometry, missing data
+
+**Storage Functions:**
+- `GetChunkMetadata()` - Retrieves chunk metadata from `chunks` table
+- `GetChunkData()` - Retrieves chunk geometry from `chunk_data` table
+- `StoreChunk()` - Stores generated chunks in both tables with PostGIS geometry conversion
+- `ConvertPostGISToGeometry()` - Converts stored geometry back to client format
+
+**Geometry Conversion:**
+- Procedural geometry (vertices/faces) → PostGIS POLYGON WKT format
+- PostGIS geometry → Client format (via terrain_data JSONB field)
+- Validates geometry (finite coordinates, sufficient vertices, valid bounding box)
 
 #### Chunk Caching
 
 Server maintains cache of frequently accessed chunks:
 
-- **Cache Strategy**: LRU (Least Recently Used)
+- **Cache Strategy**: LRU (Least Recently Used) - **PENDING** (database storage implemented, in-memory cache pending)
 - **Cache Size**: Configurable (e.g., 1000 chunks)
 - **Cache Invalidation**: On chunk modification
 - **Redis Integration**: Optional distributed cache
@@ -764,10 +798,11 @@ CREATE TABLE chunk_data (
 
 ### Procedural Generation
 
-1. **On-Demand Generation**
+1. **On-Demand Generation** ✅ **IMPLEMENTED**
    - Generate chunks when first requested by client
-   - Store generated data in database (PostGIS geometry types)
-   - Cache generated chunks to avoid regeneration
+   - **Store generated data in database (PostGIS geometry types)** ✅ **IMPLEMENTED**
+   - **Load chunks from database before generating** ✅ **IMPLEMENTED** (avoids regeneration)
+   - Cache generated chunks to avoid regeneration (in-memory cache pending)
    - Regenerate if seed changes or cache invalidated
 
 2. **Caching Strategy**
@@ -778,7 +813,7 @@ CREATE TABLE chunk_data (
 
 3. **Generation Service**
    - Procedural generation handled by separate Python service (FastAPI)
-   - **Status**: ✅ Implemented (Phase 1: basic service with empty chunk generation)
+   - **Status**: ✅ Implemented (Phase 1: basic service with ring floor geometry generation)
    - Main server (Go) requests generation via REST API (`POST /api/v1/chunks/generate`)
    - Go client (`server/internal/procedural/client.go`) handles communication with retries
    - Service runs on port 8081 (configurable via `PROCEDURAL_SERVICE_PORT`)
