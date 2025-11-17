@@ -38,6 +38,7 @@ def test_generate_chunk():
     assert data["chunk"]["chunk_id"] == "0_12345"
     assert data["chunk"]["floor"] == 0
     assert data["chunk"]["chunk_index"] == 12345
+    # Chunk 12345 is far from any hub, should have base width
     assert data["chunk"]["width"] == 400.0
     assert data["chunk"]["version"] == 2  # Phase 2 version
     # Geometry should be present (Phase 2)
@@ -49,6 +50,25 @@ def test_generate_chunk():
     assert data["geometry"]["length"] == 1000.0
     assert data["structures"] == []
     assert data["zones"] == []
+
+
+def test_generate_chunk_at_hub_center():
+    """Test chunk generation at hub center (should have max width)"""
+    # Chunk 0 is at hub 0 center (position 0)
+    request_data = {"floor": 0, "chunk_index": 0, "lod_level": "medium"}
+
+    response = client.post("/api/v1/chunks/generate", json=request_data)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["success"] is True
+    assert data["chunk"]["chunk_id"] == "0_0"
+    # At hub center, width should be close to max (25km = 25000m)
+    assert data["chunk"]["width"] > 20000.0
+    assert data["chunk"]["width"] <= 25000.0
+    # Geometry width should match
+    assert data["geometry"]["width"] > 20000.0
+    assert data["geometry"]["width"] <= 25000.0
 
 
 def test_generate_chunk_with_custom_seed():

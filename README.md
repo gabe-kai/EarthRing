@@ -227,6 +227,7 @@ EarthRing/
 │   │   │   ├── main.py                # FastAPI application and endpoints
 │   │   │   ├── config.py              # Configuration management
 │   │   │   ├── seeds.py               # Seed generation utilities
+│   │   │   ├── stations.py            # Station locations and flare calculations
 │   │   │   ├── generation.py         # Chunk generation functions
 │   │   │   ├── client.go              # Go client for calling Python service
 │   │   │   ├── tests/                 # Python service tests

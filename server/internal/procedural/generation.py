@@ -1,9 +1,10 @@
 """
 Chunk generation functions.
-Phase 2: Basic ring floor geometry generation.
+Phase 2: Basic ring floor geometry generation with station flares.
 """
 
 from . import seeds
+from . import stations
 import math
 
 # Constants
@@ -14,25 +15,50 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
     """
-    Get the width of a chunk.
+    Get the width of a chunk, accounting for station flares.
 
     Base width is 400m, but chunks at stations can be wider (up to 25km).
-    For Phase 2 MVP, returns base width. Station flare logic will be added later.
+    Width varies smoothly based on distance from station centers using cosine transitions.
 
     Args:
         floor: Floor number
-        chunk_index: Chunk index
-        chunk_seed: Chunk seed
+        chunk_index: Chunk index (0-263,999)
+        chunk_seed: Chunk seed (not used for width calculation, kept for API compatibility)
 
     Returns:
-        Chunk width in meters
+        Chunk width in meters (400m base, up to 25km at station centers)
     """
-    # Base width: 400m
-    base_width = BASE_CHUNK_WIDTH
+    # Calculate chunk center position along ring (in meters)
+    chunk_center_position = chunk_index * CHUNK_LENGTH + (CHUNK_LENGTH / 2.0)
 
-    # TODO: Phase 2 Enhancement - Calculate station flare width
-    # For now, return base width
-    return base_width
+    # Calculate width based on station flares
+    width = stations.calculate_flare_width(chunk_center_position)
+
+    return width
+
+
+def get_chunk_levels(floor: int, chunk_index: int, chunk_seed: int) -> int:
+    """
+    Get the number of levels for a chunk, accounting for station flares.
+
+    Base levels is 5, but chunks at stations can have more levels (up to 15).
+    Levels vary smoothly based on distance from station centers using cosine transitions.
+
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+        chunk_seed: Chunk seed (not used for level calculation, kept for API compatibility)
+
+    Returns:
+        Number of levels (5 base, up to 15 at station centers)
+    """
+    # Calculate chunk center position along ring (in meters)
+    chunk_center_position = chunk_index * CHUNK_LENGTH + (CHUNK_LENGTH / 2.0)
+
+    # Calculate levels based on station flares
+    levels = stations.calculate_flare_levels(chunk_center_position)
+
+    return levels
 
 
 def generate_ring_floor_geometry(chunk_width: float) -> dict:
@@ -141,6 +167,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
             "version": 2,  # Version 2 for Phase 2 geometry
             "chunk_width": chunk_width,
             "chunk_length": CHUNK_LENGTH,
+            "chunk_levels": get_chunk_levels(floor, chunk_index, chunk_seed),
         },
     }
 

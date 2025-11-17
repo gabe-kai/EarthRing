@@ -410,7 +410,7 @@ Response: {
 
 ### Procedural Generation Service API
 
-**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with ring floor geometry generation)
+**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with ring floor geometry and station flares)
 
 The Python procedural generation service exposes a REST API for chunk generation. This is an internal service API called by the Go server, not directly exposed to clients.
 
@@ -445,24 +445,32 @@ Response: {
     "chunk_id": "0_12345",
     "floor": 0,
     "chunk_index": 12345,
-    "width": 400.0,
-    "version": 1
+    "width": 400.0,  // Variable: 400m base, up to 25km at station centers
+    "version": 2  // Version 2 includes station flares
   },
   "geometry": {
     "type": "ring_floor",
     "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
     "faces": [[v1, v2, v3], ...],
     "normals": [[nx1, ny1, nz1], ...],
-    "width": 400.0,
+    "width": 400.0,  // Variable: 400m base, up to 25km at station centers (station flares)
     "length": 1000.0
   },
   "structures": [],        // Empty for Phase 1
   "zones": [],            // Empty for Phase 1
-  "message": "Chunk generated with basic ring floor geometry (full generation with buildings pending Phase 2)"
+  "message": "Chunk generated with ring floor geometry and station flares (full generation with buildings pending Phase 2)"
 }
 ```
 
-**Note**: For Phase 1, this endpoint returns chunks with basic ring floor geometry. Full generation (buildings, zones, structures) will be implemented in Phase 2.
+**Station Flares**: ✅ **IMPLEMENTED**
+- Chunk width varies based on distance from station centers
+- Base width: 400m (standard ring sections)
+- Maximum width: 25km at pillar/elevator hub centers
+- Smooth cosine-based transitions for seamless geometry
+- 12 pillar/elevator hubs positioned at regular intervals (~22,000 km apart)
+- Chunk levels also vary: 5 base levels → up to 15 levels at hub centers
+
+**Note**: This endpoint returns chunks with ring floor geometry and station flares. Full generation (buildings, zones, structures) will be implemented in Phase 2.
 
 #### Get Chunk Seed
 ```
