@@ -347,7 +347,7 @@ Manages chunk loading and unloading based on viewport.
 - Request chunks via WebSocket (`chunk_request` message)
 - Position-based chunk loading (converts ring position to chunk indices)
 - Automatic chunk rendering when added to game state
-- Ring floor geometry rendering (Phase 1: basic gray planes visible)
+- Ring floor geometry rendering (Phase 1: basic gray planes with variable width from station flares visible)
 - Mesh cleanup and resource disposal
 - Integration with game state manager for caching
 

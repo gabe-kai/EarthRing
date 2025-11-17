@@ -371,7 +371,7 @@ Response: {
   - Example: `0_264000` wraps to `0_0`
   - Example: `0_-1` wraps to `0_263999`
   - This ensures seamless ring traversal (chunk 0 connects to chunk 263,999)
-**Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated)
+**Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated). Actual generated chunks will have version 2 (includes station flares).
 
 #### Request Chunks via WebSocket ✅ **IMPLEMENTED**
 

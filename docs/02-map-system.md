@@ -295,23 +295,31 @@ else:
 
 #### Station Locations
 
-**Pillar/Elevator Hubs** (12 stations at regular intervals):
+**Status**: ✅ **IMPLEMENTED** - Station locations defined in `server/internal/procedural/stations.py`
+
+**Pillar/Elevator Hubs** (12 stations at regular intervals): ✅ **IMPLEMENTED**
 ```
-Hub 0:  Position 0 km
-Hub 1:  Position 22,000 km
-Hub 2:  Position 44,000 km
-Hub 3:  Position 66,000 km
-Hub 4:  Position 88,000 km
-Hub 5:  Position 110,000 km
-Hub 6:  Position 132,000 km
-Hub 7:  Position 154,000 km
-Hub 8:  Position 176,000 km
-Hub 9:  Position 198,000 km
-Hub 10: Position 220,000 km
-Hub 11: Position 242,000 km
+Hub 0:  Position 0 km (0 meters)
+Hub 1:  Position 22,000 km (22,000,000 meters)
+Hub 2:  Position 44,000 km (44,000,000 meters)
+Hub 3:  Position 66,000 km (66,000,000 meters)
+Hub 4:  Position 88,000 km (88,000,000 meters)
+Hub 5:  Position 110,000 km (110,000,000 meters)
+Hub 6:  Position 132,000 km (132,000,000 meters)
+Hub 7:  Position 154,000 km (154,000,000 meters)
+Hub 8:  Position 176,000 km (176,000,000 meters)
+Hub 9:  Position 198,000 km (198,000,000 meters)
+Hub 10: Position 220,000 km (220,000,000 meters)
+Hub 11: Position 242,000 km (242,000,000 meters)
 ```
 
-**Regional Hubs and Local Stations**: Exact locations TBD based on gameplay needs and player development patterns.
+**Implementation Details**:
+- Station positions stored in `PILLAR_HUB_POSITIONS` list
+- Station objects created in `PILLAR_STATIONS` list
+- `find_nearest_station()` function locates nearest station with ring wrapping support
+- Distance calculations account for ring boundaries
+
+**Regional Hubs and Local Stations**: ⏳ **PENDING** - Can be added based on gameplay needs and player development patterns. Station type definitions (`REGIONAL_HUB`, `LOCAL_STATION`) are ready for use.
 
 ### Atlas Pillars
 

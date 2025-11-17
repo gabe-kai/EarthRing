@@ -5,9 +5,12 @@ A multi-genre game (city builder, light Sims elements, and racing) set on an orb
 ## Project Overview
 
 EarthRing is set on a massive orbital ring structure:
-- **Circumference**: 264,000 km
-- **Base Width**: 400 meters
-- **Elevator Stations**: 12 pillar/elevator hubs spaced ~22,000 km apart, flaring to 25 km maximum width
+- **Circumference**: 264,000 km (seamlessly wraps around)
+- **Base Width**: 400 meters (variable-width chunks based on station flares)
+- **Station System**: 12 pillar/elevator hubs spaced ~22,000 km apart
+  - Chunks flare from 400m base width to 25 km maximum width at hub centers
+  - Chunks flare from 5 base levels to 15 levels at hub centers
+  - Smooth cosine-based transitions for seamless geometry
 - **Gameplay**: City building, NPC simulation, and racing through player-built cities
 
 ## Prerequisites
@@ -107,7 +110,7 @@ go run cmd/earthring-server/main.go
 # Runs on http://localhost:8080 (or port specified in SERVER_PORT)
 # Provides REST API endpoints and WebSocket connections
 
-# Terminal 2: Python procedural generation service (required for Phase 2+)
+# Terminal 2: Python procedural generation service (required for chunk generation)
 cd server
 # Install Python dependencies first: pip install -r requirements.txt
 python -m uvicorn internal.procedural.main:app --host 0.0.0.0 --port 8081 --reload
@@ -169,6 +172,7 @@ npm run dev
 - Returns default metadata if chunk doesn't exist yet
 - **Chunk Storage**: ✅ Implemented - Generated chunks are automatically stored in database with PostGIS geometry
 - **Database Persistence**: Chunks persist across server restarts and are loaded from database before generating
+- **Station Flares**: ✅ Implemented - Chunks have variable width (400m base → 25km at hubs) and variable height (5 base levels → 15 levels at hubs) based on distance from station centers
 
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints

@@ -134,7 +134,7 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
 
 #### Chunk Request Handling ✅ **IMPLEMENTED** (Phase 2: Handler with database persistence)
 
-**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional with full database persistence. Chunks are automatically stored in database after generation and loaded from database when they exist. Returns chunks with basic ring floor geometry. Ring floor geometry is visible in client. Full generation with buildings and structures will be added in Phase 2.
+**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional with full database persistence. Chunks are automatically stored in database after generation and loaded from database when they exist. Returns chunks with ring floor geometry and station flares (variable-width chunks). Ring floor geometry is visible in client. Full generation with buildings and structures will be added in Phase 2.
 
 1. **Request Format** (via WebSocket)
    ```json
@@ -188,8 +188,8 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
    - Loads chunks from database if they exist (with geometry from terrain_data JSONB)
    - Generates new chunks via procedural service if not found
    - Automatically stores generated chunks in database (both `chunks` and `chunk_data` tables)
-   - Returns chunks with basic ring floor geometry
-   - Ring floor geometry is visible in client (gray rectangular planes)
+   - Returns chunks with ring floor geometry and station flares (variable-width chunks)
+   - Ring floor geometry is visible in client (gray rectangular planes with variable width)
    - Full generation with buildings and structures will be populated in Phase 2
 
 #### Chunk Storage ✅ **IMPLEMENTED**
@@ -813,7 +813,7 @@ CREATE TABLE chunk_data (
 
 3. **Generation Service**
    - Procedural generation handled by separate Python service (FastAPI)
-   - **Status**: ✅ Implemented (Phase 1: basic service with ring floor geometry generation)
+   - **Status**: ✅ Implemented (Phase 1: basic service with ring floor geometry and station flares)
    - Main server (Go) requests generation via REST API (`POST /api/v1/chunks/generate`)
    - Go client (`server/internal/procedural/client.go`) handles communication with retries
    - Service runs on port 8081 (configurable via `PROCEDURAL_SERVICE_PORT`)

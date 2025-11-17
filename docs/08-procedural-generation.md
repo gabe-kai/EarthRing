@@ -1126,8 +1126,8 @@ def regenerate_chunk(chunk_id, reason, force=False):
 **Deliverables:**
 - ✅ Python service runs and responds to requests
 - ✅ Seed generation utilities working (deterministic)
-- ✅ Chunk generation endpoint returns chunks with basic ring floor geometry
-- ✅ Ring floor geometry visible in client (gray rectangular planes)
+- ✅ Chunk generation endpoint returns chunks with ring floor geometry and station flares
+- ✅ Ring floor geometry visible in client (gray rectangular planes with variable width from station flares)
 - ✅ Go server can communicate with Python service
 - ✅ Health check endpoint working
 - ✅ Service configuration and environment variables
