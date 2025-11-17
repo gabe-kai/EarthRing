@@ -230,8 +230,8 @@ func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 		{"too many parts", "0_12345_extra", http.StatusBadRequest},
 		{"invalid floor", "abc_12345", http.StatusBadRequest},
 		{"invalid chunk_index", "0_abc", http.StatusBadRequest},
-		{"chunk_index out of range", "0_264000", http.StatusBadRequest},
-		{"negative chunk_index", "0_-1", http.StatusBadRequest},
+		{"chunk_index wraps to zero", "0_264000", http.StatusOK}, // Wraps to chunk 0
+		{"negative chunk_index wraps", "0_-1", http.StatusOK},    // Wraps to chunk 263999
 	}
 
 	for _, tc := range testCases {

@@ -340,33 +340,50 @@ Each chunk contains:
 
 ## Map Wrapping
 
+**Status**: ✅ **IMPLEMENTED** - Server-side wrapping logic (`server/internal/ringmap/`) provides comprehensive position and chunk index wrapping.
+
 ### Wrapping Logic
 
-The map wraps seamlessly at the 264,000 km boundary:
+The map wraps seamlessly at the 264,000 km boundary. The server automatically wraps all positions and chunk indices to ensure seamless traversal around the ring.
 
-```python
-def wrap_position(position):
-    """Wrap position to valid range [0, 264000000)"""
-    return position % 264000000
+**Server Implementation** (`server/internal/ringmap/wrapping.go`):
+- `WrapPosition()` - Wraps ring positions to [0, 264,000,000)
+- `WrapChunkIndex()` - Wraps chunk indices to [0, 264,000)
+- `PositionToChunkIndex()` - Converts positions to chunk indices with wrapping
+- `Distance()` - Calculates shortest distance between positions (accounts for wrapping)
+- `ValidateChunkIndex()` - Validates and wraps chunk indices
+- `ValidatePosition()` - Validates and wraps positions
 
-def get_chunk_index(position):
-    """Get chunk index for a position, handling wrapping"""
-    wrapped = wrap_position(position)
-    return int(wrapped // 1000)
+**Integration Points**:
+- **Chunk Requests**: Chunk indices are automatically wrapped in WebSocket and REST handlers
+- **Player Positions**: Ring positions (X coordinate) are wrapped when updating player position
+- **Distance Calculations**: All distance calculations account for ring wrapping
+
+**Example Wrapping Behavior**:
+```go
+// Position wrapping
+WrapPosition(264000100)  // Returns 100
+WrapPosition(-1000)     // Returns 263999000
+
+// Chunk index wrapping
+WrapChunkIndex(264000)  // Returns 0
+WrapChunkIndex(-1)      // Returns 263999
+
+// Distance calculation (accounts for wrapping)
+Distance(1000, 263999000)  // Returns 2000 (wrapped path is shorter)
 ```
 
 ### Wrapping Considerations
 
-1. **Visual Continuity**: Chunk 0 and chunk 263,999 must connect seamlessly
-2. **Distance Calculations**: Shortest path may wrap around
-   ```python
-   def shortest_distance(pos1, pos2):
-       direct = abs(pos2 - pos1)
-       wrapped = 264000000 - direct
-       return min(direct, wrapped)
-   ```
-3. **Maglev Trains**: Can run continuously in loops
-4. **Player Movement**: Smooth transition when crossing boundary
+1. **Visual Continuity**: Chunk 0 and chunk 263,999 connect seamlessly ✅
+2. **Distance Calculations**: Shortest path accounts for wrapping ✅
+   - Server automatically calculates shortest distance (direct or wrapped)
+3. **Maglev Trains**: Can run continuously in loops (wrapping ensures seamless loops)
+4. **Player Movement**: Smooth transition when crossing boundary ✅
+   - Positions are automatically wrapped on update
+5. **Chunk Requests**: Out-of-range chunk indices are wrapped, not rejected
+   - Example: Requesting chunk `0_264000` wraps to chunk `0_0`
+   - Example: Requesting chunk `0_-1` wraps to chunk `0_263999`
 
 ## Zone Layout
 
@@ -468,6 +485,31 @@ The ring is divided into different zone types:
 - Procedural generation adapts to player zone boundaries
 
 ## Spatial Queries
+
+**Status**: ✅ **IMPLEMENTED** - Spatial query utilities (`server/internal/ringmap/spatial.go`) provide distance-based queries with ring wrapping support.
+
+### Implementation
+
+**Spatial Query Utilities**:
+- `SpatialQuery` - Database-backed spatial query handler
+- `FindNearbyPlayers()` - Finds players within a specified distance, accounting for ring wrapping
+- `ChunksInRange()` - Finds chunk indices within a distance of a position (handles wrapping)
+
+**Features**:
+- **Ring-Aware Distance**: All distance calculations account for ring wrapping
+- **Chunk Range Queries**: Find chunks within a distance, useful for chunk loading optimization
+- **Nearby Player Queries**: Find players within range with accurate distance calculations
+- **Wrapping Support**: Queries correctly handle positions near ring boundaries
+
+**Example Usage**:
+```go
+// Find players within 1000 meters
+spatialQuery := ringmap.NewSpatialQuery(db)
+players, err := spatialQuery.FindNearbyPlayers(5000.0, 0.0, 0, 1000)
+
+// Find chunks within 2000 meters
+chunks := ringmap.ChunksInRange(5000.0, 2000)
+```
 
 ### Common Operations
 
