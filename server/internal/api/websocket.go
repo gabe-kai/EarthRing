@@ -13,7 +13,9 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
+	"github.com/earthring/server/internal/ringmap"
 	"github.com/gorilla/websocket"
 )
 
@@ -140,6 +142,7 @@ type WebSocketHandlers struct {
 	config           *config.Config
 	jwtService       *auth.JWTService
 	proceduralClient *procedural.ProceduralClient
+	chunkStorage     *database.ChunkStorage
 	upgrader         websocket.Upgrader
 }
 
@@ -162,6 +165,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 		config:           cfg,
 		jwtService:       jwtService,
 		proceduralClient: proceduralClient,
+		chunkStorage:     database.NewChunkStorage(db),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -514,29 +518,38 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 			continue
 		}
 
-		// Validate chunk_index range (0 to 263,999)
-		if chunkIndex < 0 || chunkIndex > 263999 {
-			log.Printf("Chunk index out of range: %d", chunkIndex)
+		// Wrap chunk index to valid range (handles wrapping around ring)
+		wrappedChunkIndex, err := ringmap.ValidateChunkIndex(chunkIndex)
+		if err != nil {
+			log.Printf("Chunk index %d cannot be wrapped: %v", chunkIndex, err)
 			continue
 		}
 
-		// Check if chunk exists in database
-		var metadata ChunkMetadata
-		query := `
-			SELECT floor, chunk_index, version, last_modified, is_dirty
-			FROM chunks
-			WHERE floor = $1 AND chunk_index = $2
-		`
-		err = h.db.QueryRow(query, floor, chunkIndex).Scan(
-			&metadata.Floor,
-			&metadata.ChunkIndex,
-			&metadata.Version,
-			&metadata.LastModified,
-			&metadata.IsDirty,
-		)
+		// Use wrapped chunk index for all operations
+		chunkIndex = wrappedChunkIndex
 
+		// Check if chunk exists in database using storage layer
+		storedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
 		var chunk ChunkData
-		if err == sql.ErrNoRows {
+
+		if err != nil {
+			log.Printf("Error querying chunk %s: %v", chunkID, err)
+			// Return empty chunk on database error
+			chunk = ChunkData{
+				ID:         chunkID,
+				Geometry:   nil,
+				Structures: []interface{}{},
+				Zones:      []interface{}{},
+				Metadata: &ChunkMetadata{
+					ID:           chunkID,
+					Floor:        floor,
+					ChunkIndex:   chunkIndex,
+					Version:      1,
+					LastModified: time.Time{},
+					IsDirty:      false,
+				},
+			}
+		} else if storedMetadata == nil {
 			// Chunk doesn't exist - generate it using procedural service
 			// Pass nil for world seed (procedural service will use default)
 			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
@@ -558,6 +571,12 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 					},
 				}
 			} else {
+				// Store the generated chunk in the database
+				if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
+					log.Printf("Failed to store chunk %s: %v", chunkID, err)
+					// Continue anyway - we'll return the chunk data even if storage fails
+				}
+
 				// Convert procedural service response to chunk data
 				chunk = ChunkData{
 					ID:         chunkID,
@@ -569,38 +588,35 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 						Floor:        floor,
 						ChunkIndex:   chunkIndex,
 						Version:      genResponse.Chunk.Version,
-						LastModified: time.Time{}, // Will be set when chunk is saved
+						LastModified: time.Now(), // Use current time since chunk was just generated
 						IsDirty:      false,
 					},
 				}
 			}
-		} else if err != nil {
-			log.Printf("Error querying chunk %s: %v", chunkID, err)
-			// Return empty chunk on database error
-			chunk = ChunkData{
-				ID:         chunkID,
-				Geometry:   nil,
-				Structures: []interface{}{},
-				Zones:      []interface{}{},
-				Metadata: &ChunkMetadata{
-					ID:           chunkID,
-					Floor:        floor,
-					ChunkIndex:   chunkIndex,
-					Version:      1,
-					LastModified: time.Time{},
-					IsDirty:      false,
-				},
-			}
 		} else {
 			// Chunk exists in database - load it
-			// For Phase 1, we'll return empty chunks even if they exist in DB
-			// In Phase 2, we'll load actual chunk data from the database
-			metadata.ID = chunkID
+			// Load geometry from terrain_data JSONB field
+			geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
+			if err != nil {
+				log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
+				// Continue with nil geometry - chunk metadata is still valid
+			}
+
+			// Convert stored metadata to API format
+			metadata := ChunkMetadata{
+				ID:           chunkID,
+				Floor:        storedMetadata.Floor,
+				ChunkIndex:   storedMetadata.ChunkIndex,
+				Version:      storedMetadata.Version,
+				LastModified: storedMetadata.LastModified,
+				IsDirty:      storedMetadata.IsDirty,
+			}
+
 			chunk = ChunkData{
 				ID:         chunkID,
-				Geometry:   nil, // Will be loaded from database in Phase 2
-				Structures: []interface{}{},
-				Zones:      []interface{}{},
+				Geometry:   geometry,        // Loaded from database
+				Structures: []interface{}{}, // Empty for Phase 1
+				Zones:      []interface{}{}, // Empty for Phase 1
 				Metadata:   &metadata,
 			}
 		}
@@ -657,13 +673,58 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 	}
 }
 
+// PlayerMoveData represents the data payload for a player_move message
+type PlayerMoveData struct {
+	Position Position `json:"position"`           // Ring position (X, Y)
+	Floor    int      `json:"floor"`              // Floor level
+	Rotation float64  `json:"rotation,omitempty"` // Optional rotation in degrees
+}
+
 // handlePlayerMove handles player movement updates
 func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *WebSocketMessage) {
-	// TODO: Implement player movement handling
-	// For now, just acknowledge receipt
+	// Parse request data
+	var moveData PlayerMoveData
+	if err := json.Unmarshal(msg.Data, &moveData); err != nil {
+		conn.sendError(msg.ID, "Invalid player_move format", "InvalidMessageFormat")
+		return
+	}
+
+	// Validate and wrap position
+	// X position wraps around the ring (0 to 264,000,000 meters)
+	wrappedX := ringmap.ValidatePosition(int64(moveData.Position.X))
+	moveData.Position.X = float64(wrappedX)
+
+	// Validate floor range (-2 to 15 based on schema)
+	if moveData.Floor < -2 || moveData.Floor > 15 {
+		conn.sendError(msg.ID, "Invalid floor (must be -2 to 15)", "InvalidMessageFormat")
+		return
+	}
+
+	// Update player position in database
+	query := `
+		UPDATE players
+		SET current_position = POINT($1, $2),
+		    current_floor = $3
+		WHERE id = $4
+		RETURNING id
+	`
+	var updatedID int64
+	err := h.db.QueryRow(query, moveData.Position.X, moveData.Position.Y, moveData.Floor, conn.userID).Scan(&updatedID)
+	if err == sql.ErrNoRows {
+		conn.sendError(msg.ID, "Player not found", "NotFound")
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to update player position: %v", err)
+		conn.sendError(msg.ID, "Failed to update position", "InternalError")
+		return
+	}
+
+	// Send acknowledgment
 	response := WebSocketMessage{
 		Type: "player_move_ack",
 		ID:   msg.ID,
+		Data: json.RawMessage(`{"success": true}`),
 	}
 
 	responseBytes, err := json.Marshal(response)
@@ -677,6 +738,9 @@ func (h *WebSocketHandlers) handlePlayerMove(conn *WebSocketConnection, msg *Web
 	default:
 		log.Printf("Failed to send player_move_ack: channel full")
 	}
+
+	// TODO: Broadcast player_moved message to other players in the same area
+	// This will be implemented when we add spatial awareness/broadcasting
 }
 
 // GetHub returns the WebSocket hub (for use in other packages)

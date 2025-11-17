@@ -164,7 +164,7 @@ Response: {
 **Rate Limit**: 500 requests per minute per user
 **Note**: Users can only view their own profile (403 Forbidden if requesting another player's profile)
 
-#### Update Player Position
+#### Update Player Position ✅ **IMPLEMENTED**
 ```
 PUT /api/players/{player_id}/position
 Headers: Authorization: Bearer <access_token>
@@ -180,9 +180,16 @@ Response: {
 ```
 **Rate Limit**: 500 requests per minute per user
 **Validation**:
-- X position: 0 to 264,000,000 meters (ring circumference)
+- X position: Automatically wrapped to valid range [0, 264,000,000) meters
+  - Positions beyond circumference wrap around (e.g., 264,000,100 → 100)
+  - Negative positions wrap to end of ring (e.g., -1000 → 263,999,000)
 - Y position: Any valid float (ring width)
 - Floor: -2 to 15
+
+**Position Wrapping**: ✅ **IMPLEMENTED**
+- All positions are automatically wrapped to ensure seamless ring traversal
+- Wrapping handled by `ringmap.ValidatePosition()` utility
+
 **Note**: Users can only update their own position (403 Forbidden if updating another player's position)
 
 ### Zone Management
@@ -342,7 +349,7 @@ Response: {
 
 ### Chunk Management
 
-**Implementation Status:** ✅ **PARTIALLY IMPLEMENTED** (metadata endpoint and WebSocket chunk requests implemented, REST chunk request endpoint pending)
+**Implementation Status:** ✅ **MOSTLY IMPLEMENTED** (metadata endpoint, WebSocket chunk requests with database persistence implemented, REST chunk request endpoint pending)
 
 #### Get Chunk Metadata
 ```
@@ -359,12 +366,24 @@ Response: {
 ```
 **Rate Limit**: 100 requests per minute per user
 **chunk_id Format**: `"floor_chunk_index"` (e.g., `"0_12345"` for floor 0, chunk index 12345)
-**chunk_index Range**: 0 to 263,999
+**chunk_index Range**: 0 to 263,999 (automatically wrapped if out of range)
+**Wrapping**: Chunk indices are automatically wrapped to valid range [0, 264,000)
+  - Example: `0_264000` wraps to `0_0`
+  - Example: `0_-1` wraps to `0_263999`
+  - This ensures seamless ring traversal (chunk 0 connects to chunk 263,999)
 **Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated)
 
 #### Request Chunks via WebSocket ✅ **IMPLEMENTED**
 
 Chunk requests are implemented via WebSocket using the `chunk_request` message type (see WebSocket Protocol section above). This provides real-time bidirectional communication for chunk loading.
+
+**Database Persistence**: ✅ **IMPLEMENTED**
+- Chunks are automatically stored in database after generation
+- Chunks are loaded from database when they exist (avoids regeneration)
+- Storage layer (`server/internal/database/chunks.go`) handles persistence
+- PostGIS geometry stored for spatial queries
+- JSONB terrain_data stores client-friendly geometry format
+- Transaction-safe operations ensure data consistency
 
 #### Request Chunks via REST (To Be Implemented)
 ```
@@ -391,11 +410,12 @@ Response: {
 
 ### Procedural Generation Service API
 
-**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with empty chunk generation)
+**Status**: ✅ **IMPLEMENTED** (Phase 1: basic service with ring floor geometry and station flares)
 
 The Python procedural generation service exposes a REST API for chunk generation. This is an internal service API called by the Go server, not directly exposed to clients.
 
-**Base URL**: `http://localhost:8081` (configurable via `PROCEDURAL_BASE_URL`)
+**Base URL**: `http://127.0.0.1:8081` (default, configurable via `PROCEDURAL_BASE_URL`)
+**Note**: Default uses `127.0.0.1` instead of `localhost` for better Windows compatibility (avoids IPv6 resolution issues)
 
 #### Health Check
 ```
@@ -425,17 +445,32 @@ Response: {
     "chunk_id": "0_12345",
     "floor": 0,
     "chunk_index": 12345,
-    "width": 400.0,
-    "version": 1
+    "width": 400.0,  // Variable: 400m base, up to 25km at station centers
+    "version": 2  // Version 2 includes station flares
   },
-  "geometry": null,        // Empty for Phase 1
+  "geometry": {
+    "type": "ring_floor",
+    "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+    "faces": [[v1, v2, v3], ...],
+    "normals": [[nx1, ny1, nz1], ...],
+    "width": 400.0,  // Variable: 400m base, up to 25km at station centers (station flares)
+    "length": 1000.0
+  },
   "structures": [],        // Empty for Phase 1
   "zones": [],            // Empty for Phase 1
-  "message": "Empty chunk generated (full generation pending Phase 2)"
+  "message": "Chunk generated with ring floor geometry and station flares (full generation with buildings pending Phase 2)"
 }
 ```
 
-**Note**: For Phase 1, this endpoint returns empty chunks with metadata only. Full generation (buildings, zones, geometry) will be implemented in Phase 2.
+**Station Flares**: ✅ **IMPLEMENTED**
+- Chunk width varies based on distance from station centers
+- Base width: 400m (standard ring sections)
+- Maximum width: 25km at pillar/elevator hub centers
+- Smooth cosine-based transitions for seamless geometry
+- 12 pillar/elevator hubs positioned at regular intervals (~22,000 km apart)
+- Chunk levels also vary: 5 base levels → up to 15 levels at hub centers
+
+**Note**: This endpoint returns chunks with ring floor geometry and station flares. Full generation (buildings, zones, structures) will be implemented in Phase 2.
 
 #### Get Chunk Seed
 ```
@@ -644,10 +679,11 @@ All WebSocket messages use JSON:
    - Generates chunks via procedural service if they don't exist in database
    - Server responds with `chunk_data` message
 
-2. **player_move**
+2. **player_move** ✅ **IMPLEMENTED**
    ```json
    {
      "type": "player_move",
+     "id": "req_124",
      "data": {
        "position": {"x": 12345, "y": 0},
        "floor": 0,
@@ -655,6 +691,12 @@ All WebSocket messages use JSON:
      }
    }
    ```
+   - Updates player's position via WebSocket
+   - Position X coordinate is automatically wrapped to valid range [0, 264,000,000)
+   - Floor must be between -2 and 15
+   - Rotation is optional (in degrees)
+   - Server responds with `player_move_ack` message
+   - Position is persisted to database
 
 3. **zone_create**
    ```json
@@ -744,14 +786,21 @@ All WebSocket messages use JSON:
        "chunks": [
          {
            "id": "0_12345",
-           "geometry": null, // Empty for Phase 1, will contain geometry in Phase 2
+           "geometry": {
+             "type": "ring_floor",
+             "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+             "faces": [[v1, v2, v3], ...],
+             "normals": [[nx1, ny1, nz1], ...],
+             "width": 400.0,
+             "length": 1000.0
+           },
            "structures": [], // Empty for Phase 1
            "zones": [], // Empty for Phase 1
            "metadata": {
              "id": "0_12345",
              "floor": 0,
              "chunk_index": 12345,
-             "version": 1,
+             "version": 2,
              "last_modified": "2024-01-01T00:00:00Z",
              "is_dirty": false
            }
@@ -761,8 +810,9 @@ All WebSocket messages use JSON:
    }
    ```
    - Response to `chunk_request` messages
-   - Returns empty chunks with metadata for Phase 1
-   - Geometry, structures, and zones will be populated in Phase 2
+   - Returns chunks with basic ring floor geometry for Phase 1
+   - Ring floor geometry is visible in client (gray rectangular planes)
+   - Structures and zones will be populated in Phase 2
 
 2. **chunk_updated**
    ```json
@@ -806,15 +856,20 @@ All WebSocket messages use JSON:
    }
    ```
 
-5. **player_move_ack** (Acknowledgment)
+5. **player_move_ack** (Acknowledgment) ✅ **IMPLEMENTED**
    ```json
    {
      "type": "player_move_ack",
-     "id": "req_124" // Matches player_move request ID
+     "id": "req_124", // Matches player_move request ID
+     "data": {
+       "success": true
+     }
    }
    ```
    - Acknowledgment response to `player_move` messages
-   - Currently returns immediately (full implementation pending Phase 2)
+   - Sent after position is validated, wrapped, and updated in database
+   - Position wrapping ensures seamless ring traversal
+   - If position update fails, an `error` message is sent instead
 
 6. **player_moved** (Broadcast)
    ```json

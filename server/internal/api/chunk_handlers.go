@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 	"github.com/earthring/server/internal/procedural"
+	"github.com/earthring/server/internal/ringmap"
 )
 
 // ChunkHandlers handles chunk-related HTTP requests.
@@ -74,11 +76,13 @@ func (h *ChunkHandlers) GetChunkMetadata(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Validate chunk_index range (0 to 263,999)
-	if chunkIndex < 0 || chunkIndex > 263999 {
-		respondWithError(w, http.StatusBadRequest, "Invalid chunk_index (must be 0-263999)")
+	// Wrap chunk index to valid range (handles wrapping around ring)
+	wrappedChunkIndex, err := ringmap.ValidateChunkIndex(chunkIndex)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid chunk_index: %v", err))
 		return
 	}
+	chunkIndex = wrappedChunkIndex
 
 	// Query chunk metadata from database
 	var metadata ChunkMetadata

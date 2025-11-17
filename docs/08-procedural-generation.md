@@ -27,11 +27,16 @@
 
 The procedural generation system creates the cityscape, buildings, parks, and decorative elements of EarthRing. It uses deterministic, seed-based algorithms to ensure consistent generation across all clients while allowing for variety and realistic city layouts.
 
-**Implementation Status**: ✅ **SERVICE IMPLEMENTED** (Phase 1)
+**Implementation Status**: ✅ **SERVICE IMPLEMENTED** (Phase 1 + Station Flares)
 - Python service implemented with FastAPI (`server/internal/procedural/main.py`)
 - Go client implemented for service communication (`server/internal/procedural/client.go`)
 - Seed generation utilities implemented (`server/internal/procedural/seeds.py`)
-- **Current**: Returns chunks with basic ring floor geometry (Phase 1)
+- **Station flare calculations**: ✅ **IMPLEMENTED** (`server/internal/procedural/stations.py`)
+  - Variable-width chunks (400m base → up to 25km at hub centers)
+  - Variable-height chunks (5 base levels → up to 15 levels at hub centers)
+  - 12 pillar/elevator hubs positioned at regular intervals
+  - Cosine-based smooth transitions for seamless geometry
+- **Current**: Returns chunks with ring floor geometry and station flares
 - **Future**: Full generation with buildings, zones, structures (Phase 2)
 
 **Key Characteristics:**
@@ -1127,8 +1132,10 @@ def regenerate_chunk(chunk_id, reason, force=False):
 - ✅ Health check endpoint working
 - ✅ Service configuration and environment variables
 - ✅ Windows compatibility (default uses 127.0.0.1 instead of localhost)
+- ✅ Chunk storage and database persistence implemented (PostGIS geometry storage)
+- ✅ Station flare calculations implemented (variable-width and variable-height chunks)
 
-**Status**: ✅ **COMPLETE** - Service foundation implemented with basic geometry generation, ready for Phase 2 full generation.
+**Status**: ✅ **COMPLETE** - Service foundation implemented with basic geometry generation, station flares, and database persistence. Ready for Phase 2 full generation with buildings and structures.
 
 ### Phase 2: MVP (Basic Generation)
 

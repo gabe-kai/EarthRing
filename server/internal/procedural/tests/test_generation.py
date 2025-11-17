@@ -15,16 +15,21 @@ from internal.procedural import seeds
 
 
 def test_get_chunk_width():
-    """Test chunk width calculation"""
+    """Test chunk width calculation with station flares"""
     floor = 0
-    chunk_index = 100
+    chunk_index = 100  # 100km from position 0 (outside flare range)
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
 
     width = generation.get_chunk_width(floor, chunk_index, chunk_seed)
 
-    # Should return base width (400m) for Phase 1
+    # Should return base width (400m) since chunk 100 is outside station flare range
     assert width == 400.0
     assert isinstance(width, float)
+
+    # Test at hub center (chunk 0) - should have max width
+    width_at_hub = generation.get_chunk_width(0, 0, chunk_seed)
+    assert width_at_hub > 20000.0  # Should be close to max width (25km)
+    assert width_at_hub <= 25000.0
 
 
 def test_generate_empty_chunk():
@@ -44,6 +49,7 @@ def test_generate_empty_chunk():
     assert chunk["geometry"]["type"] == "ring_floor"
     assert len(chunk["geometry"]["vertices"]) == 4
     assert len(chunk["geometry"]["faces"]) == 2
+    # Width should be base width (400m) since chunk 100 is outside station flare range
     assert chunk["geometry"]["width"] == 400.0
     assert chunk["geometry"]["length"] == 1000.0
     # Check vertices are in absolute positions
