@@ -146,6 +146,14 @@ func (s *ChunkStorage) GetChunkData(chunkID int64) (*StoredChunkData, error) {
 	return &data, nil
 }
 
+// rollbackTx safely rolls back a transaction, ignoring errors if the transaction was already committed.
+func rollbackTx(tx *sql.Tx) {
+	if err := tx.Rollback(); err != nil {
+		// Transaction was already committed or closed, ignore rollback error
+		// This is expected behavior - if Commit() succeeded, Rollback() will fail
+	}
+}
+
 // StoreChunk stores a chunk in the database (both metadata and geometry)
 func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural.GenerateChunkResponse, proceduralSeed *int) error {
 	if genResponse == nil {
@@ -166,11 +174,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		// Rollback is safe to call even if the transaction was already committed.
-		// If Commit() succeeded, Rollback() will return an error which we can ignore.
-		_ = tx.Rollback()
-	}()
+	defer rollbackTx(tx)
 
 	// Insert or update chunk metadata
 	var chunkID int64
