@@ -167,10 +167,9 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() {
-		if err := tx.Rollback(); err != nil {
-			// Ignore rollback error if transaction was already committed
-			// This is expected behavior - if Commit() succeeded, Rollback() will fail
-		}
+		// Rollback is safe to call even if the transaction was already committed.
+		// If Commit() succeeded, Rollback() will return an error which we can ignore.
+		_ = tx.Rollback()
 	}()
 
 	// Insert or update chunk metadata
