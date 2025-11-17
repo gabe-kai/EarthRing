@@ -232,6 +232,8 @@ EarthRing/
 │   │   ├── auth/                      # Authentication UI and service
 │   │   ├── network/                   # WebSocket client and network utilities
 │   │   ├── ui/                        # UI components (player panel, chunk panel)
+│   │   ├── utils/                     # Utility modules
+│   │   │   └── coordinates.js         # Coordinate conversion utilities (EarthRing ↔ Three.js ↔ Unreal)
 │   │   ├── config.js                  # Client configuration
 │   │   └── test-utils.js              # Test utilities and mocks
 │   ├── assets/                        # Game assets (models, textures, shaders)
