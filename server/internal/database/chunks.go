@@ -151,6 +151,7 @@ func rollbackTx(tx *sql.Tx) {
 	if err := tx.Rollback(); err != nil {
 		// Transaction was already committed or closed, ignore rollback error
 		// This is expected behavior - if Commit() succeeded, Rollback() will fail
+		_ = err // Explicitly ignore error to satisfy staticcheck SA9003
 	}
 }
 
