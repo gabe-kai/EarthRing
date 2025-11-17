@@ -129,7 +129,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 2. Chunk storage and retrieval (PostGIS geometry types, compression) - **COMPLETE**
 3. Map wrapping logic (modulo 264,000 km, seamless boundaries) - **COMPLETE**
 4. Basic coordinate system handling (X=ring, Y=width, Z=floor) - **COMPLETE** (from Phase 1)
-5. Station flare calculations (horizontal and vertical, dual-flare geometry)
+5. Station flare calculations (horizontal and vertical, dual-flare geometry) - **COMPLETE**
 6. Client-side chunk loading and rendering (chunk request, decompression, rendering) - **PARTIALLY COMPLETE** (chunk request/response working, decompression pending)
 7. Basic 3D scene rendering (empty ring with stations, camera controls) - **PARTIALLY COMPLETE** (basic scene working, stations pending)
 
@@ -138,7 +138,8 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Chunk storage and retrieval working (PostGIS geometry types, database persistence) - **COMPLETE**
 - ✅ Chunks can be loaded and rendered in client (1 km chunks, variable width, ring floor geometry visible) - **COMPLETE**
 - ✅ Map wrapping works correctly (seamless loop, server-side wrapping for positions and chunk indices) - **COMPLETE**
-- ⏳ Station geometry renders correctly (flare shapes: 5km/16km/25km hubs) - **PENDING**
+- ✅ Station flare calculations working (variable-width chunks: 400m base → 25km at hubs, variable-height: 5 base levels → 15 levels at hubs) - **COMPLETE**
+- ⏳ Station geometry renders correctly in client (flare shapes visible) - **PENDING**
 - ⏳ Chunk compression/decompression working (gzip, MessagePack, WebP) - **PENDING**
 
 **Dependencies**: Phase 1 complete, procedural generation spec (`08-procedural-generation.md`)

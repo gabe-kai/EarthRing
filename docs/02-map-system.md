@@ -205,13 +205,18 @@ The ring features three types of stations, each with different sizes and purpose
 
 #### Station Geometry
 
+**Status**: ✅ **IMPLEMENTED** - Station flare calculations (`server/internal/procedural/stations.py`) provide variable-width and variable-height chunks based on distance from station centers.
+
 All stations use a smooth **dual-flare transition** (both horizontal and vertical) from the base ring dimensions to their maximum dimensions at the station center. The flare shape uses a cosine-based smooth transition for both axes.
 
 **Base Ring Dimensions**:
 - **Base Width**: 400 meters
 - **Base Height**: 5 levels (Levels -2, -1, 0, +1, +2)
 
-**Flare Width Calculation** (generalized for all station types):
+**Flare Width Calculation** (generalized for all station types): ✅ **IMPLEMENTED**
+
+**Implementation**: `stations.calculate_flare_width()` in `server/internal/procedural/stations.py`
+
 ```
 distance_from_center = |position - station_center|
 flare_radius = station_type.max_flare_radius  // 12,500, 8,000, or 2,500
@@ -227,7 +232,16 @@ else:
     width = base_width
 ```
 
-**Flare Height Calculation** (generalized for all station types):
+**Features**:
+- Automatically calculates chunk width based on distance from nearest station
+- Supports ring wrapping (distance calculations account for ring boundaries)
+- Cosine-based smooth transitions for seamless geometry
+- Currently implements 12 pillar/elevator hubs (regional hubs and local stations can be added)
+
+**Flare Height Calculation** (generalized for all station types): ✅ **IMPLEMENTED**
+
+**Implementation**: `stations.calculate_flare_levels()` in `server/internal/procedural/stations.py`
+
 ```
 distance_from_center = |position - station_center|
 max_levels = station_type.max_levels  // 15, 11, or 7
@@ -243,6 +257,12 @@ else:
     // Outside flare zone - base levels
     total_levels = base_levels
 ```
+
+**Features**:
+- Automatically calculates chunk levels based on distance from nearest station
+- Returns integer number of levels (5 base, up to 15 at pillar/elevator hub centers)
+- Integrated into chunk generation (`get_chunk_levels()` function)
+- Chunk metadata includes `chunk_levels` field
 
 **Utility Space in Sloping Areas**:
 - The sloping exterior areas created by vertical flaring are designated as **utility space**
