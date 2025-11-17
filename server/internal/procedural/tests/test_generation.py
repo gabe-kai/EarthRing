@@ -28,18 +28,57 @@ def test_get_chunk_width():
 
 
 def test_generate_empty_chunk():
-    """Test empty chunk generation"""
+    """Test chunk generation (now generates geometry in Phase 2)"""
     floor = 0
     chunk_index = 100
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
 
-    chunk = generation.generate_empty_chunk(floor, chunk_index, chunk_seed)
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
 
     assert chunk["chunk_id"] == "0_100"
     assert chunk["floor"] == 0
     assert chunk["chunk_index"] == 100
     assert chunk["seed"] == chunk_seed
-    assert chunk["geometry"] is None
+    # Geometry should be present (Phase 2)
+    assert chunk["geometry"] is not None
+    assert chunk["geometry"]["type"] == "ring_floor"
+    assert len(chunk["geometry"]["vertices"]) == 4
+    assert len(chunk["geometry"]["faces"]) == 2
+    assert chunk["geometry"]["width"] == 400.0
+    assert chunk["geometry"]["length"] == 1000.0
+    # Check vertices are in absolute positions
+    assert chunk["geometry"]["vertices"][0][0] == chunk_index * 1000.0  # X position
+    assert chunk["geometry"]["vertices"][0][2] == floor  # Z position (floor)
     assert chunk["structures"] == []
     assert chunk["zones"] == []
     assert chunk["metadata"]["generated"] is True
+    assert chunk["metadata"]["version"] == 2  # Phase 2 version
+
+
+def test_generate_ring_floor_geometry():
+    """Test ring floor geometry generation"""
+    from internal.procedural import generation
+
+    chunk_width = 400.0
+    geometry = generation.generate_ring_floor_geometry(chunk_width)
+
+    assert geometry["type"] == "ring_floor"
+    assert geometry["width"] == 400.0
+    assert geometry["length"] == 1000.0
+    assert len(geometry["vertices"]) == 4
+    assert len(geometry["faces"]) == 2
+    assert len(geometry["normals"]) == 2
+
+    # Check vertices are relative positions (will be adjusted in generate_chunk)
+    assert geometry["vertices"][0] == [0.0, -200.0, 0.0]  # Bottom-left
+    assert geometry["vertices"][1] == [1000.0, -200.0, 0.0]  # Bottom-right
+    assert geometry["vertices"][2] == [1000.0, 200.0, 0.0]  # Top-right
+    assert geometry["vertices"][3] == [0.0, 200.0, 0.0]  # Top-left
+
+    # Check faces are triangles
+    assert geometry["faces"][0] == [0, 1, 2]
+    assert geometry["faces"][1] == [0, 2, 3]
+
+    # Check normals point up (Z direction in EarthRing)
+    assert geometry["normals"][0] == [0.0, 0.0, 1.0]
+    assert geometry["normals"][1] == [0.0, 0.0, 1.0]

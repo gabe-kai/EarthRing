@@ -166,10 +166,10 @@ class WebSocketClient {
         } else {
           pending.resolve(message.data);
         }
-        return;
+        // Don't return - continue to handle as event too (for chunk_data, etc.)
       }
 
-      // Handle message type handlers
+      // Handle message type handlers (always process, even if it was a response)
       if (this.messageHandlers.has(message.type)) {
         const handlers = this.messageHandlers.get(message.type);
         handlers.forEach(handler => handler(message.data, message));

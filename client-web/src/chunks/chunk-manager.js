@@ -4,7 +4,7 @@
  */
 
 import { wsClient } from '../network/websocket-client.js';
-import { positionToChunkIndex } from '../utils/coordinates.js';
+import { positionToChunkIndex, toThreeJS } from '../utils/coordinates.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
 import * as THREE from 'three';
 
@@ -61,10 +61,10 @@ export class ChunkManager {
   /**
    * Request chunks via WebSocket
    * @param {Array<string>} chunkIDs - Array of chunk IDs (format: "floor_chunk_index")
-   * @param {number} lodLevel - Level of detail (0-3)
+   * @param {string|number} lodLevel - Level of detail: "low", "medium", "high" or 0-3 (converted to string)
    * @returns {Promise} Promise that resolves when request is sent
    */
-  async requestChunks(chunkIDs, lodLevel = 0) {
+  async requestChunks(chunkIDs, lodLevel = 'medium') {
     if (!wsClient.isConnected()) {
       throw new Error('WebSocket is not connected');
     }
@@ -78,16 +78,23 @@ export class ChunkManager {
       throw new Error('Cannot request more than 10 chunks at once');
     }
     
-    // Validate LOD level
-    if (lodLevel < 0 || lodLevel > 3) {
-      throw new Error('LOD level must be between 0 and 3');
+    // Convert numeric LOD level to string if needed
+    let lodLevelStr = lodLevel;
+    if (typeof lodLevel === 'number') {
+      const lodMap = { 0: 'low', 1: 'medium', 2: 'high', 3: 'high' };
+      lodLevelStr = lodMap[lodLevel] || 'medium';
+    }
+    
+    // Validate LOD level string
+    if (lodLevelStr !== 'low' && lodLevelStr !== 'medium' && lodLevelStr !== 'high') {
+      lodLevelStr = 'medium'; // Default to medium if invalid
     }
     
     try {
       // Send chunk request via WebSocket
       await wsClient.request('chunk_request', {
         chunks: chunkIDs,
-        lod_level: lodLevel,
+        lod_level: lodLevelStr,
       });
     } catch (error) {
       console.error('Failed to request chunks:', error);
@@ -100,10 +107,10 @@ export class ChunkManager {
    * @param {number} ringPosition - Ring position in meters
    * @param {number} floor - Floor number
    * @param {number} radius - Number of chunks to load on each side (default: 1)
-   * @param {number} lodLevel - Level of detail (0-3)
+   * @param {string|number} lodLevel - Level of detail: "low", "medium", "high" or 0-3 (default: "medium")
    * @returns {Promise} Promise that resolves when request is sent
    */
-  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 0) {
+  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium') {
     const centerChunkIndex = positionToChunkIndex(ringPosition);
     const chunkIDs = [];
     
@@ -126,11 +133,20 @@ export class ChunkManager {
       return;
     }
     
+    console.log(`Received ${data.chunks.length} chunk(s) from server`);
+    
     data.chunks.forEach(chunkData => {
       if (!chunkData.id) {
         console.error('Chunk data missing ID:', chunkData);
         return;
       }
+      
+      console.log(`Processing chunk ${chunkData.id}:`, {
+        hasGeometry: !!chunkData.geometry,
+        geometryType: chunkData.geometry?.type,
+        structures: chunkData.structures?.length || 0,
+        zones: chunkData.zones?.length || 0,
+      });
       
       // Store chunk in game state
       this.gameStateManager.addChunk(chunkData.id, chunkData);
@@ -146,14 +162,94 @@ export class ChunkManager {
     // Remove existing mesh if present
     this.removeChunkMesh(chunkID);
     
-    // For Phase 1, chunks are empty (no geometry yet)
-    // Create a placeholder visualization
-    const placeholder = this.createChunkPlaceholder(chunkID, chunkData);
+    // Check if chunk has geometry data
+    if (chunkData.geometry && chunkData.geometry.type === 'ring_floor') {
+      console.log(`Rendering chunk ${chunkID} with ring floor geometry`);
+      // Render actual geometry (Phase 2)
+      const mesh = this.createRingFloorMesh(chunkID, chunkData);
+      if (mesh) {
+        this.scene.add(mesh);
+        this.chunkMeshes.set(chunkID, mesh);
+        console.log(`Successfully rendered chunk ${chunkID} mesh`);
+        return;
+      } else {
+        console.warn(`Failed to create mesh for chunk ${chunkID}, falling back to placeholder`);
+      }
+    } else {
+      console.log(`Chunk ${chunkID} has no geometry or wrong type, using placeholder`);
+    }
     
+    // Fallback to placeholder if no geometry or geometry creation failed
+    const placeholder = this.createChunkPlaceholder(chunkID, chunkData);
     if (placeholder) {
       this.scene.add(placeholder);
       this.chunkMeshes.set(chunkID, placeholder);
+      console.log(`Rendered placeholder for chunk ${chunkID}`);
     }
+  }
+  
+  /**
+   * Create a Three.js mesh from ring floor geometry data
+   * @param {string} chunkID - Chunk ID
+   * @param {Object} chunkData - Chunk data with geometry
+   * @returns {THREE.Mesh|null} Three.js mesh or null
+   */
+  createRingFloorMesh(chunkID, chunkData) {
+    const geometry = chunkData.geometry;
+    
+    if (!geometry.vertices || !geometry.faces) {
+      console.error('Invalid geometry data for chunk:', chunkID, geometry);
+      return null;
+    }
+    
+    console.log(`Creating ring floor mesh for chunk ${chunkID}:`, {
+      vertexCount: geometry.vertices.length,
+      faceCount: geometry.faces.length,
+      width: geometry.width,
+      length: geometry.length,
+    });
+    
+    // Create Three.js geometry
+    const threeGeometry = new THREE.BufferGeometry();
+    
+    // Convert vertices to Three.js coordinates
+    const positions = [];
+    
+    // Process vertices
+    geometry.vertices.forEach(vertex => {
+      const earthringPos = { x: vertex[0], y: vertex[1], z: vertex[2] };
+      const threeJSPos = toThreeJS(earthringPos);
+      positions.push(threeJSPos.x, threeJSPos.y, threeJSPos.z);
+    });
+    
+    // Process faces
+    const indices = [];
+    geometry.faces.forEach(face => {
+      // Add triangle indices
+      indices.push(face[0], face[1], face[2]);
+    });
+    
+    // Set geometry attributes
+    threeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    threeGeometry.setIndex(indices);
+    
+    // Compute vertex normals automatically (Three.js will handle this correctly)
+    threeGeometry.computeVertexNormals();
+    
+    // Create material (make it more visible)
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x888888, // Lighter gray for better visibility
+      metalness: 0.1,
+      roughness: 0.8,
+      side: THREE.DoubleSide, // Render both sides of the plane
+    });
+    
+    // Create mesh
+    const mesh = new THREE.Mesh(threeGeometry, material);
+    mesh.userData.chunkID = chunkID;
+    mesh.userData.chunkData = chunkData;
+    
+    return mesh;
   }
   
   /**

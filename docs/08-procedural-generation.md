@@ -31,8 +31,8 @@ The procedural generation system creates the cityscape, buildings, parks, and de
 - Python service implemented with FastAPI (`server/internal/procedural/main.py`)
 - Go client implemented for service communication (`server/internal/procedural/client.go`)
 - Seed generation utilities implemented (`server/internal/procedural/seeds.py`)
-- **Current**: Returns empty chunks with metadata (Phase 1)
-- **Future**: Full generation with buildings, zones, geometry (Phase 2)
+- **Current**: Returns chunks with basic ring floor geometry (Phase 1)
+- **Future**: Full generation with buildings, zones, structures (Phase 2)
 
 **Key Characteristics:**
 - **Deterministic**: Same seed always produces same result
@@ -1121,12 +1121,14 @@ def regenerate_chunk(chunk_id, reason, force=False):
 **Deliverables:**
 - ✅ Python service runs and responds to requests
 - ✅ Seed generation utilities working (deterministic)
-- ✅ Chunk generation endpoint returns empty chunks with metadata
+- ✅ Chunk generation endpoint returns chunks with basic ring floor geometry
+- ✅ Ring floor geometry visible in client (gray rectangular planes)
 - ✅ Go server can communicate with Python service
 - ✅ Health check endpoint working
 - ✅ Service configuration and environment variables
+- ✅ Windows compatibility (default uses 127.0.0.1 instead of localhost)
 
-**Status**: ✅ **COMPLETE** - Service foundation implemented, ready for Phase 2 full generation.
+**Status**: ✅ **COMPLETE** - Service foundation implemented with basic geometry generation, ready for Phase 2 full generation.
 
 ### Phase 2: MVP (Basic Generation)
 

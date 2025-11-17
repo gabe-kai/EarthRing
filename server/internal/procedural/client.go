@@ -39,10 +39,14 @@ type GenerateChunkRequest struct {
 	WorldSeed  *int   `json:"world_seed,omitempty"`
 }
 
-// ChunkGeometry represents chunk geometry data
+// ChunkGeometry represents chunk geometry data (Phase 2: ring floor geometry)
 type ChunkGeometry struct {
-	Type        string        `json:"type"`
-	Coordinates [][][]float64 `json:"coordinates"`
+	Type     string       `json:"type"`     // e.g., "ring_floor"
+	Vertices [][]float64  `json:"vertices"` // Array of [x, y, z] vertices
+	Faces    [][]int      `json:"faces"`     // Array of [v1, v2, v3] face indices
+	Normals  [][]float64  `json:"normals"`   // Array of [nx, ny, nz] normals
+	Width    float64      `json:"width"`     // Chunk width in meters
+	Length   float64      `json:"length"`    // Chunk length in meters
 }
 
 // ChunkMetadata represents chunk metadata
