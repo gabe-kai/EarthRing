@@ -43,3 +43,42 @@ export async function getChunkMetadata(chunkID) {
   return await response.json();
 }
 
+/**
+ * Delete a chunk from the database
+ * This will cause the procedural service to regenerate the chunk on next request.
+ * @param {string} chunkID - Format: "floor_chunk_index" (e.g., "0_12345")
+ * @returns {Promise<Object>} Success response with message
+ */
+export async function deleteChunk(chunkID) {
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(getAPIURL(`/api/chunks/${chunkID}`), {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    let errorMessage = 'Failed to delete chunk';
+    try {
+      const error = await response.json();
+      errorMessage = error.message || error.error || errorMessage;
+      if (response.status === 401 || error.code === 'InvalidToken' || error.code === 'MissingToken') {
+        errorMessage = 'Session expired. Please log in again.';
+      } else if (response.status === 404) {
+        errorMessage = error.message || 'Chunk not found';
+      }
+    } catch (e) {
+      errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+    }
+    throw new Error(errorMessage);
+  }
+
+  return await response.json();
+}
+

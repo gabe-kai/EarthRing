@@ -100,7 +100,30 @@ The rate limiter uses `getClientIP()` to extract client IP addresses, which:
 
 This ensures accurate rate limiting even behind proxies or load balancers.
 
+### Chunk Handlers
+
+Handles chunk-related HTTP requests:
+- `GET /api/chunks/{chunk_id}` - Get chunk metadata
+- `DELETE /api/chunks/{chunk_id}` - Delete chunk (forces regeneration on next request)
+
+**Features:**
+- Authentication required for all chunk operations
+- Chunk index wrapping (handles ring boundaries)
+- Transaction-safe deletion (removes both metadata and geometry)
+- Comprehensive error handling and validation
+
+**Usage:**
+```go
+handlers := api.NewChunkHandlers(db, cfg)
+// Handlers are registered via SetupChunkRoutes()
+```
+
 ## Testing
+
+Comprehensive tests in `chunk_handlers_test.go` cover:
+- Chunk metadata retrieval (existing, non-existent, invalid formats)
+- Chunk deletion (success, non-existent, authentication, validation, wrapping)
+- Error handling and edge cases
 
 Run tests:
 ```bash

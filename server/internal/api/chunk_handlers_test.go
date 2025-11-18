@@ -251,3 +251,249 @@ func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestDeleteChunk(t *testing.T) {
+	// Setup test database
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	// Ensure PostGIS extension is available
+	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
+	if err != nil {
+		t.Skipf("PostGIS extension not available: %v", err)
+	}
+
+	// Create tables
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunk_data (
+			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+			geometry GEOMETRY(POLYGON, 0) NOT NULL,
+			structure_ids INTEGER[],
+			zone_ids INTEGER[],
+			terrain_data JSONB,
+			last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunk_data table: %v", err)
+	}
+
+	// Clean up any existing test chunks
+	_, _ = db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3))", 0, 12370, 12371)
+	_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3)", 0, 12370, 12371)
+
+	// Create config
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+	}
+
+	// Create JWT service and generate token
+	jwtService := auth.NewJWTService(cfg)
+	token, err := jwtService.GenerateAccessToken(1, "testuser", "player")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	// Create handlers
+	handlers := NewChunkHandlers(db, cfg)
+
+	t.Run("successfully deletes existing chunk", func(t *testing.T) {
+		// Create test chunk with chunk_data
+		var chunkID int64
+		err = db.QueryRow(`
+			INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, 0, 12370, 2, false).Scan(&chunkID)
+		if err != nil {
+			t.Fatalf("Failed to create test chunk: %v", err)
+		}
+
+		_, err = db.Exec(`
+			INSERT INTO chunk_data (chunk_id, geometry, terrain_data)
+			VALUES ($1, ST_GeomFromText('POLYGON((0 0, 1000 0, 1000 400, 0 400, 0 0))', 0), $2)
+		`, chunkID, `{"test": "data"}`)
+		if err != nil {
+			t.Fatalf("Failed to create chunk_data: %v", err)
+		}
+
+		// Create DELETE request
+		req := httptest.NewRequest("DELETE", "/api/chunks/0_12370", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add user context
+		ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+		req = req.WithContext(ctx)
+
+		// Create response recorder
+		rr := httptest.NewRecorder()
+
+		// Call handler
+		handlers.DeleteChunk(rr, req)
+
+		// Check status code
+		if rr.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
+			return
+		}
+
+		// Parse response
+		var response map[string]interface{}
+		if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		// Verify response
+		if success, ok := response["success"].(bool); !ok || !success {
+			t.Errorf("Expected success=true, got %v", response["success"])
+		}
+		if chunkIDResp, ok := response["chunk_id"].(string); !ok || chunkIDResp != "0_12370" {
+			t.Errorf("Expected chunk_id='0_12370', got %v", response["chunk_id"])
+		}
+
+		// Verify chunk is actually deleted
+		var count int
+		err = db.QueryRow("SELECT COUNT(*) FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12370).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunks: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk should be deleted from database")
+		}
+
+		// Verify chunk_data is also deleted
+		err = db.QueryRow("SELECT COUNT(*) FROM chunk_data WHERE chunk_id = $1", chunkID).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunk_data: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk data should be deleted from database")
+		}
+	})
+
+	t.Run("returns 404 for non-existent chunk", func(t *testing.T) {
+		// Create DELETE request for non-existent chunk
+		req := httptest.NewRequest("DELETE", "/api/chunks/0_99999", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add user context
+		ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+		req = req.WithContext(ctx)
+
+		// Create response recorder
+		rr := httptest.NewRecorder()
+
+		// Call handler
+		handlers.DeleteChunk(rr, req)
+
+		// Check status code
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d. Body: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("returns 401 for missing authentication", func(t *testing.T) {
+		// Create DELETE request without token
+		req := httptest.NewRequest("DELETE", "/api/chunks/0_12371", nil)
+		// No Authorization header
+
+		// Create response recorder
+		rr := httptest.NewRecorder()
+
+		// Call handler
+		handlers.DeleteChunk(rr, req)
+
+		// Check status code
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d. Body: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("returns 400 for invalid chunk ID format", func(t *testing.T) {
+		testCases := []struct {
+			name    string
+			chunkID string
+		}{
+			{"invalid format", "invalid"},
+			{"missing underscore", "012345"},
+			{"too many parts", "0_12345_extra"},
+			{"invalid floor", "abc_12345"},
+			{"invalid chunk_index", "0_abc"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := httptest.NewRequest("DELETE", "/api/chunks/"+tc.chunkID, nil)
+				req.Header.Set("Authorization", "Bearer "+token)
+
+				ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+				req = req.WithContext(ctx)
+
+				rr := httptest.NewRecorder()
+				handlers.DeleteChunk(rr, req)
+
+				if rr.Code != http.StatusBadRequest {
+					t.Errorf("Expected status 400, got %d. Body: %s", rr.Code, rr.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("handles chunk index wrapping", func(t *testing.T) {
+		// Create chunk at wrapped index (264000 wraps to 0)
+		var chunkID int64
+		err = db.QueryRow(`
+			INSERT INTO chunks (floor, chunk_index, version)
+			VALUES ($1, $2, $3)
+			RETURNING id
+		`, 0, 0, 1).Scan(&chunkID)
+		if err != nil {
+			t.Fatalf("Failed to create test chunk: %v", err)
+		}
+
+		// Try to delete using wrapped index
+		req := httptest.NewRequest("DELETE", "/api/chunks/0_264000", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.DeleteChunk(rr, req)
+
+		// Should succeed (wraps to chunk 0)
+		if rr.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
+		}
+
+		// Verify chunk 0 is deleted
+		var count int
+		err = db.QueryRow("SELECT COUNT(*) FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 0).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunks: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk 0 should be deleted")
+		}
+	})
+}

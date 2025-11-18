@@ -12,6 +12,7 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
 	"github.com/earthring/server/internal/ringmap"
 )
@@ -123,5 +124,88 @@ func (h *ChunkHandlers) GetChunkMetadata(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(metadata); err != nil {
 		log.Printf("Failed to encode chunk metadata: %v", err)
+	}
+}
+
+// DeleteChunk handles DELETE /api/chunks/{chunk_id} requests.
+// Deletes a chunk and its associated data from the database.
+// This will cause the procedural service to regenerate the chunk on next request.
+func (h *ChunkHandlers) DeleteChunk(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated user from context (set by AuthMiddleware)
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Extract chunk ID from URL path
+	// Path format: /api/chunks/{chunk_id}
+	path := r.URL.Path
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "chunks" {
+		respondWithError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	chunkID := parts[2]
+	if chunkID == "" {
+		respondWithError(w, http.StatusBadRequest, "Chunk ID is required")
+		return
+	}
+
+	// Parse chunk ID format: "floor_chunk_index"
+	chunkParts := strings.Split(chunkID, "_")
+	if len(chunkParts) != 2 {
+		respondWithError(w, http.StatusBadRequest, "Invalid chunk ID format (expected: floor_chunk_index)")
+		return
+	}
+
+	floor, err := strconv.Atoi(chunkParts[0])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid floor in chunk ID")
+		return
+	}
+	var chunkIndex int
+	chunkIndex, err = strconv.Atoi(chunkParts[1])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chunk_index in chunk ID")
+		return
+	}
+
+	// Wrap chunk index to valid range (handles wrapping around ring)
+	wrappedChunkIndex, err := ringmap.ValidateChunkIndex(chunkIndex)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid chunk_index: %v", err))
+		return
+	}
+	chunkIndex = wrappedChunkIndex
+
+	// Delete chunk from database
+	storage := database.NewChunkStorage(h.db)
+	log.Printf("Deleting chunk %s (floor=%d, chunk_index=%d)", chunkID, floor, chunkIndex)
+	err = storage.DeleteChunk(floor, chunkIndex)
+	if err != nil {
+		// Check if chunk doesn't exist
+		if strings.Contains(err.Error(), "chunk not found") {
+			log.Printf("Chunk %s not found in database", chunkID)
+			respondWithError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		log.Printf("Error deleting chunk %s: %v", chunkID, err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chunk")
+		return
+	}
+
+	log.Printf("✓ Successfully deleted chunk %s (floor=%d, chunk_index=%d) - will be regenerated on next request", chunkID, floor, chunkIndex)
+
+	// Return success response
+	response := map[string]interface{}{
+		"success":  true,
+		"message":  fmt.Sprintf("Chunk %s deleted successfully. It will be regenerated on next request.", chunkID),
+		"chunk_id": chunkID,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode delete chunk response: %v", err)
 	}
 }

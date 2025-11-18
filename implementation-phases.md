@@ -136,6 +136,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 **Deliverables:**
 - ✅ Chunk generation system working (procedural service generates ring floor geometry) - **COMPLETE**
 - ✅ Chunk storage and retrieval working (PostGIS geometry types, database persistence) - **COMPLETE**
+- ✅ Chunk deletion system working (transaction-safe deletion, forces regeneration on next request) - **COMPLETE**
 - ✅ Chunks can be loaded and rendered in client (1 km chunks, variable width, ring floor geometry visible) - **COMPLETE**
 - ✅ Map wrapping works correctly (seamless loop, server-side wrapping for positions and chunk indices) - **COMPLETE**
 - ✅ Station flare calculations working (variable-width chunks: 400m base → 25km at hubs, variable-height: 5 base levels → 15 levels at hubs) - **COMPLETE**
@@ -150,6 +151,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - Variable-width chunks (400m base, up to 25km at stations)
 - Station flare geometry (horizontal and vertical)
 - PostGIS spatial queries
+- Chunk deletion (transaction-safe, forces regeneration on next request)
 - Chunk compression (geometry, textures, metadata)
 
 ### Phase 3: Zone System (Weeks 9-12)
@@ -712,7 +714,7 @@ EarthRing has completed its design and planning phases with comprehensive docume
 - ✅ Database Schema: Complete (13 migrations, all tables created)
 - ✅ Phase 0 (Foundation): Complete (development environment, testing framework, CI/CD, project structure)
 - ✅ Phase 1 (Core Infrastructure): Complete (authentication, REST API, WebSocket, client structure, coordinate conversion)
-- ⏳ Phase 2 (Map System Foundation): In Progress (chunk generation, storage, wrapping, station flares, and client-side rendering complete; compression pending)
+- ⏳ Phase 2 (Map System Foundation): In Progress (chunk generation, storage, deletion, wrapping, station flares, and client-side rendering complete; compression pending)
 
 **Next Milestone**: Complete remaining Phase 2 deliverables (chunk compression/decompression), then begin Phase 3 (Zone System).
 
