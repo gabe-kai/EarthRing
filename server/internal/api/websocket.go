@@ -481,10 +481,10 @@ func compressChunkGeometry(geometry interface{}) (interface{}, error) {
 			// Try to reconstruct ChunkGeometry from map
 			// This is a basic implementation - we'd need proper JSON unmarshaling in production
 			// For now, we'll compress what we can
-			vertices, _ := geom["vertices"].([]interface{})
-			faces, _ := geom["faces"].([]interface{})
+			vertices, verticesOk := geom["vertices"].([]interface{})
+			faces, facesOk := geom["faces"].([]interface{})
 
-			if vertices != nil && faces != nil {
+			if verticesOk && facesOk && vertices != nil && faces != nil {
 				// Convert to proper types (simplified - would need full conversion in production)
 				chunkGeometry = &procedural.ChunkGeometry{
 					Type: geomType,
