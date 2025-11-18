@@ -10,8 +10,15 @@ EarthRing is set on a massive orbital ring structure:
 - **Station System**: 12 pillar/elevator hubs spaced ~22,000 km apart
   - Chunks flare from 400m base width to 25 km maximum width at hub centers
   - Chunks flare from 5 base levels to 15 levels at hub centers
-  - Smooth cosine-based transitions for seamless geometry
+  - Seam center plateau: the five chunk centers surrounding each pillar hub (two on either side of the seam plus the seam chunk itself) are clamped to the maximum width before tapering outward, guaranteeing a perfectly flush transition at chunk indices `...263998, 263999, 0, 1, 2...`
+  - Smooth cosine-based transitions for the remainder of each flare zone
 - **Gameplay**: City building, NPC simulation, and racing through player-built cities
+
+## Current Client Features
+
+- **Keyboard-relative camera movement**: WASD (forward/backward along camera view, left/right strafe), QE (vertical up/down), and OrbitControls can be used simultaneously. Movement is relative to camera orientation. Input is suppressed automatically while typing in UI fields.
+- **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
+- **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 
 ## Prerequisites
 
@@ -177,6 +184,7 @@ npm run dev
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints
 - UI panels provide forms to test all endpoints with JSON result display
+- Player position updates automatically move the camera to the new location with smooth animation
 
 **Run tests:**
 ```bash

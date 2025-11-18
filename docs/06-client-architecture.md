@@ -255,6 +255,8 @@ Handles 3D rendering using the chosen graphics library.
 - Smooth damping for camera movement
 - Zoom, rotate, and pan controls
 - Camera positioning from EarthRing coordinates
+- Keyboard movement controls (WASD/QE) with camera-relative movement
+- Programmatic camera movement (`moveToPosition()`) for smooth transitions
 
 **Key Features**:
 - Automatic window resize handling
@@ -348,6 +350,8 @@ Manages chunk loading and unloading based on viewport.
 - Position-based chunk loading (converts ring position to chunk indices)
 - Automatic chunk rendering when added to game state
 - Ring floor geometry rendering (Phase 1: basic gray planes with variable width from station flares visible)
+- Keyboard-relative camera controls (WASD for forward/backward/strafe movement relative to camera view, QE for vertical up/down) integrated with OrbitControls while respecting focused input fields
+- Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam
 - Mesh cleanup and resource disposal
 - Integration with game state manager for caching
 
@@ -757,8 +761,8 @@ class GraphicsAbstraction {
    - Zone drawing (click and drag)
 
 2. **Keyboard**
-   - Camera movement (WASD)
-   - Actions (E to interact, R to race)
+   - Camera movement (WASD for forward/backward/strafe, QE for vertical movement)
+   - Actions (E to interact, R to race) - **PENDING** (Phase 3+)
    - UI shortcuts
 
 3. **Touch** (Mobile)

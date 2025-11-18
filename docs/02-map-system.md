@@ -222,11 +222,24 @@ distance_from_center = |position - station_center|
 flare_radius = station_type.max_flare_radius  // 12,500, 8,000, or 2,500
 flare_length = station_type.flare_length  // 50,000, 32,000, or 10,000
 base_width = 400
+flare_range = flare_length / 2
 
-if distance_from_center <= flare_length / 2:
-    // Within flare zone - smooth transition
-    normalized_distance = distance_from_center / (flare_length / 2)
-    width = base_width + (flare_radius * 2 - base_width) * (1 - cos(π * normalized_distance)) / 2
+if distance_from_center <= flare_range:
+    // Pillar/elevator hubs have a flat plateau at the center
+    // Plateau covers ±2.5 km (5 chunks: -2, -1, 0, +1, +2 relative to station center)
+    plateau_radius = 2500.0 if station_type is PILLAR_ELEVATOR_HUB else 0.0
+    
+    if plateau_radius > 0.0 && distance_from_center <= plateau_radius:
+        // Within plateau: full maximum width
+        width = flare_radius * 2.0
+    else:
+        // After plateau: smooth cosine taper
+        effective_range = flare_range - plateau_radius
+        adjusted_distance = max(distance_from_center - plateau_radius, 0.0)
+        normalized_distance = adjusted_distance / effective_range
+        flare_contribution = (1 + cos(π * normalized_distance)) / 2
+        max_width = flare_radius * 2.0
+        width = base_width + (max_width - base_width) * flare_contribution
 else:
     // Outside flare zone - base width
     width = base_width
@@ -236,6 +249,7 @@ else:
 - Automatically calculates chunk width based on distance from nearest station
 - Supports ring wrapping (distance calculations account for ring boundaries)
 - Cosine-based smooth transitions for seamless geometry
+- **Pillar hub plateau**: Five center chunks (indices ...263998, 263999, 0, 1, 2...) at pillar hubs receive maximum width before tapering, ensuring perfect seam alignment
 - Currently implements 12 pillar/elevator hubs (regional hubs and local stations can be added)
 
 **Flare Height Calculation** (generalized for all station types): ✅ **IMPLEMENTED**

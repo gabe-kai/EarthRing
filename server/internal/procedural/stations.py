@@ -193,14 +193,29 @@ def calculate_flare_width(ring_position: float) -> float:
     # Check if within flare zone
     flare_range = station_type.flare_length / 2.0
     if distance <= flare_range:
-        # Calculate normalized distance (0 = at center, 1 = at edge)
-        normalized_distance = distance / flare_range
+        # Pillar hubs should have a flat plateau across the four chunks that straddle the seam.
+        # Chunk centers occur every 1 km; we want the two chunks on each side of the station center
+        # (±0.5 km and ±1.5 km) to all receive the full width.
+        # Keep the five center chunks (two on each side of the seam plus the seam chunk)
+        # at full width. Chunk centers are spaced 1 km apart, so covering ±2.5 km
+        # ensures chunk indices (..., -2, -1, 0, +1, +2, ...) all receive the max width.
+        plateau_radius = 2500.0 if station_type is PILLAR_ELEVATOR_HUB else 0.0
+
+        if plateau_radius > 0.0 and distance <= plateau_radius:
+            return station_type.max_flare_radius * 2.0
+
+        # After the plateau, fall back to the smooth cosine curve over the remaining range.
+        effective_range = flare_range - plateau_radius
+        adjusted_distance = max(distance - plateau_radius, 0.0)
+
+        if effective_range <= 0.0:
+            normalized_distance = 1.0
+        else:
+            # Calculate normalized distance (0 = start of taper, 1 = edge of flare zone)
+            normalized_distance = adjusted_distance / effective_range
 
         # Cosine-based smooth transition
-        # At center (normalized_distance = 0): flare_contribution = 1 (max width)
-        # At edge (normalized_distance = 1): flare_contribution = 0 (base width)
-        # Formula: (1 + cos(π * normalized_distance)) / 2
-        # This gives: 0 -> 1, 1 -> 0
+        # At start of taper: contribution = 1, at edge: 0.
         flare_contribution = (1.0 + math.cos(math.pi * normalized_distance)) / 2.0
         max_width = station_type.max_flare_radius * 2.0  # Total width = 2 * radius
         width = BASE_WIDTH + (max_width - BASE_WIDTH) * flare_contribution

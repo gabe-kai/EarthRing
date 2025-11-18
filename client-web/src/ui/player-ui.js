@@ -257,6 +257,13 @@ function setupPlayerPanelListeners(playerID) {
       const profile = await getCurrentPlayerProfile();
       display.textContent = JSON.stringify(profile, null, 2);
       display.className = 'result-display show success';
+      
+      // Log player's current position for reference
+      if (profile.current_position) {
+        const pos = profile.current_position;
+        const floor = profile.current_floor || 0;
+        console.log(`Player current position: (${pos.x || pos[0]}, ${pos.y || pos[1]}, floor ${floor})`);
+      }
     } catch (error) {
       display.textContent = `Error: ${error.message}`;
       display.className = 'result-display show error';
@@ -281,6 +288,18 @@ function setupPlayerPanelListeners(playerID) {
       const result = await updatePlayerPosition(playerID, { x, y }, floor);
       resultDisplay.textContent = JSON.stringify(result, null, 2);
       resultDisplay.className = 'result-display show success';
+      
+      // Update camera position to match the new player position
+      if (window.earthring && window.earthring.cameraController) {
+        const cameraController = window.earthring.cameraController;
+        // Smoothly move camera to the new position
+        cameraController.moveToPosition({
+          x: parseFloat(x),
+          y: parseFloat(y),
+          z: parseInt(floor),
+        }, 2); // 2 second smooth movement
+        console.log(`Camera moved to player position: (${x}, ${y}, ${floor})`);
+      }
       
       // Reload profile to show updated position
       setTimeout(() => {

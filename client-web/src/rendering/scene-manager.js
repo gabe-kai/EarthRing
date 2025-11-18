@@ -51,6 +51,9 @@ export class SceneManager {
     // Render loop callback
     this.onRenderCallbacks = [];
     
+    // Time tracking for deltaTime calculation
+    this.lastFrameTime = performance.now();
+    
     // Set up window resize handler
     this.setupResizeHandler();
   }
@@ -133,12 +136,22 @@ export class SceneManager {
       return; // Already running
     }
     
+    this.lastFrameTime = performance.now();
+    
     const animate = () => {
       this.animationFrameId = requestAnimationFrame(animate);
       
-      // Call all render callbacks
+      // Calculate deltaTime (time since last frame in seconds)
+      const currentTime = performance.now();
+      const deltaTime = (currentTime - this.lastFrameTime) / 1000; // Convert to seconds
+      this.lastFrameTime = currentTime;
+      
+      // Cap deltaTime to prevent large jumps (e.g., when tab is inactive)
+      const clampedDeltaTime = Math.min(deltaTime, 0.1); // Max 100ms per frame
+      
+      // Call all render callbacks with deltaTime
       this.onRenderCallbacks.forEach(callback => {
-        callback();
+        callback(clampedDeltaTime);
       });
       
       // Render the scene

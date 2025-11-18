@@ -35,7 +35,8 @@ The procedural generation system creates the cityscape, buildings, parks, and de
   - Variable-width chunks (400m base → up to 25km at hub centers)
   - Variable-height chunks (5 base levels → up to 15 levels at hub centers)
   - 12 pillar/elevator hubs positioned at regular intervals
-  - Cosine-based smooth transitions for seamless geometry
+  - Five-chunk plateau at each pillar seam (indices …263998, 263999, 0, 1, 2…) is clamped to maximum width before the cosine taper resumes, ensuring the seam renders perfectly flush
+  - Cosine-based smooth transitions for the remainder of each flare zone
 - **Current**: Returns chunks with ring floor geometry and station flares
 - **Future**: Full generation with buildings, zones, structures (Phase 2)
 
