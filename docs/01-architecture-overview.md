@@ -197,6 +197,7 @@ The system follows a **server-client architecture** with clear separation of con
      - PostGIS geometry storage for spatial queries
      - Automatic storage of generated chunks
      - Database-first loading strategy
+     - Chunk deletion with transaction safety (forces regeneration on next request)
 
 5. **Procedural Generation Service** (Python)
    - Generates procedural structures

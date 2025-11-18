@@ -345,6 +345,12 @@ Manages chunk loading and unloading based on viewport.
 - Position-based chunk loading
 - Mesh management and cleanup
 
+**Chunk UI** (`client-web/src/ui/chunk-ui.js`):
+- Chunk metadata retrieval interface
+- Chunk deletion interface (with confirmation dialog)
+- Position to chunk index conversion utility
+- Quick example chunk buttons
+
 **Key Features**:
 - Request chunks via WebSocket (`chunk_request` message)
 - Position-based chunk loading (converts ring position to chunk indices)

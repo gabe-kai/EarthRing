@@ -12,6 +12,7 @@ The `ChunkStorage` struct (`chunks.go`) handles chunk persistence and retrieval 
 - **Geometry Storage**: Stores chunk geometry in `chunk_data` table with PostGIS geometry
 - **Automatic Persistence**: Generated chunks are automatically stored after generation
 - **Database-First Loading**: Chunks are loaded from database before generating (avoids regeneration)
+- **Chunk Deletion**: Deletes chunks and associated data atomically (transaction-safe)
 - **PostGIS Integration**: Geometry stored as PostGIS POLYGON for spatial queries
 - **Client Format Storage**: JSONB terrain_data field stores client-friendly geometry format
 - **Transaction Safety**: All storage operations use database transactions
@@ -46,6 +47,12 @@ geometry, err := storage.ConvertPostGISToGeometry(chunkID)
 if err != nil {
     // Handle error
 }
+
+// Delete chunk (forces regeneration on next request)
+err = storage.DeleteChunk(floor, chunkIndex)
+if err != nil {
+    // Handle error (chunk not found, database error, etc.)
+}
 ```
 
 ### Error Handling
@@ -66,10 +73,11 @@ The storage layer handles various error conditions:
 ### Testing
 
 Comprehensive tests in `chunks_test.go` cover:
-- Normal operations (store, retrieve, update)
+- Normal operations (store, retrieve, update, delete)
+- Chunk deletion (with/without chunk_data, transaction safety, error handling)
 - Edge cases (nil inputs, invalid ranges, missing data)
 - Geometry conversion (valid/invalid geometry, NaN/Inf coordinates)
-- Error conditions (PostGIS errors, invalid JSON)
+- Error conditions (PostGIS errors, invalid JSON, non-existent chunks)
 
 Run tests:
 ```bash

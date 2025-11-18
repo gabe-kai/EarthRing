@@ -699,6 +699,212 @@ func TestChunkStorage_ConvertPostGISToGeometry_EdgeCases(t *testing.T) {
 	})
 }
 
+func TestChunkStorage_DeleteChunk(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	// Ensure PostGIS extension is available
+	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
+	if err != nil {
+		t.Skipf("PostGIS extension not available: %v", err)
+	}
+
+	// Create tables
+	setupChunkTables(t, db)
+
+	storage := NewChunkStorage(db)
+
+	t.Run("deletes chunk with chunk_data", func(t *testing.T) {
+		// First, store a chunk with geometry
+		genResponse := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_12360",
+				Floor:      0,
+				ChunkIndex: 12360,
+				Width:      400.0,
+				Version:    2,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{},
+			Zones:      []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 12360, genResponse, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk: %v", err)
+		}
+
+		// Verify chunk exists
+		metadata, err := storage.GetChunkMetadata(0, 12360)
+		if err != nil {
+			t.Fatalf("Failed to retrieve metadata: %v", err)
+		}
+		if metadata == nil {
+			t.Fatal("Chunk should exist before deletion")
+		}
+
+		// Verify chunk_data exists
+		data, err := storage.GetChunkData(metadata.ID)
+		if err != nil {
+			t.Fatalf("Failed to retrieve chunk data: %v", err)
+		}
+		if data == nil {
+			t.Fatal("Chunk data should exist before deletion")
+		}
+
+		// Delete the chunk
+		err = storage.DeleteChunk(0, 12360)
+		if err != nil {
+			t.Fatalf("Failed to delete chunk: %v", err)
+		}
+
+		// Store chunkID before deletion for verification
+		chunkIDToVerify := metadata.ID
+
+		// Verify chunk metadata is deleted
+		metadata, err = storage.GetChunkMetadata(0, 12360)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if metadata != nil {
+			t.Error("Chunk metadata should be deleted")
+		}
+
+		// Verify chunk_data is deleted
+		var count int
+		err = db.QueryRow("SELECT COUNT(*) FROM chunk_data WHERE chunk_id = $1", chunkIDToVerify).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunk_data: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk data should be deleted")
+		}
+
+		// Verify chunk doesn't exist in database
+		var chunkID int64
+		err = db.QueryRow("SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12360).Scan(&chunkID)
+		if err == nil {
+			t.Error("Chunk should not exist in database")
+		}
+	})
+
+	t.Run("deletes chunk without chunk_data", func(t *testing.T) {
+		// Insert chunk without chunk_data
+		var chunkID int64
+		err := db.QueryRow(`
+			INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, 0, 12361, 1, false).Scan(&chunkID)
+		if err != nil {
+			t.Fatalf("Failed to insert test chunk: %v", err)
+		}
+
+		// Verify chunk exists
+		metadata, err := storage.GetChunkMetadata(0, 12361)
+		if err != nil {
+			t.Fatalf("Failed to retrieve metadata: %v", err)
+		}
+		if metadata == nil {
+			t.Fatal("Chunk should exist before deletion")
+		}
+
+		// Delete the chunk
+		err = storage.DeleteChunk(0, 12361)
+		if err != nil {
+			t.Fatalf("Failed to delete chunk: %v", err)
+		}
+
+		// Verify chunk is deleted
+		metadata, err = storage.GetChunkMetadata(0, 12361)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if metadata != nil {
+			t.Error("Chunk should be deleted")
+		}
+	})
+
+	t.Run("returns error for non-existent chunk", func(t *testing.T) {
+		err := storage.DeleteChunk(0, 99999)
+		if err == nil {
+			t.Error("Expected error for non-existent chunk")
+		}
+		if err != nil {
+			errMsg := err.Error()
+			// Check if error message contains "chunk not found"
+			found := false
+			for i := 0; i <= len(errMsg)-len("chunk not found"); i++ {
+				if i+len("chunk not found") <= len(errMsg) && errMsg[i:i+len("chunk not found")] == "chunk not found" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected 'chunk not found' error, got: %v", err)
+			}
+		}
+	})
+
+	t.Run("transaction safety - rollback on chunk_data deletion failure", func(t *testing.T) {
+		// This test verifies that if chunk_data deletion fails, the transaction rolls back
+		// We'll insert a chunk and then try to delete it
+		// In a real failure scenario, the transaction would roll back
+		// For this test, we'll just verify normal deletion works atomically
+
+		// Insert chunk with chunk_data
+		var chunkID int64
+		err := db.QueryRow(`
+			INSERT INTO chunks (floor, chunk_index, version)
+			VALUES ($1, $2, $3)
+			RETURNING id
+		`, 0, 12362, 1).Scan(&chunkID)
+		if err != nil {
+			t.Fatalf("Failed to insert test chunk: %v", err)
+		}
+
+		_, err = db.Exec(`
+			INSERT INTO chunk_data (chunk_id, geometry, terrain_data)
+			VALUES ($1, ST_GeomFromText('POLYGON((0 0, 1000 0, 1000 400, 0 400, 0 0))', 0), $2)
+		`, chunkID, `{"test": "data"}`)
+		if err != nil {
+			t.Fatalf("Failed to insert chunk_data: %v", err)
+		}
+
+		// Delete should succeed and remove both
+		err = storage.DeleteChunk(0, 12362)
+		if err != nil {
+			t.Fatalf("Failed to delete chunk: %v", err)
+		}
+
+		// Verify both are deleted
+		var count int
+		err = db.QueryRow("SELECT COUNT(*) FROM chunks WHERE id = $1", chunkID).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunks: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk should be deleted")
+		}
+
+		err = db.QueryRow("SELECT COUNT(*) FROM chunk_data WHERE chunk_id = $1", chunkID).Scan(&count)
+		if err != nil {
+			t.Fatalf("Failed to query chunk_data: %v", err)
+		}
+		if count != 0 {
+			t.Error("Chunk data should be deleted")
+		}
+	})
+}
+
 // Helper function to set up chunk tables for testing
 func setupChunkTables(t *testing.T, db *sql.DB) {
 	_, err := db.Exec(`

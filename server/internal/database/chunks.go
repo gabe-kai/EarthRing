@@ -403,3 +403,54 @@ func containsSubstring(s, substr string) bool {
 func isFinite(f float64) bool {
 	return !math.IsNaN(f) && !math.IsInf(f, 0)
 }
+
+// DeleteChunk deletes a chunk and its associated data from the database.
+// This will cause the procedural service to regenerate the chunk on next request.
+// Returns an error if the chunk doesn't exist or if deletion fails.
+func (s *ChunkStorage) DeleteChunk(floor, chunkIndex int) error {
+	// Start a transaction to ensure atomic deletion
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// First, get the chunk ID to delete associated chunk_data
+	var chunkID int64
+	query := `SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2`
+	err = tx.QueryRow(query, floor, chunkIndex).Scan(&chunkID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("chunk not found: floor=%d, chunk_index=%d", floor, chunkIndex)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query chunk: %w", err)
+	}
+
+	// Delete chunk_data (if exists) - this will cascade if foreign key is set up correctly
+	// But we'll delete explicitly to be safe
+	result, err := tx.Exec(`DELETE FROM chunk_data WHERE chunk_id = $1`, chunkID)
+	if err != nil {
+		return fmt.Errorf("failed to delete chunk_data: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		// Log only if we actually deleted something (chunk_data might not exist for all chunks)
+	}
+
+	// Delete chunk metadata
+	result, err = tx.Exec(`DELETE FROM chunks WHERE id = $1`, chunkID)
+	if err != nil {
+		return fmt.Errorf("failed to delete chunk: %w", err)
+	}
+	rowsAffected, _ = result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("chunk not found: floor=%d, chunk_index=%d", floor, chunkIndex)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
