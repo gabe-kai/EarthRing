@@ -61,67 +61,91 @@ def get_chunk_levels(floor: int, chunk_index: int, chunk_seed: int) -> int:
     return levels
 
 
-def generate_ring_floor_geometry(chunk_width: float) -> dict:
+def generate_ring_floor_geometry(chunk_index: int, floor: int) -> dict:
     """
-    Generate basic ring floor geometry (flat plane).
+    Generate smooth curved ring floor geometry with tapered edges.
 
-    Creates a simple rectangular plane representing the ring floor.
+    Creates a curved mesh that smoothly tapers based on station flares.
+    Samples width at regular intervals along the chunk to create smooth curves.
     Geometry is in EarthRing coordinate system (X=ring, Y=width, Z=floor).
 
     Args:
-        chunk_width: Width of the chunk in meters
+        chunk_index: Chunk index (0-263,999)
+        floor: Floor number
 
     Returns:
         Dictionary with geometry data (vertices, faces, normals)
     """
-    # Create a simple rectangular plane
-    # Vertices in EarthRing coordinates (X=ring position, Y=width position, Z=floor)
-    # For a chunk at position (chunk_index * 1000, 0, floor):
-    # - X ranges from (chunk_index * 1000) to (chunk_index * 1000 + 1000)
-    # - Y ranges from -chunk_width/2 to +chunk_width/2
-    # - Z is the floor level (will be set by caller)
-
-    half_width = chunk_width / 2.0
-
-    # Define vertices (4 corners of the rectangle)
-    # Format: [x, y, z] in EarthRing coordinates
-    vertices = [
-        [0.0, -half_width, 0.0],  # Bottom-left (relative to chunk start)
-        [CHUNK_LENGTH, -half_width, 0.0],  # Bottom-right
-        [CHUNK_LENGTH, half_width, 0.0],  # Top-right
-        [0.0, half_width, 0.0],  # Top-left
-    ]
-
-    # Define faces (two triangles forming the rectangle)
-    # Format: [v1, v2, v3] where v1, v2, v3 are vertex indices
-    faces = [
-        [0, 1, 2],  # First triangle
-        [0, 2, 3],  # Second triangle
-    ]
-
-    # Calculate normals (all pointing up in EarthRing Z direction)
-    # For a flat plane, normal is [0, 0, 1]
-    normals = [
-        [0.0, 0.0, 1.0],  # Normal for first triangle
-        [0.0, 0.0, 1.0],  # Normal for second triangle
-    ]
-
+    # Sample interval: 50m for smooth curves (20 samples per 1km chunk)
+    SAMPLE_INTERVAL = 50.0
+    num_samples = int(CHUNK_LENGTH / SAMPLE_INTERVAL) + 1
+    
+    # Calculate chunk start position
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    
+    vertices = []
+    faces = []
+    normals = []
+    
+    # Generate vertices along both edges (left and right) at each sample point
+    for i in range(num_samples):
+        # Position along chunk (0 to CHUNK_LENGTH)
+        x_offset = min(i * SAMPLE_INTERVAL, CHUNK_LENGTH)
+        
+        # Calculate absolute ring position at this sample point
+        ring_position = chunk_start_position + x_offset
+        
+        # Calculate width at this position (smooth curve)
+        width = stations.calculate_flare_width(ring_position)
+        half_width = width / 2.0
+        
+        # Create vertices for left and right edges at this X position
+        # Left edge (negative Y)
+        vertices.append([x_offset, -half_width, 0.0])
+        # Right edge (positive Y)
+        vertices.append([x_offset, half_width, 0.0])
+    
+    # Generate faces connecting adjacent sample points
+    # Each quad is made of two triangles
+    for i in range(num_samples - 1):
+        # Indices for current sample point
+        left_current = i * 2
+        right_current = i * 2 + 1
+        
+        # Indices for next sample point
+        left_next = (i + 1) * 2
+        right_next = (i + 1) * 2 + 1
+        
+        # Create two triangles forming a quad
+        # Triangle 1: left_current -> left_next -> right_current
+        faces.append([left_current, left_next, right_current])
+        # Triangle 2: right_current -> left_next -> right_next
+        faces.append([right_current, left_next, right_next])
+    
+    # Calculate normals for each face (all pointing up: [0, 0, 1])
+    for _ in faces:
+        normals.append([0.0, 0.0, 1.0])
+    
+    # Calculate average width for metadata (width at chunk center)
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    avg_width = stations.calculate_flare_width(chunk_center_position)
+    
     return {
         "type": "ring_floor",
         "vertices": vertices,
         "faces": faces,
         "normals": normals,
-        "width": chunk_width,
+        "width": avg_width,
         "length": CHUNK_LENGTH,
     }
 
 
 def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     """
-    Generate a chunk with basic ring floor geometry (Phase 2 MVP).
+    Generate a chunk with smooth curved ring floor geometry.
 
-    Generates a chunk with basic ring floor geometry. Buildings, zones, etc.
-    will be added in later phases.
+    Generates a chunk with smooth curved geometry that tapers based on station flares.
+    Buildings, zones, etc. will be added in later phases.
 
     Args:
         floor: Floor number
@@ -131,18 +155,15 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     Returns:
         Dictionary with chunk data including geometry
     """
-    # Get chunk width
-    chunk_width = get_chunk_width(floor, chunk_index, chunk_seed)
-
-    # Generate ring floor geometry
-    geometry = generate_ring_floor_geometry(chunk_width)
+    # Generate smooth curved ring floor geometry
+    geometry = generate_ring_floor_geometry(chunk_index, floor)
 
     # Calculate chunk position along ring (in meters)
     # Chunk index 0 starts at position 0, each chunk is 1000m long
     chunk_start_position = chunk_index * CHUNK_LENGTH
 
     # Adjust geometry vertices to absolute positions
-    # Add chunk start position to X coordinates
+    # Add chunk start position to X coordinates and set floor level
     adjusted_vertices = []
     for vertex in geometry["vertices"]:
         adjusted_vertex = [
@@ -153,6 +174,9 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         adjusted_vertices.append(adjusted_vertex)
 
     geometry["vertices"] = adjusted_vertices
+
+    # Get chunk width for metadata (width at chunk center)
+    chunk_width = get_chunk_width(floor, chunk_index, chunk_seed)
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",

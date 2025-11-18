@@ -41,11 +41,13 @@ def test_generate_chunk():
     # Chunk 12345 is far from any hub, should have base width
     assert data["chunk"]["width"] == 400.0
     assert data["chunk"]["version"] == 2  # Phase 2 version
-    # Geometry should be present (Phase 2)
+    # Geometry should be present (Phase 2) - now with smooth curved geometry
     assert data["geometry"] is not None
     assert data["geometry"]["type"] == "ring_floor"
-    assert len(data["geometry"]["vertices"]) == 4
-    assert len(data["geometry"]["faces"]) == 2
+    # With 50m sample interval: 21 samples * 2 vertices = 42 vertices
+    # 20 quads * 2 triangles = 40 faces
+    assert len(data["geometry"]["vertices"]) == 42
+    assert len(data["geometry"]["faces"]) == 40
     assert data["geometry"]["width"] == 400.0
     assert data["geometry"]["length"] == 1000.0
     assert data["structures"] == []

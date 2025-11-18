@@ -33,7 +33,7 @@ def test_get_chunk_width():
 
 
 def test_generate_empty_chunk():
-    """Test chunk generation (now generates geometry in Phase 2)"""
+    """Test chunk generation (now generates smooth curved geometry in Phase 2)"""
     floor = 0
     chunk_index = 100
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
@@ -47,8 +47,11 @@ def test_generate_empty_chunk():
     # Geometry should be present (Phase 2)
     assert chunk["geometry"] is not None
     assert chunk["geometry"]["type"] == "ring_floor"
-    assert len(chunk["geometry"]["vertices"]) == 4
-    assert len(chunk["geometry"]["faces"]) == 2
+    # With 50m sample interval, we get 21 samples (0, 50, 100, ..., 1000)
+    # Each sample has 2 vertices (left and right edge), so 42 vertices total
+    # 20 quads * 2 triangles = 40 faces
+    assert len(chunk["geometry"]["vertices"]) == 42  # 21 samples * 2 vertices
+    assert len(chunk["geometry"]["faces"]) == 40  # 20 quads * 2 triangles
     # Width should be base width (400m) since chunk 100 is outside station flare range
     assert chunk["geometry"]["width"] == 400.0
     assert chunk["geometry"]["length"] == 1000.0
@@ -62,28 +65,33 @@ def test_generate_empty_chunk():
 
 
 def test_generate_ring_floor_geometry():
-    """Test ring floor geometry generation"""
+    """Test smooth curved ring floor geometry generation"""
     from internal.procedural import generation
 
-    chunk_width = 400.0
-    geometry = generation.generate_ring_floor_geometry(chunk_width)
+    chunk_index = 100  # Chunk 100 (outside flare range, should be 400m width)
+    floor = 0
+    geometry = generation.generate_ring_floor_geometry(chunk_index, floor)
 
     assert geometry["type"] == "ring_floor"
-    assert geometry["width"] == 400.0
+    assert geometry["width"] == 400.0  # Base width for chunk 100
     assert geometry["length"] == 1000.0
-    assert len(geometry["vertices"]) == 4
-    assert len(geometry["faces"]) == 2
-    assert len(geometry["normals"]) == 2
+    # With 50m sample interval: 21 samples * 2 vertices = 42 vertices
+    # 20 quads * 2 triangles = 40 faces
+    assert len(geometry["vertices"]) == 42
+    assert len(geometry["faces"]) == 40
+    assert len(geometry["normals"]) == 40
 
-    # Check vertices are relative positions (will be adjusted in generate_chunk)
-    assert geometry["vertices"][0] == [0.0, -200.0, 0.0]  # Bottom-left
-    assert geometry["vertices"][1] == [1000.0, -200.0, 0.0]  # Bottom-right
-    assert geometry["vertices"][2] == [1000.0, 200.0, 0.0]  # Top-right
-    assert geometry["vertices"][3] == [0.0, 200.0, 0.0]  # Top-left
+    # Check first vertex (left edge at start of chunk)
+    assert geometry["vertices"][0] == [0.0, -200.0, 0.0]  # Left edge, -half_width
+    # Check second vertex (right edge at start of chunk)
+    assert geometry["vertices"][1] == [0.0, 200.0, 0.0]  # Right edge, +half_width
+    
+    # Check last vertex (right edge at end of chunk)
+    assert geometry["vertices"][-1] == [1000.0, 200.0, 0.0]  # Right edge at end
 
-    # Check faces are triangles
-    assert geometry["faces"][0] == [0, 1, 2]
-    assert geometry["faces"][1] == [0, 2, 3]
+    # Check faces are triangles (first quad)
+    assert geometry["faces"][0] == [0, 2, 1]  # First triangle of first quad
+    assert geometry["faces"][1] == [1, 2, 3]  # Second triangle of first quad
 
     # Check normals point up (Z direction in EarthRing)
     assert geometry["normals"][0] == [0.0, 0.0, 1.0]
