@@ -301,7 +301,8 @@ func (h *ChunkHandlers) InvalidateOutdatedChunks(w http.ResponseWriter, r *http.
 		argIndex++
 	}
 
-	// Execute query
+	// Execute query (argIndex was incremented above if needed, read it to avoid ineffassign warning)
+	_ = argIndex
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
 		log.Printf("Error querying outdated chunks: %v", err)
