@@ -99,4 +99,3 @@ func TestQuantizeVertices_InvalidVertex(t *testing.T) {
 		t.Fatal("Expected error for invalid vertex")
 	}
 }
-

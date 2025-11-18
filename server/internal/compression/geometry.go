@@ -27,12 +27,12 @@ const (
 
 // GeometryHeader represents the binary format header
 type GeometryHeader struct {
-	Magic      [4]byte // "CHNK"
-	Version    uint8
+	Magic       [4]byte // "CHNK"
+	Version     uint8
 	FormatFlags uint8  // Bit flags: bit 0 = index size (0=16-bit, 1=32-bit)
 	VertexCount uint16 // Or uint32 if >65k (handled separately)
 	IndexCount  uint16 // Or uint32 if >65k (handled separately)
-	BaseX      int64   // Base X coordinate (quantized) - added to all relative X values during decompression (int64 to handle large positions)
+	BaseX       int64  // Base X coordinate (quantized) - added to all relative X values during decompression (int64 to handle large positions)
 }
 
 // QuantizedVertex represents a quantized vertex
@@ -66,7 +66,7 @@ func CompressChunkGeometry(geometry *procedural.ChunkGeometry) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to quantize vertices: %w", err)
 	}
-	
+
 	// Store base X for decompression (quantized)
 	// Use int64 to handle large positions (chunks far from origin)
 	var baseXQuantized int64
@@ -95,7 +95,7 @@ func CompressChunkGeometry(geometry *procedural.ChunkGeometry) ([]byte, error) {
 // quantizeVertices quantizes vertex positions to reduce precision
 func quantizeVertices(vertices [][]float64) ([]QuantizedVertex, error) {
 	quantized := make([]QuantizedVertex, len(vertices))
-	
+
 	for i, vertex := range vertices {
 		if len(vertex) < 3 {
 			return nil, fmt.Errorf("vertex %d has insufficient coordinates", i)
@@ -121,7 +121,7 @@ func encodeToBinary(vertices []QuantizedVertex, faces [][]int, use32BitIndices b
 		BaseX:   baseX,
 	}
 	copy(header.Magic[:], GeometryMagic)
-	
+
 	vertexCount := uint16(len(vertices))
 	if len(vertices) >= 65536 {
 		// For now, we'll use 16-bit and handle overflow separately if needed
@@ -190,7 +190,7 @@ func encodeToBinary(vertices []QuantizedVertex, faces [][]int, use32BitIndices b
 // gzipCompress compresses data using gzip
 func gzipCompress(data []byte, level int) ([]byte, error) {
 	var buf bytes.Buffer
-	
+
 	writer, err := gzip.NewWriterLevel(&buf, level)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gzip writer: %w", err)
@@ -207,4 +207,3 @@ func gzipCompress(data []byte, level int) ([]byte, error) {
 
 	return buf.Bytes(), nil
 }
-

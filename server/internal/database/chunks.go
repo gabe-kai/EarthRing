@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -413,7 +414,12 @@ func (s *ChunkStorage) DeleteChunk(floor, chunkIndex int) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			// Log error but don't fail - transaction may already be committed
+			log.Printf("Warning: failed to rollback transaction: %v", err)
+		}
+	}()
 
 	// First, get the chunk ID to delete associated chunk_data
 	var chunkID int64
@@ -432,17 +438,22 @@ func (s *ChunkStorage) DeleteChunk(floor, chunkIndex int) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete chunk_data: %w", err)
 	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected > 0 {
-		// Log only if we actually deleted something (chunk_data might not exist for all chunks)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for chunk_data deletion: %w", err)
 	}
+	// rowsAffected > 0 means chunk_data was deleted (may not exist for all chunks)
+	_ = rowsAffected // Explicitly ignore to satisfy staticcheck SA9003
 
 	// Delete chunk metadata
 	result, err = tx.Exec(`DELETE FROM chunks WHERE id = $1`, chunkID)
 	if err != nil {
 		return fmt.Errorf("failed to delete chunk: %w", err)
 	}
-	rowsAffected, _ = result.RowsAffected()
+	rowsAffected, err = result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for chunk deletion: %w", err)
+	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("chunk not found: floor=%d, chunk_index=%d", floor, chunkIndex)
 	}

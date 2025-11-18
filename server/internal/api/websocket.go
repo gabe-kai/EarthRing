@@ -292,7 +292,9 @@ func (h *WebSocketHandlers) negotiateVersion(requested string) string {
 func (c *WebSocketConnection) readPump(handlers *WebSocketHandlers) {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Printf("Failed to close connection: %v", err)
+		}
 	}()
 
 	if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
@@ -331,7 +333,9 @@ func (c *WebSocketConnection) writePump() {
 	ticker := time.NewTicker(defaultPingInterval)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Printf("Failed to close connection: %v", err)
+		}
 	}()
 
 	for {
@@ -457,7 +461,7 @@ func compressChunkGeometry(geometry interface{}) (interface{}, error) {
 
 	// Try to convert to *procedural.ChunkGeometry
 	var chunkGeometry *procedural.ChunkGeometry
-	
+
 	switch geom := geometry.(type) {
 	case *procedural.ChunkGeometry:
 		chunkGeometry = geom
@@ -471,7 +475,7 @@ func compressChunkGeometry(geometry interface{}) (interface{}, error) {
 			// For now, we'll compress what we can
 			vertices, _ := geom["vertices"].([]interface{})
 			faces, _ := geom["faces"].([]interface{})
-			
+
 			if vertices != nil && faces != nil {
 				// Convert to proper types (simplified - would need full conversion in production)
 				chunkGeometry = &procedural.ChunkGeometry{
@@ -686,7 +690,7 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 			if compressedGeom, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
 				// Already compressed, log and continue
 				compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)", 
+				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)",
 					chunkID, compressedGeom.Size, compressionRatio)
 			} else {
 				// Compress the geometry
@@ -712,7 +716,7 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 						// Log compression success with stats
 						if compressedGeom, ok := compressedGeometry.(*compression.CompressedGeometry); ok {
 							compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)", 
+							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)",
 								chunkID, compressedGeom.UncompressedSize, compressedGeom.Size, compressionRatio, uncompressedSize)
 						} else {
 							log.Printf("✓ Compressed chunk %s geometry (estimated uncompressed: %d bytes)", chunkID, uncompressedSize)

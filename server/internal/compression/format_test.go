@@ -122,7 +122,7 @@ func TestCompressAndFormatRoundTrip(t *testing.T) {
 
 	// Verify compression ratio
 	compressionRatio := float64(uncompressedSize) / float64(formatted.Size)
-	t.Logf("Compression ratio: %.2f:1 (uncompressed: %d bytes, compressed: %d bytes)", 
+	t.Logf("Compression ratio: %.2f:1 (uncompressed: %d bytes, compressed: %d bytes)",
 		compressionRatio, uncompressedSize, formatted.Size)
 
 	// For small geometries, compression might not be great, but should still work
@@ -135,4 +135,3 @@ func TestCompressAndFormatRoundTrip(t *testing.T) {
 		t.Errorf("Expected format 'binary_gzip', got '%s'", formatted.Format)
 	}
 }
-
