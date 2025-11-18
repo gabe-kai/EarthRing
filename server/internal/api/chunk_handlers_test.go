@@ -460,6 +460,10 @@ func TestDeleteChunk(t *testing.T) {
 	})
 
 	t.Run("handles chunk index wrapping", func(t *testing.T) {
+		// Clean up any existing chunk 0_0 first
+		_, _ = db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2)", 0, 0)
+		_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 0)
+
 		// Create chunk at wrapped index (264000 wraps to 0)
 		var chunkID int64
 		err = db.QueryRow(`

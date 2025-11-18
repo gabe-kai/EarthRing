@@ -299,10 +299,12 @@ func (c *WebSocketConnection) readPump(handlers *WebSocketHandlers) {
 
 	if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
 		log.Printf("Failed to set read deadline: %v", err)
+		return
 	}
 	c.conn.SetPongHandler(func(string) error {
 		if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
 			log.Printf("Failed to set read deadline in pong handler: %v", err)
+			return err
 		}
 		return nil
 	})
