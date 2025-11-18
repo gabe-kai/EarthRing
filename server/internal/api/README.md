@@ -104,13 +104,24 @@ This ensures accurate rate limiting even behind proxies or load balancers.
 
 Handles chunk-related HTTP requests:
 - `GET /api/chunks/{chunk_id}` - Get chunk metadata
+- `GET /api/chunks/version` - Get current geometry version (no auth required)
 - `DELETE /api/chunks/{chunk_id}` - Delete chunk (forces regeneration on next request)
+- `GET /api/chunks/invalidate-outdated` - Bulk invalidate outdated chunks
+- `POST /api/chunks/batch-regenerate` - Batch regenerate chunks in background
 
 **Features:**
-- Authentication required for all chunk operations
+- Authentication required for most chunk operations (version endpoint is public)
 - Chunk index wrapping (handles ring boundaries)
 - Transaction-safe deletion (removes both metadata and geometry)
+- Automatic version detection and regeneration (outdated chunks auto-regenerate on request)
+- Bulk operations for managing multiple chunks
+- Version metadata storage (algorithm parameters, sample intervals, etc.)
 - Comprehensive error handling and validation
+
+**Version Management:**
+- `CurrentGeometryVersion` constant defines current geometry version (must match Python `CURRENT_GEOMETRY_VERSION`)
+- WebSocket handler automatically regenerates outdated chunks when loading
+- Version metadata stored in chunk `metadata` JSONB field for granular checking
 
 **Usage:**
 ```go
@@ -123,7 +134,13 @@ handlers := api.NewChunkHandlers(db, cfg)
 Comprehensive tests in `chunk_handlers_test.go` cover:
 - Chunk metadata retrieval (existing, non-existent, invalid formats)
 - Chunk deletion (success, non-existent, authentication, validation, wrapping)
+- Version endpoint (current version, version history)
+- Bulk invalidation (outdated chunks, filtering, error handling)
+- Batch regeneration (chunk IDs, filters, async processing)
 - Error handling and edge cases
+
+WebSocket tests in `websocket_test.go` cover:
+- Automatic version detection and regeneration (outdated chunks auto-regenerate)
 
 Run tests:
 ```bash

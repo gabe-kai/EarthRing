@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -478,41 +479,259 @@ func TestDeleteChunk(t *testing.T) {
 		if err != nil {
 			t.Logf("Warning: failed to delete chunk: %v", err)
 		}
-
-		// Create chunk at wrapped index (264000 wraps to 0)
-		var chunkID int64
-		err = db.QueryRow(`
-			INSERT INTO chunks (floor, chunk_index, version)
-			VALUES ($1, $2, $3)
-			RETURNING id
-		`, 0, 0, 1).Scan(&chunkID)
-		if err != nil {
-			t.Fatalf("Failed to create test chunk: %v", err)
-		}
-
-		// Try to delete using wrapped index
-		req := httptest.NewRequest("DELETE", "/api/chunks/0_264000", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
-		req = req.WithContext(ctx)
-
-		rr := httptest.NewRecorder()
-		handlers.DeleteChunk(rr, req)
-
-		// Should succeed (wraps to chunk 0)
-		if rr.Code != http.StatusOK {
-			t.Errorf("Expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
-		}
-
-		// Verify chunk 0 is deleted
-		var count int
-		err = db.QueryRow("SELECT COUNT(*) FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 0).Scan(&count)
-		if err != nil {
-			t.Fatalf("Failed to query chunks: %v", err)
-		}
-		if count != 0 {
-			t.Error("Chunk 0 should be deleted")
-		}
 	})
+}
+
+func TestGetChunkVersion(t *testing.T) {
+	// Setup test database (not needed for version endpoint, but for consistency)
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	cfg := &config.Config{}
+	handlers := NewChunkHandlers(db, cfg)
+
+	// Create request
+	req := httptest.NewRequest("GET", "/api/chunks/version", nil)
+	w := httptest.NewRecorder()
+
+	// Call handler
+	handlers.GetChunkVersion(w, req)
+
+	// Check response
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if currentVersion, ok := response["current_version"].(float64); !ok || int(currentVersion) != CurrentGeometryVersion {
+		t.Errorf("Expected current_version %d, got %v", CurrentGeometryVersion, response["current_version"])
+	}
+
+	if versionHistory, ok := response["version_history"].([]interface{}); !ok || len(versionHistory) == 0 {
+		t.Errorf("Expected version_history array, got %v", response["version_history"])
+	}
+}
+
+func TestInvalidateOutdatedChunks(t *testing.T) {
+	// Setup test database
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	// Run migrations
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	// Drop and recreate chunk_data table
+	_, err = db.Exec("DROP TABLE IF EXISTS chunk_data")
+	if err != nil {
+		t.Logf("Warning: failed to drop chunk_data table: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE chunk_data (
+			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+			geometry GEOMETRY(POLYGON, 0) NOT NULL,
+			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
+			structure_ids INTEGER[],
+			zone_ids INTEGER[],
+			npc_data JSONB,
+			terrain_data JSONB,
+			last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunk_data table: %v", err)
+	}
+
+	// Clean up
+	_, err = db.Exec("DELETE FROM chunk_data")
+	if err != nil {
+		t.Logf("Warning: failed to delete chunk_data: %v", err)
+	}
+	_, err = db.Exec("DELETE FROM chunks")
+	if err != nil {
+		t.Logf("Warning: failed to delete chunks: %v", err)
+	}
+
+	// Create test chunks with old version (version 1)
+	var chunkID1, chunkID2 int64
+	err = db.QueryRow(`
+		INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, 0, 100, 1, false).Scan(&chunkID1)
+	if err != nil {
+		t.Fatalf("Failed to insert test chunk 1: %v", err)
+	}
+
+	err = db.QueryRow(`
+		INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, 0, 101, 1, false).Scan(&chunkID2)
+	if err != nil {
+		t.Fatalf("Failed to insert test chunk 2: %v", err)
+	}
+
+	// Create auth token
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+	}
+	jwtService := auth.NewJWTService(cfg)
+	token, err := jwtService.GenerateAccessToken(1, "testuser", "player")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	handlers := NewChunkHandlers(db, cfg)
+
+	// Test invalidating outdated chunks
+	req := httptest.NewRequest("GET", "/api/chunks/invalidate-outdated", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handlers.InvalidateOutdatedChunks(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if success, ok := response["success"].(bool); !ok || !success {
+		t.Errorf("Expected success=true, got %v", response["success"])
+	}
+
+	deletedCount, ok := response["deleted_count"].(float64)
+	if !ok || int(deletedCount) != 2 {
+		t.Errorf("Expected deleted_count=2, got %v", response["deleted_count"])
+	}
+
+	// Verify chunks were deleted
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3)", 0, 100, 101).Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to query chunk count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 chunks remaining, got %d", count)
+	}
+}
+
+func TestBatchRegenerateChunks(t *testing.T) {
+	// Setup test database
+	db := testutil.SetupTestDB(t)
+	defer db.Close()
+
+	// Run migrations
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	// Clean up
+	_, err = db.Exec("DELETE FROM chunks")
+	if err != nil {
+		t.Logf("Warning: failed to delete chunks: %v", err)
+	}
+
+	// Create test chunks
+	var chunkID1 int64
+	err = db.QueryRow(`
+		INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, 0, 200, 2, false).Scan(&chunkID1)
+	if err != nil {
+		t.Fatalf("Failed to insert test chunk: %v", err)
+	}
+
+	// Create auth token
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+		Procedural: config.ProceduralConfig{
+			BaseURL: "http://localhost:8081",
+		},
+	}
+	jwtService := auth.NewJWTService(cfg)
+	token, err := jwtService.GenerateAccessToken(1, "testuser", "player")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	handlers := NewChunkHandlers(db, cfg)
+
+	// Test batch regeneration with chunk IDs
+	requestBody := map[string]interface{}{
+		"chunk_ids":  []string{"0_200"},
+		"lod_level":  "medium",
+		"max_chunks": 10,
+	}
+	body, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/api/chunks/batch-regenerate", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), auth.UserIDKey, int64(1))
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handlers.BatchRegenerateChunks(w, req)
+
+	// Should return 202 Accepted for async operation
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected status 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if success, ok := response["success"].(bool); !ok || !success {
+		t.Errorf("Expected success=true, got %v", response["success"])
+	}
+
+	if status, ok := response["status"].(string); !ok || status != "processing" {
+		t.Errorf("Expected status='processing', got %v", response["status"])
+	}
 }

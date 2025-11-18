@@ -49,13 +49,23 @@ type ChunkGeometry struct {
 	Length   float64     `json:"length"`   // Chunk length in meters
 }
 
+// VersionMetadata represents version metadata for granular version checking
+type VersionMetadata struct {
+	GeometryVersion int      `json:"geometry_version"`
+	SampleInterval  *float64 `json:"sample_interval,omitempty"`
+	Algorithm       *string  `json:"algorithm,omitempty"`
+	VertexCount     *int     `json:"vertex_count,omitempty"`
+	FaceCount       *int     `json:"face_count,omitempty"`
+}
+
 // ChunkMetadata represents chunk metadata
 type ChunkMetadata struct {
-	ChunkID    string  `json:"chunk_id"`
-	Floor      int     `json:"floor"`
-	ChunkIndex int     `json:"chunk_index"`
-	Width      float64 `json:"width"`
-	Version    int     `json:"version"`
+	ChunkID         string           `json:"chunk_id"`
+	Floor           int              `json:"floor"`
+	ChunkIndex      int              `json:"chunk_index"`
+	Width           float64          `json:"width"`
+	Version         int              `json:"version"`
+	VersionMetadata *VersionMetadata `json:"version_metadata,omitempty"`
 }
 
 // GenerateChunkResponse represents the response from chunk generation

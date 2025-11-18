@@ -349,7 +349,7 @@ Response: {
 
 ### Chunk Management
 
-**Implementation Status:** ✅ **MOSTLY IMPLEMENTED** (metadata endpoint, WebSocket chunk requests with database persistence implemented, REST chunk request endpoint pending)
+**Implementation Status:** ✅ **FULLY IMPLEMENTED** (metadata endpoint, deletion, version management, bulk operations, batch regeneration, automatic version detection)
 
 #### Get Chunk Metadata
 ```
@@ -359,7 +359,7 @@ Response: {
   "id": "0_12345",
   "floor": 0,
   "chunk_index": 12345,
-  "version": 1,
+  "version": 2,
   "last_modified": "2024-01-01T00:00:00Z",
   "is_dirty": false
 }
@@ -372,6 +372,33 @@ Response: {
   - Example: `0_-1` wraps to `0_263999`
   - This ensures seamless ring traversal (chunk 0 connects to chunk 263,999)
 **Note**: Returns default metadata (version 1, is_dirty: false) if chunk doesn't exist yet (acceptable for chunks that haven't been generated). Actual generated chunks will have version 2 (includes station flares).
+
+#### Get Chunk Version ✅ **IMPLEMENTED**
+
+Returns the current geometry version and version history. No authentication required (public information).
+
+```
+GET /api/chunks/version
+```
+
+**Response:**
+```json
+{
+  "current_version": 2,
+  "version_history": [
+    {
+      "version": 1,
+      "description": "Initial rectangular geometry (4 vertices, 2 faces)",
+      "sample_interval": null
+    },
+    {
+      "version": 2,
+      "description": "Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)",
+      "sample_interval": 50.0
+    }
+  ]
+}
+```
 
 #### Delete Chunk ✅ **IMPLEMENTED**
 
@@ -407,6 +434,86 @@ Headers: Authorization: Bearer <access_token>
 **chunk_id Format**: `"floor_chunk_index"` (e.g., `"0_12345"` for floor 0, chunk index 12345)
 **chunk_index Range**: 0 to 263,999 (automatically wrapped if out of range)
 **Wrapping**: Chunk indices are automatically wrapped to valid range [0, 264,000)
+
+#### Invalidate Outdated Chunks ✅ **IMPLEMENTED**
+
+Bulk invalidation endpoint that deletes all chunks with version < current version. Supports optional filtering by floor and chunk index range.
+
+```
+GET /api/chunks/invalidate-outdated?floor={floor}&chunk_index_start={start}&chunk_index_end={end}
+Headers: Authorization: Bearer <access_token>
+```
+
+**Query Parameters** (all optional):
+- `floor`: Filter by floor number
+- `chunk_index_start`: Start of chunk index range
+- `chunk_index_end`: End of chunk index range
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Invalidated 15 outdated chunks. They will be regenerated on next request.",
+  "deleted_count": 15,
+  "failed_count": 0,
+  "chunks": [
+    {"chunk_id": "0_0", "floor": 0, "chunk_index": 0},
+    {"chunk_id": "0_1", "floor": 0, "chunk_index": 1}
+  ]
+}
+```
+
+**Examples:**
+- Invalidate all outdated chunks: `GET /api/chunks/invalidate-outdated`
+- Invalidate outdated chunks on floor 0: `GET /api/chunks/invalidate-outdated?floor=0`
+- Invalidate outdated chunks in range 0-100: `GET /api/chunks/invalidate-outdated?chunk_index_start=0&chunk_index_end=100`
+
+**Rate Limit**: 100 requests per minute per user
+
+#### Batch Regenerate Chunks ✅ **IMPLEMENTED**
+
+Regenerates multiple chunks in the background. Accepts specific chunk IDs or filters (floor, chunk_index range). Returns immediately with job status, processing happens asynchronously.
+
+```
+POST /api/chunks/batch-regenerate
+Headers: Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "chunk_ids": ["0_200", "0_201"],
+  "floor": 0,
+  "chunk_index_start": 0,
+  "chunk_index_end": 100,
+  "lod_level": "medium",
+  "max_chunks": 100
+}
+```
+
+**Request Fields** (all optional except at least one filter or chunk_ids):
+- `chunk_ids`: Array of specific chunk IDs to regenerate (e.g., `["0_200", "0_201"]`)
+- `floor`: Filter by floor number
+- `chunk_index_start`: Start of chunk index range
+- `chunk_index_end`: End of chunk index range
+- `lod_level`: LOD level for regeneration (`"low"`, `"medium"`, `"high"`, default: `"medium"`)
+- `max_chunks`: Maximum chunks to process (default: 100, max: 1000)
+
+**Response (202 Accepted):**
+```json
+{
+  "success": true,
+  "message": "Started batch regeneration of 15 chunks in background",
+  "chunk_count": 15,
+  "lod_level": "medium",
+  "status": "processing"
+}
+```
+
+**Note**: Processing happens asynchronously in a background goroutine. Check server logs for completion status.
+
+**Rate Limit**: 100 requests per minute per user
 **Behavior**:
 - Deletes chunk metadata from `chunks` table
 - Deletes chunk geometry data from `chunk_data` table
@@ -1082,6 +1189,39 @@ See `docs/05-authentication-security.md` for detailed rate limiting specificatio
 - Simple to implement using standard WebSocket subprotocol
 - Works well with multiple client types (web, light local, Unreal)
 - Easy to debug (version visible in connection logs)
+
+### Chunk Geometry Versioning ✅ **IMPLEMENTED**
+
+**Automatic Version Detection:**
+- Chunks store a `version` field in the database
+- When loading chunks, server compares stored version vs. current version
+- If `storedVersion < CurrentGeometryVersion`, chunk is automatically regenerated
+- Falls back to old geometry if regeneration fails
+
+**Version Metadata:**
+- Chunks store detailed version metadata in JSONB `metadata` field:
+  - `geometry_version`: Current geometry version number
+  - `sample_interval`: Sample interval in meters (e.g., 50.0 for smooth curves)
+  - `algorithm`: Algorithm identifier (e.g., `"smooth_curved_taper"`)
+  - `vertex_count`: Number of vertices in geometry
+  - `face_count`: Number of faces in geometry
+- Enables granular version checking beyond simple version numbers
+
+**Version History:**
+- Version 1: Initial rectangular geometry (4 vertices, 2 faces)
+- Version 2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
+
+**Bulk Operations:**
+- `GET /api/chunks/invalidate-outdated`: Delete all outdated chunks (supports filtering)
+- `POST /api/chunks/batch-regenerate`: Regenerate multiple chunks in background
+- SQL migration function `update_chunk_versions()`: Bulk version updates without deletion
+
+**Migration Workflow:**
+1. Increment `CURRENT_GEOMETRY_VERSION` in `generation.py` (e.g., `2` → `3`)
+2. Increment `CurrentGeometryVersion` in `chunk_handlers.go` to match
+3. Deploy changes
+4. Option A: Let chunks regenerate automatically as requested (gradual)
+5. Option B: Use bulk invalidation API to force immediate regeneration
 
 ## Compression
 

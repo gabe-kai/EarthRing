@@ -13,6 +13,7 @@ The `ChunkStorage` struct (`chunks.go`) handles chunk persistence and retrieval 
 - **Automatic Persistence**: Generated chunks are automatically stored after generation
 - **Database-First Loading**: Chunks are loaded from database before generating (avoids regeneration)
 - **Chunk Deletion**: Deletes chunks and associated data atomically (transaction-safe)
+- **Version Management**: Stores chunk version and version metadata (algorithm parameters, sample intervals, etc.)
 - **PostGIS Integration**: Geometry stored as PostGIS POLYGON for spatial queries
 - **Client Format Storage**: JSONB terrain_data field stores client-friendly geometry format
 - **Transaction Safety**: All storage operations use database transactions
@@ -35,12 +36,24 @@ if metadata == nil {
     // Chunk doesn't exist
 }
 
-// Store generated chunk
+// Store generated chunk (includes version metadata)
 genResponse := &procedural.GenerateChunkResponse{...}
 err := storage.StoreChunk(floor, chunkIndex, genResponse, proceduralSeed)
 if err != nil {
     // Handle error (PostGIS not available, invalid geometry, etc.)
 }
+
+// Version metadata is automatically stored in metadata JSONB field:
+// {
+//   "width": 400.0,
+//   "version_metadata": {
+//     "geometry_version": 2,
+//     "sample_interval": 50.0,
+//     "algorithm": "smooth_curved_taper",
+//     "vertex_count": 42,
+//     "face_count": 40
+//   }
+// }
 
 // Load geometry from database
 geometry, err := storage.ConvertPostGISToGeometry(chunkID)
