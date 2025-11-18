@@ -619,9 +619,14 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 		t.Fatalf("Failed to create chunks table: %v", err)
 	}
 
+	// Drop and recreate chunk_data table to ensure it has the correct schema
+	_, err = db.Exec("DROP TABLE IF EXISTS chunk_data")
+	if err != nil {
+		t.Logf("Warning: failed to drop chunk_data table: %v", err)
+	}
 	// Create chunk_data table
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS chunk_data (
+		CREATE TABLE chunk_data (
 			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
 			geometry GEOMETRY(POLYGON, 0) NOT NULL,
 			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
@@ -674,7 +679,9 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Logf("Warning: failed to encode response: %v", err)
+		}
 	}))
 	defer mockServer.Close()
 

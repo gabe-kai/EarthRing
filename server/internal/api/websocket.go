@@ -359,7 +359,9 @@ func (c *WebSocketConnection) writePump() {
 				return
 			}
 			if _, err := w.Write(message); err != nil {
-				_ = w.Close()
+				if closeErr := w.Close(); closeErr != nil {
+					log.Printf("Failed to close writer after write error: %v", closeErr)
+				}
 				return
 			}
 
@@ -367,11 +369,15 @@ func (c *WebSocketConnection) writePump() {
 			n := len(c.send)
 			for i := 0; i < n; i++ {
 				if _, err := w.Write([]byte{'\n'}); err != nil {
-					_ = w.Close()
+					if closeErr := w.Close(); closeErr != nil {
+						log.Printf("Failed to close writer after write error: %v", closeErr)
+					}
 					return
 				}
 				if _, err := w.Write(<-c.send); err != nil {
-					_ = w.Close()
+					if closeErr := w.Close(); closeErr != nil {
+						log.Printf("Failed to close writer after write error: %v", closeErr)
+					}
 					return
 				}
 			}
