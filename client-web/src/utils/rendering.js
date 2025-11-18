@@ -4,7 +4,7 @@
  */
 
 import * as THREE from 'three';
-import { toThreeJS, fromThreeJS, DEFAULT_FLOOR_HEIGHT } from './coordinates.js';
+import { toThreeJS, fromThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition } from './coordinates.js';
 
 /**
  * Set Three.js object position from EarthRing coordinates
@@ -59,7 +59,10 @@ export function getEarthRingPositionFromCamera(camera, floorHeight = DEFAULT_FLO
     y: camera.position.y,
     z: camera.position.z,
   };
-  return fromThreeJS(threeJSPosition, floorHeight);
+  const earthRingPos = fromThreeJS(threeJSPosition, floorHeight);
+  // Wrap the X coordinate (ring position) to valid range [0, 264000000)
+  earthRingPos.x = wrapRingPosition(earthRingPos.x);
+  return earthRingPos;
 }
 
 /**

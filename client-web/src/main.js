@@ -14,6 +14,8 @@ import { GameStateManager } from './state/game-state.js';
 import { ChunkManager } from './chunks/chunk-manager.js';
 import { wsClient } from './network/websocket-client.js';
 import { createMeshAtEarthRingPosition } from './utils/rendering.js';
+import { positionToChunkIndex } from './utils/coordinates.js';
+import { findNearestStation, getStationPosition, getAllStationPositions } from './utils/stations.js';
 
 // Initialize game state manager
 const gameStateManager = new GameStateManager();
@@ -28,8 +30,8 @@ const cameraController = new CameraController(
   sceneManager
 );
 
-// Initialize chunk manager
-const chunkManager = new ChunkManager(sceneManager, gameStateManager);
+// Initialize chunk manager (pass camera controller for position wrapping)
+const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController);
 
 // Add a test cube at EarthRing position (0, 0, 0) for demonstration
 const scene = sceneManager.getScene();
@@ -45,13 +47,13 @@ const cubeThreeJSPos = cube.position;
 cameraController.setTargetFromEarthRing(earthringPosition);
 const camera = sceneManager.getCamera();
 
-// Position camera closer to cube for better view
-// EarthRing position: 5m along ring, 0 width, floor 0
-const cameraEarthRingPos = { x: 5, y: 0, z: 0 };
+// Position camera for better view of the ring
+// EarthRing position: 100m along ring, 0 width, floor 0
+const cameraEarthRingPos = { x: 100, y: 0, z: 0 };
 cameraController.setPositionFromEarthRing(cameraEarthRingPos);
-// Adjust camera to be above and behind the cube
-camera.position.y += 5;
-camera.position.z += 5;
+// Adjust camera to be elevated and angled for better view
+camera.position.y += 20; // Higher up for better overview
+camera.position.z += 30; // Back from the ring
 camera.lookAt(cubeThreeJSPos.x, cubeThreeJSPos.y, cubeThreeJSPos.z);
 
 // Add grid helper for better visibility
@@ -62,13 +64,73 @@ scene.add(gridHelper);
 const axesHelper = new THREE.AxesHelper(10);
 scene.add(axesHelper);
 
-// Set up render loop to update camera controls
-sceneManager.onRender(() => {
-  cameraController.update();
+// Track last camera position for chunk loading (throttle to avoid excessive requests)
+let lastCameraChunkIndex = null;
+let lastCameraPosition = null; // Track actual position, not just chunk index
+let lastChunkLoadTime = 0;
+let pendingChunkLoad = false; // Track if a chunk load is in progress
+const CHUNK_LOAD_THROTTLE_MS = 1000; // Only check for new chunks every 1 second
+const CHUNK_LOAD_DISTANCE_THRESHOLD = 500; // Load new chunks if moved more than 500m
+
+// Set up render loop to update camera controls and load chunks as camera moves
+sceneManager.onRender((deltaTime) => {
+  // Update camera controller with deltaTime for smooth movement
+  cameraController.update(deltaTime);
   
   // Rotate test cube
   cube.rotation.x += 0.01;
   cube.rotation.y += 0.01;
+  
+  // Disabled automatic re-rendering for wrapping to prevent z-fighting
+  // Chunks are wrapped when first rendered based on camera position
+  // Re-enable this if needed, but it causes flickering due to overlapping chunks
+  // if (chunkManager.shouldReRenderChunks()) {
+  //   chunkManager.reRenderAllChunks();
+  // }
+  
+  // Check if camera has moved enough to load new chunks
+  // Throttle chunk loading to avoid excessive requests
+  const now = performance.now();
+  if (wsClient.isConnected() && 
+      !pendingChunkLoad && 
+      (now - lastChunkLoadTime) >= CHUNK_LOAD_THROTTLE_MS) {
+    const cameraPos = cameraController.getEarthRingPosition();
+    const currentChunkIndex = positionToChunkIndex(cameraPos.x);
+    
+    // Calculate distance moved (accounting for wrapping)
+    let distanceMoved = 0;
+    if (lastCameraPosition !== null) {
+      const RING_CIRCUMFERENCE = 264000000;
+      const directDistance = Math.abs(cameraPos.x - lastCameraPosition);
+      const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+      distanceMoved = Math.min(directDistance, wrappedDistance);
+    }
+    
+    // Load chunks if we've moved to a different chunk OR moved far enough
+    // This ensures chunks load even when moving within the same chunk
+    if (lastCameraChunkIndex === null || 
+        currentChunkIndex !== lastCameraChunkIndex ||
+        distanceMoved > CHUNK_LOAD_DISTANCE_THRESHOLD) {
+      lastCameraChunkIndex = currentChunkIndex;
+      lastCameraPosition = cameraPos.x;
+      lastChunkLoadTime = now;
+      pendingChunkLoad = true;
+      
+      // Load chunks around camera position (radius of 4 chunks = 9 total chunks, within limit of 10)
+      // Use floor 0 for now (camera Z coordinate conversion can be inaccurate due to camera offsets)
+      const floor = 0;
+      console.log(`Loading chunks around position ${cameraPos.x.toFixed(0)}m (chunk ${currentChunkIndex}, floor ${floor})`);
+      chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium')
+        .then(() => {
+          console.log(`Successfully requested chunks around chunk ${currentChunkIndex}`);
+          pendingChunkLoad = false;
+        })
+        .catch(error => {
+          console.error('Failed to load chunks at camera position:', error);
+          pendingChunkLoad = false;
+        });
+    }
+  }
 });
 
 // Start rendering loop
@@ -159,8 +221,9 @@ wsClient.onOpen(async () => {
   // Automatically load chunks around the camera position
   try {
     const cameraPos = cameraController.getEarthRingPosition();
-    // Load chunks at camera position (floor 0, radius 2 chunks)
-    await chunkManager.requestChunksAtPosition(cameraPos.x, 0, 2, 'medium');
+    // Load chunks at camera position (floor 0, radius 4 chunks = 9 total chunks)
+    // Use floor 0 explicitly since camera Z coordinate conversion can be inaccurate
+    await chunkManager.requestChunksAtPosition(cameraPos.x, 0, 4, 'medium');
     console.log('Loaded chunks around camera position');
   } catch (error) {
     console.error('Failed to load initial chunks:', error);
@@ -183,13 +246,34 @@ wsClient.onError((error) => {
   });
 });
 
-// Export managers for debugging/development
+// Export managers and utilities for debugging/development
 window.earthring = {
   sceneManager,
   cameraController,
   gameStateManager,
   chunkManager,
   wsClient,
+  debug: false, // Set to true to enable debug logging
+  stations: {
+    findNearestStation,
+    getStationPosition,
+    getAllStationPositions,
+    // Helper function to navigate to a station
+    navigateToStation: (index) => {
+      const stationPos = getStationPosition(index);
+      if (stationPos !== null) {
+        // Position camera above station center for good view
+        cameraController.moveToPosition({
+          x: stationPos,
+          y: 0,
+          z: 0,
+        }, 3); // 3 second smooth movement
+        console.log(`Navigating to Station Hub ${index} at position ${stationPos}m`);
+      } else {
+        console.error(`Invalid station index: ${index}`);
+      }
+    },
+  },
 };
 
 // Client initialization complete

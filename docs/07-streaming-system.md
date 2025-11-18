@@ -191,6 +191,7 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
    - Returns chunks with ring floor geometry and station flares (variable-width chunks)
    - Ring floor geometry is visible in client (gray rectangular planes with variable width)
    - Full generation with buildings and structures will be populated in Phase 2
+- Client seam handling: the web client dynamically shifts entire chunk meshes by integer multiples of the ring circumference so that only the copy closest to the camera is rendered. This ensures chunk `263999` sits perfectly beside chunk `0` with no overlapping geometry or visible gaps when the camera crosses the wrap point.
 
 #### Chunk Storage ✅ **IMPLEMENTED**
 

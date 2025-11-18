@@ -467,6 +467,7 @@ Response: {
 - Base width: 400m (standard ring sections)
 - Maximum width: 25km at pillar/elevator hub centers
 - Smooth cosine-based transitions for seamless geometry
+- **Pillar hub plateau**: Five center chunks (indices ...263998, 263999, 0, 1, 2...) at pillar hubs receive maximum width before tapering, ensuring perfect seam alignment
 - 12 pillar/elevator hubs positioned at regular intervals (~22,000 km apart)
 - Chunk levels also vary: 5 base levels → up to 15 levels at hub centers
 

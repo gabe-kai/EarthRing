@@ -1,15 +1,18 @@
 /**
  * Camera Controller
  * Manages camera movement and controls using OrbitControls
+ * Includes keyboard controls for smooth movement along the ring
  */
 
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
 import { setCameraPositionFromEarthRing, getEarthRingPositionFromCamera } from '../utils/rendering.js';
-import { toThreeJS } from '../utils/coordinates.js';
+import { toThreeJS, wrapRingPosition } from '../utils/coordinates.js';
 
 /**
  * Camera Controller class
  * Wraps OrbitControls and provides EarthRing coordinate integration
+ * Includes keyboard movement controls for exploring the ring
  */
 export class CameraController {
   constructor(camera, renderer, sceneManager) {
@@ -20,8 +23,23 @@ export class CameraController {
     // Create OrbitControls
     this.controls = new OrbitControls(camera, renderer.domElement);
     
+    // Movement state
+    this.movementSpeed = 500; // meters per second (5 km per 10 seconds for faster exploration)
+    this.widthMovementSpeed = 200; // meters per second for width movement
+    this.keys = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+    };
+    
     // Configure controls
     this.setupControls();
+    
+    // Set up keyboard listeners
+    this.setupKeyboardControls();
   }
   
   /**
@@ -85,9 +103,190 @@ export class CameraController {
   }
   
   /**
-   * Update controls (should be called in render loop)
+   * Check if the user is currently typing in an input field
+   * @param {KeyboardEvent} event - Keyboard event
+   * @returns {boolean} True if user is typing in an input field
    */
-  update() {
+  isTypingInInput(event) {
+    const target = event.target;
+    const tagName = target.tagName.toLowerCase();
+    
+    // Check if focus is on input, textarea, or contenteditable element
+    if (tagName === 'input' || tagName === 'textarea') {
+      return true;
+    }
+    
+    // Check if element is contenteditable
+    if (target.isContentEditable) {
+      return true;
+    }
+    
+    // Check if element is inside a form (but allow if it's a button)
+    if (tagName === 'button' || tagName === 'select') {
+      return false;
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Set up keyboard controls for camera movement
+   */
+  setupKeyboardControls() {
+    // Handle key down
+    document.addEventListener('keydown', (event) => {
+      // Don't intercept keys if user is typing in an input field
+      if (this.isTypingInInput(event)) {
+        return;
+      }
+      
+      switch (event.code) {
+        case 'KeyW':
+        case 'ArrowUp':
+          this.keys.forward = true;
+          event.preventDefault();
+          break;
+        case 'KeyS':
+        case 'ArrowDown':
+          this.keys.backward = true;
+          event.preventDefault();
+          break;
+        case 'KeyA':
+        case 'ArrowLeft':
+          this.keys.left = true;
+          event.preventDefault();
+          break;
+        case 'KeyD':
+        case 'ArrowRight':
+          this.keys.right = true;
+          event.preventDefault();
+          break;
+        case 'KeyQ':
+        case 'KeyE':
+          // Q = move "north" (negative Y), E = move "south" (positive Y)
+          if (event.code === 'KeyQ') {
+            this.keys.up = true;
+          } else {
+            this.keys.down = true;
+          }
+          event.preventDefault();
+          break;
+      }
+    });
+    
+    // Handle key up
+    document.addEventListener('keyup', (event) => {
+      // Don't intercept keys if user is typing in an input field
+      if (this.isTypingInInput(event)) {
+        return;
+      }
+      
+      switch (event.code) {
+        case 'KeyW':
+        case 'ArrowUp':
+          this.keys.forward = false;
+          event.preventDefault();
+          break;
+        case 'KeyS':
+        case 'ArrowDown':
+          this.keys.backward = false;
+          event.preventDefault();
+          break;
+        case 'KeyA':
+        case 'ArrowLeft':
+          this.keys.left = false;
+          event.preventDefault();
+          break;
+        case 'KeyD':
+        case 'ArrowRight':
+          this.keys.right = false;
+          event.preventDefault();
+          break;
+        case 'KeyQ':
+          this.keys.up = false;
+          event.preventDefault();
+          break;
+        case 'KeyE':
+          this.keys.down = false;
+          event.preventDefault();
+          break;
+      }
+    });
+  }
+  
+  /**
+   * Update camera position based on keyboard input
+   * Movement is relative to camera direction (forward/backward along camera view, left/right perpendicular)
+   * @param {number} deltaTime - Time since last frame in seconds
+   */
+  updateMovement(deltaTime) {
+    // Check if any movement keys are pressed
+    const isMoving = this.keys.forward || this.keys.backward || 
+                     this.keys.left || this.keys.right || 
+                     this.keys.up || this.keys.down;
+    
+    // Only update if keys are pressed
+    if (!isMoving) {
+      return;
+    }
+    
+    // Calculate movement distance based on deltaTime
+    const forwardSpeed = this.movementSpeed * deltaTime;
+    const strafeSpeed = this.widthMovementSpeed * deltaTime;
+    
+    // Get camera direction vectors (in Three.js space)
+    const cameraDirection = new THREE.Vector3();
+    this.camera.getWorldDirection(cameraDirection);
+    
+    // Create right vector (perpendicular to camera direction and up)
+    const rightVector = new THREE.Vector3();
+    rightVector.crossVectors(cameraDirection, this.camera.up).normalize();
+    
+    // Calculate movement vector based on input
+    const movement = new THREE.Vector3();
+    
+    // Forward/backward movement (along camera direction)
+    if (this.keys.forward) {
+      movement.add(cameraDirection.multiplyScalar(forwardSpeed));
+    }
+    if (this.keys.backward) {
+      movement.add(cameraDirection.multiplyScalar(-forwardSpeed));
+    }
+    
+    // Left/right strafe movement (perpendicular to camera direction)
+    if (this.keys.left) {
+      movement.add(rightVector.multiplyScalar(-strafeSpeed));
+    }
+    if (this.keys.right) {
+      movement.add(rightVector.multiplyScalar(strafeSpeed));
+    }
+    
+    // Q/E for vertical movement (up/down in world space)
+    if (this.keys.up) {
+      movement.add(this.camera.up.clone().multiplyScalar(strafeSpeed));
+    }
+    if (this.keys.down) {
+      movement.add(this.camera.up.clone().multiplyScalar(-strafeSpeed));
+    }
+    
+    // Apply movement to camera and target
+    if (movement.length() > 0) {
+      this.camera.position.add(movement);
+      this.controls.target.add(movement);
+    }
+  }
+  
+  /**
+   * Update controls (should be called in render loop)
+   * @param {number} [deltaTime] - Time since last frame in seconds (for movement)
+   */
+  update(deltaTime) {
+    // Update keyboard movement if deltaTime provided
+    if (deltaTime !== undefined) {
+      this.updateMovement(deltaTime);
+    }
+    
+    // Update OrbitControls
     this.controls.update();
   }
   
@@ -118,10 +317,73 @@ export class CameraController {
   }
   
   /**
+   * Set movement speed
+   * @param {number} speed - Movement speed in meters per second
+   */
+  setMovementSpeed(speed) {
+    this.movementSpeed = speed;
+  }
+  
+  /**
+   * Set width movement speed
+   * @param {number} speed - Width movement speed in meters per second
+   */
+  setWidthMovementSpeed(speed) {
+    this.widthMovementSpeed = speed;
+  }
+  
+  /**
+   * Get current movement speed
+   * @returns {number} Movement speed in meters per second
+   */
+  getMovementSpeed() {
+    return this.movementSpeed;
+  }
+  
+  /**
+   * Smoothly move camera to a specific EarthRing position
+   * @param {Object} targetPosition - Target EarthRing position {x, y, z}
+   * @param {number} duration - Duration of movement in seconds (default: 2)
+   */
+  moveToPosition(targetPosition, duration = 2) {
+    const startPos = this.getEarthRingPosition();
+    const startTime = performance.now();
+    
+    const animate = () => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Smooth easing function (ease-in-out)
+      const eased = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      
+      const currentPos = {
+        x: startPos.x + (targetPosition.x - startPos.x) * eased,
+        y: startPos.y + (targetPosition.y - startPos.y) * eased,
+        z: startPos.z + (targetPosition.z - startPos.z) * eased,
+      };
+      
+      // Wrap ring position
+      currentPos.x = wrapRingPosition(currentPos.x);
+      
+      this.setPositionFromEarthRing(currentPos);
+      this.setTargetFromEarthRing(currentPos);
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    
+    animate();
+  }
+  
+  /**
    * Clean up resources
    */
   dispose() {
     this.controls.dispose();
+    // Note: Keyboard event listeners persist, but that's acceptable for this implementation
   }
 }
 
