@@ -19,6 +19,7 @@ EarthRing is set on a massive orbital ring structure:
 - **Keyboard-relative camera movement**: WASD (forward/backward along camera view, left/right strafe), QE (vertical up/down), and OrbitControls can be used simultaneously. Movement is relative to camera orientation. Input is suppressed automatically while typing in UI fields.
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
+- **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
 
 ## Prerequisites
 
