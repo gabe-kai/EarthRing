@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/earthring/server/internal/auth"
+	"github.com/earthring/server/internal/compression"
 	"github.com/earthring/server/internal/config"
 	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
@@ -448,6 +449,64 @@ type ChunkRequestData struct {
 	LODLevel string   `json:"lod_level,omitempty"` // Optional LOD level: "low", "medium", "high"
 }
 
+// compressChunkGeometry compresses chunk geometry for transmission
+func compressChunkGeometry(geometry interface{}) (interface{}, error) {
+	if geometry == nil {
+		return nil, nil
+	}
+
+	// Try to convert to *procedural.ChunkGeometry
+	var chunkGeometry *procedural.ChunkGeometry
+	
+	switch geom := geometry.(type) {
+	case *procedural.ChunkGeometry:
+		chunkGeometry = geom
+	case map[string]interface{}:
+		// Convert map to ChunkGeometry (for database-loaded geometry)
+		// This is a simplified conversion - in production we'd have better type handling
+		// For now, we'll attempt to extract the necessary fields
+		if geomType, ok := geom["type"].(string); ok && geomType == "ring_floor" {
+			// Try to reconstruct ChunkGeometry from map
+			// This is a basic implementation - we'd need proper JSON unmarshaling in production
+			// For now, we'll compress what we can
+			vertices, _ := geom["vertices"].([]interface{})
+			faces, _ := geom["faces"].([]interface{})
+			
+			if vertices != nil && faces != nil {
+				// Convert to proper types (simplified - would need full conversion in production)
+				chunkGeometry = &procedural.ChunkGeometry{
+					Type: geomType,
+					// Note: Full conversion would require proper type assertions
+					// For now, we'll skip compression for map types and compress only procedural types
+				}
+			}
+		}
+	}
+
+	// Only compress if we have a proper ChunkGeometry
+	if chunkGeometry == nil {
+		// Return geometry as-is if we can't convert it
+		return geometry, nil
+	}
+
+	// Compress the geometry
+	compressedData, err := compression.CompressChunkGeometry(chunkGeometry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress geometry: %w", err)
+	}
+
+	// Estimate uncompressed size (approximate)
+	uncompressedSize := compression.EstimateUncompressedSize(chunkGeometry)
+
+	// Format for transmission
+	compressedGeometry, err := compression.FormatCompressedGeometry(compressedData, uncompressedSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to format compressed geometry: %w", err)
+	}
+
+	return compressedGeometry, nil
+}
+
 // ChunkData represents a single chunk in the chunk_data response
 type ChunkData struct {
 	ID         string         `json:"id"`                 // Format: "floor_chunk_index"
@@ -618,6 +677,49 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 				Structures: []interface{}{}, // Empty for Phase 1
 				Zones:      []interface{}{}, // Empty for Phase 1
 				Metadata:   &metadata,
+			}
+		}
+
+		// Compress geometry if present
+		if chunk.Geometry != nil {
+			// Check if geometry is already compressed (shouldn't happen, but be safe)
+			if compressedGeom, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
+				// Already compressed, log and continue
+				compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
+				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)", 
+					chunkID, compressedGeom.Size, compressionRatio)
+			} else {
+				// Compress the geometry
+				var chunkGeometry *procedural.ChunkGeometry
+				switch geom := chunk.Geometry.(type) {
+				case *procedural.ChunkGeometry:
+					chunkGeometry = geom
+				case map[string]interface{}:
+					// Skip compression for map types (database-loaded geometry)
+					// They'll be sent uncompressed for now
+					log.Printf("Chunk %s geometry is map type, skipping compression", chunkID)
+				default:
+					log.Printf("Chunk %s geometry has unknown type, skipping compression", chunkID)
+				}
+
+				if chunkGeometry != nil {
+					uncompressedSize := compression.EstimateUncompressedSize(chunkGeometry)
+					compressedGeometry, err := compressChunkGeometry(chunk.Geometry)
+					if err != nil {
+						log.Printf("Failed to compress geometry for chunk %s: %v", chunkID, err)
+						// Continue with uncompressed geometry if compression fails
+					} else {
+						// Log compression success with stats
+						if compressedGeom, ok := compressedGeometry.(*compression.CompressedGeometry); ok {
+							compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
+							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)", 
+								chunkID, compressedGeom.UncompressedSize, compressedGeom.Size, compressionRatio, uncompressedSize)
+						} else {
+							log.Printf("✓ Compressed chunk %s geometry (estimated uncompressed: %d bytes)", chunkID, uncompressedSize)
+						}
+						chunk.Geometry = compressedGeometry
+					}
+				}
 			}
 		}
 

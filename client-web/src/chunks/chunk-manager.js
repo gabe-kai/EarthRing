@@ -6,6 +6,7 @@
 import { wsClient } from '../network/websocket-client.js';
 import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS } from '../utils/coordinates.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
+import { decompressChunkGeometry, isCompressedGeometry } from '../utils/decompression.js';
 import * as THREE from 'three';
 
 /**
@@ -186,7 +187,7 @@ export class ChunkManager {
    * Handle chunk data received from server
    * @param {Object} data - Chunk data from server
    */
-  handleChunkData(data) {
+  async handleChunkData(data) {
     if (!data.chunks || !Array.isArray(data.chunks)) {
       console.error('Invalid chunk_data format:', data);
       return;
@@ -194,29 +195,82 @@ export class ChunkManager {
     
     console.log(`Received ${data.chunks.length} chunk(s) from server`);
     
-    data.chunks.forEach(chunkData => {
-      if (!chunkData.id) {
-        console.error('Chunk data missing ID:', chunkData);
-        return;
+    // Process chunks in parallel (decompress if needed)
+    const processedChunks = await Promise.all(
+      data.chunks.map(async (chunkData) => {
+        if (!chunkData.id) {
+          console.error('Chunk data missing ID:', chunkData);
+          return null;
+        }
+        
+        // Remove from pending requests since we received the data
+        this.pendingChunkRequests.delete(chunkData.id);
+        
+        // Decompress geometry if it's compressed
+        let geometry = chunkData.geometry;
+        if (geometry && isCompressedGeometry(geometry)) {
+          const startTime = performance.now();
+          try {
+            geometry = await decompressChunkGeometry(geometry);
+            const decompressTime = performance.now() - startTime;
+            const compressionRatio = (chunkData.geometry.uncompressed_size / chunkData.geometry.size).toFixed(2);
+            
+            console.log(`✓ Decompressed chunk ${chunkData.id} geometry: ${chunkData.geometry.size} → ${chunkData.geometry.uncompressed_size} bytes (${compressionRatio}:1 ratio) in ${decompressTime.toFixed(2)}ms`);
+            
+            if (window.earthring?.debug) {
+              console.log(`  Decompression details:`, {
+                compressedSize: chunkData.geometry.size,
+                uncompressedSize: chunkData.geometry.uncompressed_size,
+                ratio: compressionRatio + ':1',
+                decompressTime: `${decompressTime.toFixed(2)}ms`,
+                vertices: geometry.vertices?.length || 0,
+                faces: geometry.faces?.length || 0
+              });
+            }
+          } catch (error) {
+            const decompressTime = performance.now() - startTime;
+            console.error(`✗ Failed to decompress geometry for chunk ${chunkData.id} (took ${decompressTime.toFixed(2)}ms):`, error);
+            // Try to use original geometry if decompression fails (fallback to uncompressed)
+            // This ensures chunks still render even if compression/decompression has issues
+            console.warn(`Falling back to original geometry format for chunk ${chunkData.id}`);
+            // Return original chunk data (might be uncompressed or in a different format)
+            return chunkData;
+          }
+        } else if (geometry && !isCompressedGeometry(geometry)) {
+          // Log when geometry is uncompressed (for debugging)
+          if (window.earthring?.debug) {
+            console.log(`Chunk ${chunkData.id} geometry is uncompressed (type: ${geometry.type || 'unknown'})`);
+          }
+        }
+        
+        // Create processed chunk data with decompressed geometry
+        const processedChunk = {
+          ...chunkData,
+          geometry
+        };
+        
+        // Only log detailed info if geometry exists or in debug mode
+        if (geometry || window.earthring?.debug) {
+          console.log(`Processing chunk ${processedChunk.id}:`, {
+            hasGeometry: !!geometry,
+            isCompressed: isCompressedGeometry(chunkData.geometry),
+            geometryType: geometry?.type,
+            width: geometry?.width,
+            length: geometry?.length,
+            structures: processedChunk.structures?.length || 0,
+            zones: processedChunk.zones?.length || 0,
+          });
+        }
+        
+        return processedChunk;
+      })
+    );
+    
+    // Store processed chunks in game state (this will trigger renderChunk via event listener)
+    processedChunks.forEach(chunkData => {
+      if (chunkData) {
+        this.gameStateManager.addChunk(chunkData.id, chunkData);
       }
-      
-      // Remove from pending requests since we received the data
-      this.pendingChunkRequests.delete(chunkData.id);
-      
-      // Only log detailed info if geometry exists or in debug mode
-      if (chunkData.geometry || window.earthring?.debug) {
-        console.log(`Processing chunk ${chunkData.id}:`, {
-          hasGeometry: !!chunkData.geometry,
-          geometryType: chunkData.geometry?.type,
-          width: chunkData.geometry?.width,
-          length: chunkData.geometry?.length,
-          structures: chunkData.structures?.length || 0,
-          zones: chunkData.zones?.length || 0,
-        });
-      }
-      
-      // Store chunk in game state (this will trigger renderChunk via event listener)
-      this.gameStateManager.addChunk(chunkData.id, chunkData);
     });
   }
   
