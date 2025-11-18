@@ -44,6 +44,7 @@ func main() {
 	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/favicon.ico", faviconHandler)
 	mux.HandleFunc("/ws", wsHandlers.HandleWebSocket)
 
 	// Set up authentication routes (includes rate limiting)
@@ -80,6 +81,12 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`)
+}
+
+// faviconHandler responds to favicon requests.
+// Returns 204 No Content to suppress 404 errors in browser console.
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // setupDatabase creates a database connection using configuration
