@@ -924,8 +924,13 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 		t.Fatalf("Failed to create chunks table: %v", err)
 	}
 
+	// Drop and recreate chunk_data table to ensure it has the correct schema
+	_, err = db.Exec("DROP TABLE IF EXISTS chunk_data")
+	if err != nil {
+		t.Logf("Warning: failed to drop chunk_data table: %v", err)
+	}
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS chunk_data (
+		CREATE TABLE chunk_data (
 			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
 			geometry GEOMETRY(POLYGON, 0) NOT NULL,
 			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
@@ -941,6 +946,12 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 	}
 
 	// Clean up test data
-	_, _ = db.Exec("DELETE FROM chunk_data")
-	_, _ = db.Exec("DELETE FROM chunks")
+	_, err = db.Exec("DELETE FROM chunk_data")
+	if err != nil {
+		t.Logf("Warning: failed to delete chunk_data: %v", err)
+	}
+	_, err = db.Exec("DELETE FROM chunks")
+	if err != nil {
+		t.Logf("Warning: failed to delete chunks: %v", err)
+	}
 }

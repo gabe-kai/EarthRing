@@ -36,7 +36,10 @@ func TestGetChunkMetadata(t *testing.T) {
 	}
 
 	// Clean up any existing test chunk first
-	_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12345)
+	_, err = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12345)
+	if err != nil {
+		t.Logf("Warning: failed to delete test chunk: %v", err)
+	}
 
 	// Create test chunk
 	var chunkID int64
@@ -296,8 +299,14 @@ func TestDeleteChunk(t *testing.T) {
 	}
 
 	// Clean up any existing test chunks
-	_, _ = db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3))", 0, 12370, 12371)
-	_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3)", 0, 12370, 12371)
+	_, err = db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3))", 0, 12370, 12371)
+	if err != nil {
+		t.Logf("Warning: failed to delete chunk_data: %v", err)
+	}
+	_, err = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index IN ($2, $3)", 0, 12370, 12371)
+	if err != nil {
+		t.Logf("Warning: failed to delete chunks: %v", err)
+	}
 
 	// Create config
 	cfg := &config.Config{
@@ -461,8 +470,14 @@ func TestDeleteChunk(t *testing.T) {
 
 	t.Run("handles chunk index wrapping", func(t *testing.T) {
 		// Clean up any existing chunk 0_0 first
-		_, _ = db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2)", 0, 0)
-		_, _ = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 0)
+		_, err := db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2)", 0, 0)
+		if err != nil {
+			t.Logf("Warning: failed to delete chunk_data: %v", err)
+		}
+		_, err = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 0)
+		if err != nil {
+			t.Logf("Warning: failed to delete chunk: %v", err)
+		}
 
 		// Create chunk at wrapped index (264000 wraps to 0)
 		var chunkID int64

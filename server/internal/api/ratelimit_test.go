@@ -12,7 +12,10 @@ func TestRateLimitMiddleware(t *testing.T) {
 	// Create a simple handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
+		_, err := w.Write([]byte("OK"))
+		if err != nil {
+			t.Logf("Warning: failed to write response: %v", err)
+		}
 	})
 
 	// Create rate limit middleware (5 requests per minute)
