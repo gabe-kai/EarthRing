@@ -887,4 +887,85 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 	// Unregister connection
 	handlers.GetHub().unregister <- conn
 	time.Sleep(10 * time.Millisecond)
+
+	t.Run("auto-regenerates outdated chunks", func(t *testing.T) {
+		// Clean up
+		_, err := db.Exec("DELETE FROM chunk_data WHERE chunk_id IN (SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2)", 0, 12380)
+		if err != nil {
+			t.Logf("Warning: failed to delete chunk_data: %v", err)
+		}
+		_, err = db.Exec("DELETE FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12380)
+		if err != nil {
+			t.Logf("Warning: failed to delete chunk: %v", err)
+		}
+
+		// Create a chunk with old version (version 1)
+		var chunkID int64
+		err = db.QueryRow(`
+			INSERT INTO chunks (floor, chunk_index, version, is_dirty)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, 0, 12380, 1, false).Scan(&chunkID)
+		if err != nil {
+			t.Fatalf("Failed to create test chunk: %v", err)
+		}
+
+		// Store old geometry
+		oldGeometryJSON := `{"type": "ring_floor", "vertices": [[0, -200, 0], [1000, -200, 0], [1000, 200, 0], [0, 200, 0]], "faces": [[0, 1, 2], [0, 2, 3]], "normals": [[0, 0, 1], [0, 0, 1]], "width": 400.0, "length": 1000.0}`
+		_, err = db.Exec(`
+			INSERT INTO chunk_data (chunk_id, geometry, terrain_data)
+			VALUES ($1, ST_GeomFromText('POLYGON((0 0, 1000 0, 1000 400, 0 400, 0 0))', 0), $2)
+		`, chunkID, oldGeometryJSON)
+		if err != nil {
+			t.Fatalf("Failed to insert chunk_data: %v", err)
+		}
+
+		// Create a new connection for this test
+		conn2 := &WebSocketConnection{
+			conn:   nil, // Not needed for this test
+			userID: 1,
+			send:   make(chan []byte, 256),
+		}
+		handlers.GetHub().register <- conn2
+		time.Sleep(10 * time.Millisecond)
+
+		// Request the chunk via WebSocket - it should auto-regenerate
+		chunkRequest := &WebSocketMessage{
+			Type: "chunk_request",
+			ID:   "test-outdated",
+			Data: json.RawMessage(`{"chunks":["0_12380"],"lod_level":"medium"}`),
+		}
+
+		handlers.handleChunkRequest(conn2, chunkRequest)
+
+		// Wait for response
+		select {
+		case responseBytes := <-conn2.send:
+			var response WebSocketMessage
+			if err := json.Unmarshal(responseBytes, &response); err != nil {
+				t.Fatalf("Failed to unmarshal response: %v", err)
+			}
+
+			// Verify response type
+			if response.Type != "chunk_data" {
+				t.Errorf("Expected chunk_data, got %v", response.Type)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("Timeout waiting for response")
+		}
+
+		// Verify chunk was regenerated (version should be updated to current)
+		var newVersion int
+		err = db.QueryRow("SELECT version FROM chunks WHERE floor = $1 AND chunk_index = $2", 0, 12380).Scan(&newVersion)
+		if err != nil {
+			t.Fatalf("Failed to query version: %v", err)
+		}
+		if newVersion < CurrentGeometryVersion {
+			t.Errorf("Expected version >= %d after regeneration, got %d", CurrentGeometryVersion, newVersion)
+		}
+
+		// Unregister connection
+		handlers.GetHub().unregister <- conn2
+		time.Sleep(10 * time.Millisecond)
+	})
 }

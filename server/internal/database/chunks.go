@@ -199,9 +199,38 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 		seedValue = sql.NullInt64{Int64: int64(*proceduralSeed), Valid: true}
 	}
 
+	// Build metadata JSON with version metadata if available
 	var metadataJSON sql.NullString
 	if genResponse.Chunk.Version > 0 {
-		metadataJSON = sql.NullString{String: fmt.Sprintf(`{"width": %f}`, genResponse.Chunk.Width), Valid: true}
+		metadataMap := map[string]interface{}{
+			"width": genResponse.Chunk.Width,
+		}
+
+		// Include version metadata if present
+		if genResponse.Chunk.VersionMetadata != nil {
+			vm := genResponse.Chunk.VersionMetadata
+			versionMetadataMap := map[string]interface{}{
+				"geometry_version": vm.GeometryVersion,
+			}
+			if vm.SampleInterval != nil {
+				versionMetadataMap["sample_interval"] = *vm.SampleInterval
+			}
+			if vm.Algorithm != nil {
+				versionMetadataMap["algorithm"] = *vm.Algorithm
+			}
+			if vm.VertexCount != nil {
+				versionMetadataMap["vertex_count"] = *vm.VertexCount
+			}
+			if vm.FaceCount != nil {
+				versionMetadataMap["face_count"] = *vm.FaceCount
+			}
+			metadataMap["version_metadata"] = versionMetadataMap
+		}
+
+		metadataBytes, err := json.Marshal(metadataMap)
+		if err == nil {
+			metadataJSON = sql.NullString{String: string(metadataBytes), Valid: true}
+		}
 	}
 
 	err = tx.QueryRow(query, floor, chunkIndex, genResponse.Chunk.Version, false, seedValue, metadataJSON).Scan(&chunkID, &version)

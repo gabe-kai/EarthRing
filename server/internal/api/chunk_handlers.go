@@ -17,6 +17,13 @@ import (
 	"github.com/earthring/server/internal/ringmap"
 )
 
+// CurrentGeometryVersion must match CURRENT_GEOMETRY_VERSION in procedural/generation.py
+// Version history:
+//
+//	1: Initial rectangular geometry (4 vertices, 2 faces)
+//	2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
+const CurrentGeometryVersion = 2
+
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {
 	db               *sql.DB
@@ -207,5 +214,336 @@ func (h *ChunkHandlers) DeleteChunk(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Failed to encode delete chunk response: %v", err)
+	}
+}
+
+// GetChunkVersion returns the current geometry version
+func (h *ChunkHandlers) GetChunkVersion(w http.ResponseWriter, r *http.Request) {
+	// No authentication required for version endpoint (public info)
+	response := map[string]interface{}{
+		"current_version": CurrentGeometryVersion,
+		"version_history": []map[string]interface{}{
+			{
+				"version":         1,
+				"description":     "Initial rectangular geometry (4 vertices, 2 faces)",
+				"sample_interval": nil,
+			},
+			{
+				"version":         2,
+				"description":     "Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)",
+				"sample_interval": 50.0,
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode version response: %v", err)
+	}
+}
+
+// InvalidateOutdatedChunks invalidates all chunks with version < CurrentGeometryVersion
+// This forces regeneration of outdated chunks on next request
+func (h *ChunkHandlers) InvalidateOutdatedChunks(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated user from context (set by AuthMiddleware)
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Get optional query parameters for filtering
+	floorStr := r.URL.Query().Get("floor")
+	chunkIndexStartStr := r.URL.Query().Get("chunk_index_start")
+	chunkIndexEndStr := r.URL.Query().Get("chunk_index_end")
+
+	storage := database.NewChunkStorage(h.db)
+
+	// Build query to find outdated chunks
+	query := `
+		SELECT floor, chunk_index, id
+		FROM chunks
+		WHERE version < $1
+	`
+	args := []interface{}{CurrentGeometryVersion}
+	argIndex := 2
+
+	if floorStr != "" {
+		floor, err := strconv.Atoi(floorStr)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid floor parameter")
+			return
+		}
+		query += fmt.Sprintf(" AND floor = $%d", argIndex)
+		args = append(args, floor)
+		argIndex++
+	}
+
+	if chunkIndexStartStr != "" {
+		start, err := strconv.Atoi(chunkIndexStartStr)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid chunk_index_start parameter")
+			return
+		}
+		query += fmt.Sprintf(" AND chunk_index >= $%d", argIndex)
+		args = append(args, start)
+		argIndex++
+	}
+
+	if chunkIndexEndStr != "" {
+		end, err := strconv.Atoi(chunkIndexEndStr)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid chunk_index_end parameter")
+			return
+		}
+		query += fmt.Sprintf(" AND chunk_index <= $%d", argIndex)
+		args = append(args, end)
+		argIndex++
+	}
+
+	// Execute query
+	rows, err := h.db.Query(query, args...)
+	if err != nil {
+		log.Printf("Error querying outdated chunks: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to query outdated chunks")
+		return
+	}
+	defer rows.Close()
+
+	var deletedCount int
+	var failedCount int
+	var chunks []map[string]interface{}
+
+	for rows.Next() {
+		var floor, chunkIndex int
+		var chunkID int64
+		if err := rows.Scan(&floor, &chunkIndex, &chunkID); err != nil {
+			log.Printf("Error scanning chunk row: %v", err)
+			failedCount++
+			continue
+		}
+
+		// Delete the chunk
+		if err := storage.DeleteChunk(floor, chunkIndex); err != nil {
+			log.Printf("Failed to delete outdated chunk %d_%d: %v", floor, chunkIndex, err)
+			failedCount++
+			continue
+		}
+
+		deletedCount++
+		chunks = append(chunks, map[string]interface{}{
+			"chunk_id":    fmt.Sprintf("%d_%d", floor, chunkIndex),
+			"floor":       floor,
+			"chunk_index": chunkIndex,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating chunk rows: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to process chunks")
+		return
+	}
+
+	log.Printf("✓ Invalidated %d outdated chunks (failed: %d)", deletedCount, failedCount)
+
+	// Return success response
+	response := map[string]interface{}{
+		"success":       true,
+		"message":       fmt.Sprintf("Invalidated %d outdated chunks. They will be regenerated on next request.", deletedCount),
+		"deleted_count": deletedCount,
+		"failed_count":  failedCount,
+		"chunks":        chunks,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode invalidation response: %v", err)
+	}
+}
+
+// BatchRegenerateChunksRequest represents a request to batch regenerate chunks
+type BatchRegenerateChunksRequest struct {
+	ChunkIDs        []string `json:"chunk_ids,omitempty"`         // Specific chunk IDs to regenerate
+	Floor           *int     `json:"floor,omitempty"`             // Filter by floor
+	ChunkIndexStart *int     `json:"chunk_index_start,omitempty"` // Start of chunk index range
+	ChunkIndexEnd   *int     `json:"chunk_index_end,omitempty"`   // End of chunk index range
+	LODLevel        string   `json:"lod_level,omitempty"`         // LOD level for regeneration
+	MaxChunks       int      `json:"max_chunks,omitempty"`        // Maximum chunks to process (default: 100)
+}
+
+// BatchRegenerateChunks regenerates multiple chunks in the background
+// This endpoint accepts chunk IDs or filters and regenerates them asynchronously
+func (h *ChunkHandlers) BatchRegenerateChunks(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated user from context (set by AuthMiddleware)
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Parse request body
+	var req BatchRegenerateChunksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Set defaults
+	if req.LODLevel == "" {
+		req.LODLevel = "medium"
+	}
+	if req.MaxChunks <= 0 {
+		req.MaxChunks = 100 // Default limit
+	}
+	if req.MaxChunks > 1000 {
+		req.MaxChunks = 1000 // Hard limit
+	}
+
+	// Validate LOD level
+	if req.LODLevel != "low" && req.LODLevel != "medium" && req.LODLevel != "high" {
+		respondWithError(w, http.StatusBadRequest, "Invalid LOD level (must be 'low', 'medium', or 'high')")
+		return
+	}
+
+	storage := database.NewChunkStorage(h.db)
+	var chunksToRegenerate []map[string]int // []{floor, chunk_index}
+
+	// Build list of chunks to regenerate
+	if len(req.ChunkIDs) > 0 {
+		// Process specific chunk IDs
+		for _, chunkID := range req.ChunkIDs {
+			parts := strings.Split(chunkID, "_")
+			if len(parts) != 2 {
+				continue
+			}
+			floor, err1 := strconv.Atoi(parts[0])
+			chunkIndex, err2 := strconv.Atoi(parts[1])
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			chunksToRegenerate = append(chunksToRegenerate, map[string]int{
+				"floor":       floor,
+				"chunk_index": chunkIndex,
+			})
+		}
+	} else {
+		// Build query based on filters
+		query := `SELECT floor, chunk_index FROM chunks WHERE 1=1`
+		args := []interface{}{}
+		argIndex := 1
+
+		if req.Floor != nil {
+			query += fmt.Sprintf(" AND floor = $%d", argIndex)
+			args = append(args, *req.Floor)
+			argIndex++
+		}
+
+		if req.ChunkIndexStart != nil {
+			query += fmt.Sprintf(" AND chunk_index >= $%d", argIndex)
+			args = append(args, *req.ChunkIndexStart)
+			argIndex++
+		}
+
+		if req.ChunkIndexEnd != nil {
+			query += fmt.Sprintf(" AND chunk_index <= $%d", argIndex)
+			args = append(args, *req.ChunkIndexEnd)
+			argIndex++
+		}
+
+		query += fmt.Sprintf(" LIMIT $%d", argIndex)
+		args = append(args, req.MaxChunks)
+
+		rows, err := h.db.Query(query, args...)
+		if err != nil {
+			log.Printf("Error querying chunks for batch regeneration: %v", err)
+			respondWithError(w, http.StatusInternalServerError, "Failed to query chunks")
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var floor, chunkIndex int
+			if err := rows.Scan(&floor, &chunkIndex); err != nil {
+				continue
+			}
+			chunksToRegenerate = append(chunksToRegenerate, map[string]int{
+				"floor":       floor,
+				"chunk_index": chunkIndex,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("Error iterating chunk rows: %v", err)
+			respondWithError(w, http.StatusInternalServerError, "Failed to process chunks")
+			return
+		}
+	}
+
+	if len(chunksToRegenerate) == 0 {
+		respondWithError(w, http.StatusBadRequest, "No chunks found to regenerate")
+		return
+	}
+
+	// Limit to max chunks
+	if len(chunksToRegenerate) > req.MaxChunks {
+		chunksToRegenerate = chunksToRegenerate[:req.MaxChunks]
+	}
+
+	// Start background regeneration (non-blocking)
+	// In a production system, you'd use a proper job queue, but for now we'll do it in a goroutine
+	go func() {
+		regeneratedCount := 0
+		failedCount := 0
+		for _, chunk := range chunksToRegenerate {
+			floor := chunk["floor"]
+			chunkIndex := chunk["chunk_index"]
+
+			// Delete chunk to force regeneration
+			if err := storage.DeleteChunk(floor, chunkIndex); err != nil {
+				log.Printf("Failed to delete chunk %d_%d for regeneration: %v", floor, chunkIndex, err)
+				failedCount++
+				continue
+			}
+
+			// Generate and store the regenerated chunk
+			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, req.LODLevel, nil)
+			if err != nil {
+				log.Printf("Failed to regenerate chunk %d_%d: %v", floor, chunkIndex, err)
+				failedCount++
+				continue
+			}
+
+			if genResponse == nil || !genResponse.Success {
+				log.Printf("Chunk generation failed for %d_%d", floor, chunkIndex)
+				failedCount++
+				continue
+			}
+
+			// Store the regenerated chunk
+			if err := storage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
+				log.Printf("Failed to store regenerated chunk %d_%d: %v", floor, chunkIndex, err)
+				failedCount++
+				continue
+			}
+
+			regeneratedCount++
+			if regeneratedCount%10 == 0 {
+				log.Printf("Batch regeneration progress: %d/%d chunks regenerated", regeneratedCount, len(chunksToRegenerate))
+			}
+		}
+		log.Printf("✓ Batch regeneration complete: %d regenerated, %d failed", regeneratedCount, failedCount)
+	}()
+
+	// Return immediate response
+	response := map[string]interface{}{
+		"success":     true,
+		"message":     fmt.Sprintf("Started batch regeneration of %d chunks in background", len(chunksToRegenerate)),
+		"chunk_count": len(chunksToRegenerate),
+		"lod_level":   req.LODLevel,
+		"status":      "processing",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted) // 202 Accepted for async operations
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode batch regeneration response: %v", err)
 	}
 }

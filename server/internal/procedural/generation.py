@@ -12,6 +12,12 @@ CHUNK_LENGTH = 1000.0  # 1 km chunk length along ring
 BASE_CHUNK_WIDTH = 400.0  # Base width: 400m
 FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 
+# Geometry version - increment this when generation algorithm changes significantly
+# Version history:
+#   1: Initial rectangular geometry (4 vertices, 2 faces)
+#   2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
+CURRENT_GEOMETRY_VERSION = 2
+
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
     """
@@ -79,57 +85,57 @@ def generate_ring_floor_geometry(chunk_index: int, floor: int) -> dict:
     # Sample interval: 50m for smooth curves (20 samples per 1km chunk)
     SAMPLE_INTERVAL = 50.0
     num_samples = int(CHUNK_LENGTH / SAMPLE_INTERVAL) + 1
-    
+
     # Calculate chunk start position
     chunk_start_position = chunk_index * CHUNK_LENGTH
-    
+
     vertices = []
     faces = []
     normals = []
-    
+
     # Generate vertices along both edges (left and right) at each sample point
     for i in range(num_samples):
         # Position along chunk (0 to CHUNK_LENGTH)
         x_offset = min(i * SAMPLE_INTERVAL, CHUNK_LENGTH)
-        
+
         # Calculate absolute ring position at this sample point
         ring_position = chunk_start_position + x_offset
-        
+
         # Calculate width at this position (smooth curve)
         width = stations.calculate_flare_width(ring_position)
         half_width = width / 2.0
-        
+
         # Create vertices for left and right edges at this X position
         # Left edge (negative Y)
         vertices.append([x_offset, -half_width, 0.0])
         # Right edge (positive Y)
         vertices.append([x_offset, half_width, 0.0])
-    
+
     # Generate faces connecting adjacent sample points
     # Each quad is made of two triangles
     for i in range(num_samples - 1):
         # Indices for current sample point
         left_current = i * 2
         right_current = i * 2 + 1
-        
+
         # Indices for next sample point
         left_next = (i + 1) * 2
         right_next = (i + 1) * 2 + 1
-        
+
         # Create two triangles forming a quad
         # Triangle 1: left_current -> left_next -> right_current
         faces.append([left_current, left_next, right_current])
         # Triangle 2: right_current -> left_next -> right_next
         faces.append([right_current, left_next, right_next])
-    
+
     # Calculate normals for each face (all pointing up: [0, 0, 1])
     for _ in faces:
         normals.append([0.0, 0.0, 1.0])
-    
+
     # Calculate average width for metadata (width at chunk center)
     chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
     avg_width = stations.calculate_flare_width(chunk_center_position)
-    
+
     return {
         "type": "ring_floor",
         "vertices": vertices,
@@ -188,10 +194,18 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "zones": [],
         "metadata": {
             "generated": True,
-            "version": 2,  # Version 2 for Phase 2 geometry
+            "version": CURRENT_GEOMETRY_VERSION,
             "chunk_width": chunk_width,
             "chunk_length": CHUNK_LENGTH,
             "chunk_levels": get_chunk_levels(floor, chunk_index, chunk_seed),
+            # Version metadata for granular version checking
+            "version_metadata": {
+                "geometry_version": CURRENT_GEOMETRY_VERSION,
+                "sample_interval": 50.0,  # Sample interval in meters
+                "algorithm": "smooth_curved_taper",
+                "vertex_count": len(geometry["vertices"]),
+                "face_count": len(geometry["faces"]),
+            },
         },
     }
 

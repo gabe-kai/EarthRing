@@ -85,7 +85,7 @@ def test_generate_ring_floor_geometry():
     assert geometry["vertices"][0] == [0.0, -200.0, 0.0]  # Left edge, -half_width
     # Check second vertex (right edge at start of chunk)
     assert geometry["vertices"][1] == [0.0, 200.0, 0.0]  # Right edge, +half_width
-    
+
     # Check last vertex (right edge at end of chunk)
     assert geometry["vertices"][-1] == [1000.0, 200.0, 0.0]  # Right edge at end
 

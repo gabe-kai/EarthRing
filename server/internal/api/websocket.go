@@ -665,30 +665,81 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 				}
 			}
 		} else {
-			// Chunk exists in database - load it
-			// Load geometry from terrain_data JSONB field
-			geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
-			if err != nil {
-				log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
-				// Continue with nil geometry - chunk metadata is still valid
-			}
+			// Chunk exists in database - check if version is current
+			if storedMetadata.Version < CurrentGeometryVersion {
+				// Chunk is outdated - regenerate it
+				log.Printf("Chunk %s has outdated version %d (current: %d), regenerating...", chunkID, storedMetadata.Version, CurrentGeometryVersion)
+				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+				if err != nil {
+					log.Printf("Failed to regenerate outdated chunk %s: %v", chunkID, err)
+					// Fall back to loading old geometry if regeneration fails
+					geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
+					if err != nil {
+						log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
+					}
+					metadata := ChunkMetadata{
+						ID:           chunkID,
+						Floor:        storedMetadata.Floor,
+						ChunkIndex:   storedMetadata.ChunkIndex,
+						Version:      storedMetadata.Version,
+						LastModified: storedMetadata.LastModified,
+						IsDirty:      storedMetadata.IsDirty,
+					}
+					chunk = ChunkData{
+						ID:         chunkID,
+						Geometry:   geometry,
+						Structures: []interface{}{},
+						Zones:      []interface{}{},
+						Metadata:   &metadata,
+					}
+				} else {
+					// Store the regenerated chunk in the database
+					if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
+						log.Printf("Failed to store regenerated chunk %s: %v", chunkID, err)
+						// Continue anyway - we'll return the chunk data even if storage fails
+					}
+					// Convert procedural service response to chunk data
+					chunk = ChunkData{
+						ID:         chunkID,
+						Geometry:   genResponse.Geometry,
+						Structures: genResponse.Structures,
+						Zones:      genResponse.Zones,
+						Metadata: &ChunkMetadata{
+							ID:           chunkID,
+							Floor:        floor,
+							ChunkIndex:   chunkIndex,
+							Version:      genResponse.Chunk.Version,
+							LastModified: time.Now(),
+							IsDirty:      false,
+						},
+					}
+				}
+			} else {
+				// Chunk version is current - load it from database
+				// Load geometry from terrain_data JSONB field
+				geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
+				if err != nil {
+					log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
+					// Continue with nil geometry - chunk metadata is still valid
+				}
 
-			// Convert stored metadata to API format
-			metadata := ChunkMetadata{
-				ID:           chunkID,
-				Floor:        storedMetadata.Floor,
-				ChunkIndex:   storedMetadata.ChunkIndex,
-				Version:      storedMetadata.Version,
-				LastModified: storedMetadata.LastModified,
-				IsDirty:      storedMetadata.IsDirty,
-			}
+				// Convert stored metadata to API format
+				metadata := ChunkMetadata{
+					ID:           chunkID,
+					Floor:        storedMetadata.Floor,
+					ChunkIndex:   storedMetadata.ChunkIndex,
+					Version:      storedMetadata.Version,
+					LastModified: storedMetadata.LastModified,
+					IsDirty:      storedMetadata.IsDirty,
+				}
 
-			chunk = ChunkData{
-				ID:         chunkID,
-				Geometry:   geometry,        // Loaded from database
-				Structures: []interface{}{}, // Empty for Phase 1
-				Zones:      []interface{}{}, // Empty for Phase 1
-				Metadata:   &metadata,
+				chunk = ChunkData{
+					ID:         chunkID,
+					Geometry:   geometry,        // Loaded from database
+					Structures: []interface{}{}, // Empty for Phase 1
+					Zones:      []interface{}{}, // Empty for Phase 1
+					Metadata:   &metadata,
+				}
 			}
 		}
 

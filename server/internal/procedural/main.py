@@ -74,6 +74,16 @@ class ChunkGeometry(BaseModel):
     length: float
 
 
+class VersionMetadata(BaseModel):
+    """Version metadata for granular version checking"""
+
+    geometry_version: int
+    sample_interval: Optional[float] = None
+    algorithm: Optional[str] = None
+    vertex_count: Optional[int] = None
+    face_count: Optional[int] = None
+
+
 class ChunkMetadata(BaseModel):
     """Chunk metadata"""
 
@@ -82,6 +92,7 @@ class ChunkMetadata(BaseModel):
     chunk_index: int
     width: float
     version: int = 1
+    version_metadata: Optional[VersionMetadata] = None
 
 
 class GenerateChunkResponse(BaseModel):
@@ -138,6 +149,20 @@ async def generate_chunk(request: GenerateChunkRequest):
         if geometry_data:
             geometry_model = ChunkGeometry(**geometry_data)
 
+        # Extract version metadata if present
+        version_metadata = None
+        if "version_metadata" in chunk_data.get("metadata", {}):
+            vm = chunk_data["metadata"]["version_metadata"]
+            version_metadata = VersionMetadata(
+                geometry_version=vm.get(
+                    "geometry_version", chunk_data["metadata"]["version"]
+                ),
+                sample_interval=vm.get("sample_interval"),
+                algorithm=vm.get("algorithm"),
+                vertex_count=vm.get("vertex_count"),
+                face_count=vm.get("face_count"),
+            )
+
         response = GenerateChunkResponse(
             success=True,
             chunk=ChunkMetadata(
@@ -146,6 +171,7 @@ async def generate_chunk(request: GenerateChunkRequest):
                 chunk_index=request.chunk_index,
                 width=chunk_width,
                 version=chunk_data["metadata"]["version"],
+                version_metadata=version_metadata,
             ),
             geometry=geometry_model,
             structures=chunk_data.get("structures", []),
