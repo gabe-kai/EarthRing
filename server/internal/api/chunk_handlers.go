@@ -450,7 +450,9 @@ func (h *ChunkHandlers) BatchRegenerateChunks(w http.ResponseWriter, r *http.Req
 			argIndex++
 		}
 
-		query += fmt.Sprintf(" LIMIT $%d", argIndex)
+		// Use current argIndex for LIMIT placeholder (read argIndex to avoid ineffassign warning)
+		limitParamIndex := argIndex
+		query += fmt.Sprintf(" LIMIT $%d", limitParamIndex)
 		args = append(args, req.MaxChunks)
 
 		rows, err := h.db.Query(query, args...)
