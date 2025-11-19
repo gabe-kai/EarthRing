@@ -3,6 +3,9 @@
 
 version: 2
 
+output:
+  format: colored-line-number
+
 linters-settings:
   errcheck:
     check-type-assertions: true
