@@ -12,7 +12,7 @@ import (
 
 func TestChunkStorage_GetChunkMetadata(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -97,7 +97,7 @@ func TestChunkStorage_GetChunkMetadata(t *testing.T) {
 
 func TestChunkStorage_GetChunkData(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -177,7 +177,7 @@ func TestChunkStorage_GetChunkData(t *testing.T) {
 
 func TestChunkStorage_StoreChunk(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -271,7 +271,10 @@ func TestChunkStorage_StoreChunk(t *testing.T) {
 		}
 
 		// Get initial version
-		metadata1, _ := storage.GetChunkMetadata(0, 12349)
+		metadata1, err := storage.GetChunkMetadata(0, 12349)
+		if err != nil {
+			t.Fatalf("Failed to get chunk metadata: %v", err)
+		}
 		initialVersion := metadata1.Version
 
 		// Store again with updated version
@@ -302,7 +305,10 @@ func TestChunkStorage_StoreChunk(t *testing.T) {
 		}
 
 		// Verify version was incremented
-		metadata2, _ := storage.GetChunkMetadata(0, 12349)
+		metadata2, err := storage.GetChunkMetadata(0, 12349)
+		if err != nil {
+			t.Fatalf("Failed to get chunk metadata: %v", err)
+		}
 		if metadata2.Version <= initialVersion {
 			t.Errorf("Expected version to increment, got %d (was %d)", metadata2.Version, initialVersion)
 		}
@@ -341,7 +347,7 @@ func TestChunkStorage_StoreChunk(t *testing.T) {
 
 func TestChunkStorage_ConvertPostGISToGeometry(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -526,7 +532,7 @@ func TestConvertGeometryToPostGIS(t *testing.T) {
 
 func TestChunkStorage_StoreChunk_EdgeCases(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -603,7 +609,7 @@ func TestChunkStorage_StoreChunk_EdgeCases(t *testing.T) {
 
 func TestChunkStorage_ConvertPostGISToGeometry_EdgeCases(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -701,7 +707,7 @@ func TestChunkStorage_ConvertPostGISToGeometry_EdgeCases(t *testing.T) {
 
 func TestChunkStorage_DeleteChunk(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")

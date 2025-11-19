@@ -166,7 +166,7 @@ func TestWebSocketHub_SendToUser(t *testing.T) {
 
 func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Create players table
 	_, err := db.Exec(`
@@ -202,7 +202,10 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 
 	// Create a test player
 	passwordService := auth.NewPasswordService(cfg)
-	hashedPassword, _ := passwordService.HashPassword("password123")
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
 
@@ -241,7 +244,7 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 
 func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Create players table
 	_, err := db.Exec(`
@@ -277,7 +280,10 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 
 	// Create a test player
 	passwordService := auth.NewPasswordService(cfg)
-	hashedPassword, _ := passwordService.HashPassword("password123")
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
 
@@ -309,7 +315,7 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 
 func TestWebSocketHandlers_handleMessage(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
@@ -376,7 +382,7 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 
 func TestWebSocketHandlers_handlePing(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
@@ -453,7 +459,7 @@ func TestWebSocketConnection_sendError(t *testing.T) {
 
 func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Create players table
 	_, err := db.Exec(`
@@ -489,7 +495,10 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 
 	// Create a test player
 	passwordService := auth.NewPasswordService(cfg)
-	hashedPassword, _ := passwordService.HashPassword("password123")
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
 
@@ -523,7 +532,11 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping WebSocket test: failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Fatalf("Failed to close WebSocket connection: %v", err)
+		}
+	}()
 
 	// Send invalid JSON message
 	invalidJSON := []byte("not valid json")
@@ -593,7 +606,7 @@ func TestWebSocketHub_RegisterUnregister(t *testing.T) {
 
 func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")

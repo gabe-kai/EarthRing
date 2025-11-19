@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -99,7 +100,9 @@ func (c *ProceduralClient) HealthCheck() error {
 		return fmt.Errorf("health check request failed: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close() // Ignore close error - response body close errors are typically non-critical
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close procedural health response body: %v", closeErr)
+		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
@@ -156,14 +159,17 @@ func (c *ProceduralClient) GenerateChunk(floor, chunkIndex int, lodLevel string,
 			continue
 		}
 
-		defer func() {
-			_ = resp.Body.Close() // Ignore close error - response body close errors are typically non-critical
-		}()
-
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response: %w", err)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("Warning: failed to close procedural response body: %v", closeErr)
+			}
 			continue
+		}
+
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close procedural response body: %v", closeErr)
 		}
 
 		if resp.StatusCode != http.StatusOK {

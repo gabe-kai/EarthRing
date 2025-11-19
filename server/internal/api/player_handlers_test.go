@@ -18,7 +18,7 @@ import (
 func TestGetCurrentPlayerProfile(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations (simplified - just create players table)
 	_, err := db.Exec(`
@@ -43,7 +43,10 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 
 	// Create test player with unique username/email
 	passwordService := auth.NewPasswordService(&config.Config{})
-	hashedPassword, _ := passwordService.HashPassword("password123")
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
 
@@ -119,7 +122,7 @@ func TestGetCurrentPlayerProfile(t *testing.T) {
 func TestUpdatePlayerPosition(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations (simplified - just create players table)
 	_, err := db.Exec(`
@@ -144,7 +147,10 @@ func TestUpdatePlayerPosition(t *testing.T) {
 
 	// Create test player with unique username/email
 	passwordService := auth.NewPasswordService(&config.Config{})
-	hashedPassword, _ := passwordService.HashPassword("password123")
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
 	username := testutil.RandomUsername()
 	email := testutil.RandomEmail()
 
@@ -187,7 +193,10 @@ func TestUpdatePlayerPosition(t *testing.T) {
 		Position: Position{X: 12345.0, Y: 100.0},
 		Floor:    0,
 	}
-	body, _ := json.Marshal(updateReq)
+	body, err := json.Marshal(updateReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal update request: %v", err)
+	}
 
 	// Create request
 	req := httptest.NewRequest("PUT", "/api/players/"+strconv.FormatInt(player.ID, 10)+"/position", bytes.NewReader(body))

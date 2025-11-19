@@ -16,7 +16,7 @@ import (
 func TestGetChunkMetadata(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations (simplified - just create chunks table)
 	_, err := db.Exec(`
@@ -118,7 +118,7 @@ func TestGetChunkMetadata(t *testing.T) {
 func TestGetChunkMetadata_NonExistent(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations (simplified - just create chunks table)
 	_, err := db.Exec(`
@@ -203,7 +203,7 @@ func TestGetChunkMetadata_NonExistent(t *testing.T) {
 func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Create config
 	cfg := &config.Config{
@@ -259,7 +259,7 @@ func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 func TestDeleteChunk(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Ensure PostGIS extension is available
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -485,7 +485,7 @@ func TestDeleteChunk(t *testing.T) {
 func TestGetChunkVersion(t *testing.T) {
 	// Setup test database (not needed for version endpoint, but for consistency)
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	cfg := &config.Config{}
 	handlers := NewChunkHandlers(db, cfg)
@@ -519,7 +519,7 @@ func TestGetChunkVersion(t *testing.T) {
 func TestInvalidateOutdatedChunks(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations
 	_, err := db.Exec(`
@@ -646,7 +646,7 @@ func TestInvalidateOutdatedChunks(t *testing.T) {
 func TestBatchRegenerateChunks(t *testing.T) {
 	// Setup test database
 	db := testutil.SetupTestDB(t)
-	defer db.Close()
+	testutil.CloseDB(t, db)
 
 	// Run migrations
 	_, err := db.Exec(`
@@ -707,7 +707,10 @@ func TestBatchRegenerateChunks(t *testing.T) {
 		"lod_level":  "medium",
 		"max_chunks": 10,
 	}
-	body, _ := json.Marshal(requestBody)
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("Failed to marshal request body: %v", err)
+	}
 	req := httptest.NewRequest("POST", "/api/chunks/batch-regenerate", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")

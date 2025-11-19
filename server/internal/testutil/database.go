@@ -154,6 +154,17 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// CloseDB registers a cleanup function that closes the provided database connection.
+// It fails the test if closing the database returns an error.
+func CloseDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("Failed to close test database: %v", err)
+		}
+	})
+}
+
 // CleanupTestDB drops all tables in the test database
 // Useful for integration tests that need a clean slate
 func CleanupTestDB(t *testing.T, db *sql.DB) {

@@ -1,21 +1,15 @@
 package config
 
 import (
-	"os"
 	"testing"
 	"time"
 )
 
 func TestLoad(t *testing.T) {
 	// Set required environment variables
-	_ = os.Setenv("DB_PASSWORD", "test_password")
-	_ = os.Setenv("JWT_SECRET", "test_jwt_secret")
-	_ = os.Setenv("REFRESH_SECRET", "test_refresh_secret")
-	defer func() {
-		_ = os.Unsetenv("DB_PASSWORD")
-		_ = os.Unsetenv("JWT_SECRET")
-		_ = os.Unsetenv("REFRESH_SECRET")
-	}()
+	t.Setenv("DB_PASSWORD", "test_password")
+	t.Setenv("JWT_SECRET", "test_jwt_secret")
+	t.Setenv("REFRESH_SECRET", "test_refresh_secret")
 
 	config, err := Load()
 	if err != nil {
@@ -172,12 +166,7 @@ func TestGetDurationEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				_ = os.Setenv("TEST_DURATION", tt.envValue)
-				defer func() {
-					_ = os.Unsetenv("TEST_DURATION")
-				}()
-			}
+			t.Setenv("TEST_DURATION", tt.envValue)
 			got := getDurationEnv("TEST_DURATION", tt.defaultValue)
 			if got != tt.expected {
 				t.Errorf("getDurationEnv() = %v, want %v", got, tt.expected)

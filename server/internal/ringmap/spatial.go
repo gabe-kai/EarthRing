@@ -3,6 +3,7 @@ package ringmap
 import (
 	"database/sql"
 	"fmt"
+	"log"
 )
 
 // SpatialQuery provides utilities for spatial queries on the ring
@@ -54,7 +55,9 @@ func (sq *SpatialQuery) FindNearbyPlayers(centerX, centerY float64, floor int, m
 		return nil, fmt.Errorf("failed to query nearby players: %w", err)
 	}
 	defer func() {
-		_ = rows.Close() // Ignore close error - rows close errors are typically non-critical
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close nearby players rows: %v", closeErr)
+		}
 	}()
 
 	var results []NearbyPlayersResult

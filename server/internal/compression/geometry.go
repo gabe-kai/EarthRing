@@ -197,7 +197,9 @@ func gzipCompress(data []byte, level int) ([]byte, error) {
 	}
 
 	if _, err := writer.Write(data); err != nil {
-		_ = writer.Close() // Ignore close error - we're already returning an error
+		if closeErr := writer.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to write to gzip: %w; also failed to close writer: %v", err, closeErr)
+		}
 		return nil, fmt.Errorf("failed to write to gzip: %w", err)
 	}
 
