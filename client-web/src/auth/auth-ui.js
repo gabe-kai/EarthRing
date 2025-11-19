@@ -442,6 +442,7 @@ export function showUserInfo() {
       <span style="color: #00ff00; font-weight: 500;">Logged in as: ${user.username}</span>
       <button id="player-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Player</button>
       <button id="chunk-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Chunks</button>
+      <button id="zone-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Zones</button>
       <button id="logout-button" style="background: #ff4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Logout</button>
     </div>
   `;
@@ -459,6 +460,7 @@ export function showUserInfo() {
   // Set up panel buttons (will be imported in main.js)
   const playerBtn = document.getElementById('player-panel-btn');
   const chunkBtn = document.getElementById('chunk-panel-btn');
+  const zoneBtn = document.getElementById('zone-panel-btn');
   
   if (playerBtn) {
     playerBtn.addEventListener('click', () => {
@@ -469,6 +471,12 @@ export function showUserInfo() {
   if (chunkBtn) {
     chunkBtn.addEventListener('click', () => {
       window.dispatchEvent(new CustomEvent('show:chunk-panel'));
+    });
+  }
+  
+  if (zoneBtn) {
+    zoneBtn.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('show:zone-panel'));
     });
   }
 }

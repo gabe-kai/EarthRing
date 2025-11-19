@@ -364,6 +364,25 @@ Manages chunk loading and unloading based on viewport.
 - Integration with game state manager for caching
 - Compression ratio logging (2.6-3.1:1 achieved in production)
 
+#### Zone Rendering & Editor Scaffolding ✅ **INITIAL IMPLEMENTATION**
+
+**Zone Manager** (`client-web/src/zones/zone-manager.js`):
+- Throttled bounding-box fetches (`GET /api/zones/area`) anchored to the camera position
+- Converts GeoJSON polygons/multipolygons to Three.js line overlays with zone-type color coding
+- Keeps zone meshes in sync with `GameStateManager` events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`)
+- Exposes `loadZonesAroundCamera()` for the renderer loop and manual refresh from the UI
+
+**Zone Service** (`client-web/src/api/zone-service.js`):
+- Typed helpers for area queries, owner listing, and CRUD operations (auth-required)
+- Centralizes error handling / token injection for the new zone endpoints
+
+**Zone UI Panel** (`client-web/src/ui/zone-ui.js`):
+- Provides a scaffolding interface to:
+  - Load overlays near the camera (wired to the renderer fetch)
+  - Create simple rectangular sample zones (GeoJSON polygon generator)
+  - Inspect zones by owner ID
+- Future work: freeform drawing, vertex editing, deletion controls, overlap indicators
+
 **Usage Example**:
 ```javascript
 import { ChunkManager } from './chunks/chunk-manager.js';
@@ -748,9 +767,8 @@ class GraphicsAbstraction {
    - Notifications
 
 2. **Zone Editor**
-   - Polygon drawing interface
-   - Zone properties panel
-   - Zone list
+   - Current scaffolding: zone panel (web) that loads nearby zones, renders overlays, and submits rectangular samples to the REST API
+   - Roadmap: polygon drawing/vertex editing, conflict indicators, zone list & metadata inspector
 
 3. **Structure Placer**
    - Structure selection

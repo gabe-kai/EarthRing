@@ -7,11 +7,13 @@ import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
+import { showZonePanel } from './ui/zone-ui.js';
 import * as THREE from 'three';
 import { SceneManager } from './rendering/scene-manager.js';
 import { CameraController } from './input/camera-controller.js';
 import { GameStateManager } from './state/game-state.js';
 import { ChunkManager } from './chunks/chunk-manager.js';
+import { ZoneManager } from './zones/zone-manager.js';
 import { wsClient } from './network/websocket-client.js';
 import { createMeshAtEarthRingPosition } from './utils/rendering.js';
 import { positionToChunkIndex } from './utils/coordinates.js';
@@ -32,6 +34,7 @@ const cameraController = new CameraController(
 
 // Initialize chunk manager (pass camera controller for position wrapping)
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController);
+const zoneManager = new ZoneManager(sceneManager, gameStateManager, cameraController);
 
 // Add a test cube at EarthRing position (0, 0, 0) for demonstration
 const scene = sceneManager.getScene();
@@ -131,6 +134,9 @@ sceneManager.onRender((deltaTime) => {
         });
     }
   }
+
+  // Refresh zone overlays (ZoneManager throttles internally)
+  zoneManager.loadZonesAroundCamera();
 });
 
 // Start rendering loop
@@ -199,6 +205,7 @@ window.addEventListener('auth:logout', () => {
     connecting: false 
   });
   gameStateManager.updateConnectionState('api', { authenticated: false });
+  zoneManager.clearAllZones();
 });
 
 // Listen for panel show events
@@ -208,6 +215,10 @@ window.addEventListener('show:player-panel', () => {
 
 window.addEventListener('show:chunk-panel', () => {
   showChunkPanel();
+});
+
+window.addEventListener('show:zone-panel', () => {
+  showZonePanel();
 });
 
 // WebSocket connection event handlers
@@ -227,6 +238,12 @@ wsClient.onOpen(async () => {
     console.log('Loaded chunks around camera position');
   } catch (error) {
     console.error('Failed to load initial chunks:', error);
+  }
+
+  try {
+    await zoneManager.loadZonesAroundCamera();
+  } catch (error) {
+    console.error('Failed to load initial zones:', error);
   }
 });
 
@@ -252,6 +269,7 @@ window.earthring = {
   cameraController,
   gameStateManager,
   chunkManager,
+  zoneManager,
   wsClient,
   debug: false, // Set to true to enable debug logging
   stations: {

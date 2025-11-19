@@ -20,6 +20,7 @@ EarthRing is set on a massive orbital ring structure:
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
+- **Zone overlays & editor panel**: Authenticated players can load nearby zones from the REST API, view them as colored line overlays in the scene, and use the Zones panel to submit simple rectangular test zones.
 
 ## Prerequisites
 
@@ -196,6 +197,18 @@ npm run dev
 - **Chunk Deletion**: ✅ Implemented - Chunks can be deleted via API or UI to force regeneration
 - **Station Flares**: ✅ Implemented - Chunks have variable width (400m base → 25km at hubs) and variable height (5 base levels → 15 levels at hubs) based on distance from station centers
 - **Version Management**: ✅ Implemented - Automatic version detection and regeneration, bulk invalidation, batch regeneration, version metadata storage
+
+**Zone Management:**
+- Open the **Zones** button (user info bar) to launch the panel:
+  - Load & visualize nearby zones using `GET /api/zones/area`.
+  - Create simple rectangular zones for testing (GeoJSON polygons posted to `POST /api/zones`).
+  - Fetch your zones via `GET /api/zones/owner/{owner_id}` for quick inspection.
+- REST endpoints:
+  - `POST /api/zones` – create zone (auth required, validates GeoJSON and ownership).
+  - `GET|PUT|DELETE /api/zones/{zone_id}` – manage a specific zone.
+  - `GET /api/zones/area?floor&min_x&min_y&max_x&max_y` – bounding-box query (used by overlays).
+  - `GET /api/zones/owner/{owner_id}` – list zones for the authenticated owner (restricted to self).
+- Rate limit: 200 requests per minute per user; authentication required for all zone routes.
 
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints
