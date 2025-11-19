@@ -53,7 +53,9 @@ func (sq *SpatialQuery) FindNearbyPlayers(centerX, centerY float64, floor int, m
 	if err != nil {
 		return nil, fmt.Errorf("failed to query nearby players: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Ignore close error - rows close errors are typically non-critical
+	}()
 
 	var results []NearbyPlayersResult
 	for rows.Next() {

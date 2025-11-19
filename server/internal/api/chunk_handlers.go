@@ -309,7 +309,11 @@ func (h *ChunkHandlers) InvalidateOutdatedChunks(w http.ResponseWriter, r *http.
 		respondWithError(w, http.StatusInternalServerError, "Failed to query outdated chunks")
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	var deletedCount int
 	var failedCount int
@@ -462,7 +466,11 @@ func (h *ChunkHandlers) BatchRegenerateChunks(w http.ResponseWriter, r *http.Req
 			respondWithError(w, http.StatusInternalServerError, "Failed to query chunks")
 			return
 		}
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				log.Printf("Error closing rows: %v", err)
+			}
+		}()
 
 		for rows.Next() {
 			var floor, chunkIndex int

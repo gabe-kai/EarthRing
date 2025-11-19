@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -128,7 +129,9 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					if retryAfter < 0 {
 						retryAfter = 0
 					}
-					fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter)
+					if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+						log.Printf("Error writing rate limit response: %v", err)
+					}
 					return
 				}
 
@@ -162,7 +165,9 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					retryAfter = 0
 				}
 
-				fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter)
+				if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+					log.Printf("Error writing rate limit response: %v", err)
+				}
 				return
 			}
 

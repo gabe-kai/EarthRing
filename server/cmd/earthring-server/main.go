@@ -35,7 +35,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database connection: %v", err)
+		}
+	}()
 
 	// Set up WebSocket handlers
 	wsHandlers := api.NewWebSocketHandlers(db, cfg)
@@ -80,7 +84,9 @@ func main() {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`)
+	if _, err := fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`); err != nil {
+		log.Printf("Error writing health check response: %v", err)
+	}
 }
 
 // faviconHandler responds to favicon requests.

@@ -121,7 +121,11 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("Failed to connect to PostgreSQL: %v", err)
 	}
-	defer adminDB.Close()
+	defer func() {
+		if err := adminDB.Close(); err != nil {
+			t.Logf("Warning: error closing admin database connection: %v", err)
+		}
+	}()
 
 	// Create test database if it doesn't exist
 	_, err = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database))
