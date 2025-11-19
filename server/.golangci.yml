@@ -1,27 +1,10 @@
-# golangci-lint configuration file
+# golangci-lint v2 configuration file
 # See https://golangci-lint.run/usage/configuration/ for more information
 
-version: 2
-
-output:
-  format: colored-line-number
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  lll:
-    line-length: 120
-  misspell:
-    locale: US
-
-formatters:
-  enable:
-    - gofmt
-    - goimports
+version: "2"
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - govet
@@ -30,12 +13,24 @@ linters:
     - staticcheck
     - unused
     - whitespace
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
-  exclude-rules:
+  exclude:
     - path: _test\.go
       linters:
         - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
-
