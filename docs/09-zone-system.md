@@ -536,7 +536,10 @@ Players can modify their zones:
 2. **Change Type**: Convert zone to different type
 3. **Change Density**: Adjust density level
 4. **Change Properties**: Modify custom properties
-5. **Delete**: Remove zone (structures may be affected)
+5. **Delete**: Remove zone via zone editor panel (structures may be affected)
+   - Delete button available in zone list
+   - Confirmation dialog prevents accidental deletion
+   - Zone removed from scene and game state immediately
 
 ### Zone Merging
 

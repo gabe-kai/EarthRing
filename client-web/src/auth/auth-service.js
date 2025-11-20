@@ -186,3 +186,92 @@ export function getCurrentUser() {
   };
 }
 
+/**
+ * Check if access token is expired or about to expire
+ * @param {number} bufferSeconds - Buffer time in seconds before expiration (default: 120 = 2 minutes)
+ * @returns {boolean} True if token is expired or will expire soon
+ */
+export function isTokenExpired(bufferSeconds = 120) {
+  const expiresAt = localStorage.getItem('token_expires_at');
+  if (!expiresAt) {
+    return true; // No expiration time stored, assume expired
+  }
+  
+  const expirationTime = new Date(expiresAt).getTime();
+  const now = Date.now();
+  const bufferMs = bufferSeconds * 1000;
+  
+  return (now + bufferMs) >= expirationTime;
+}
+
+// Token refresh state
+let refreshInProgress = false;
+let refreshPromise = null;
+let lastRefreshAttempt = 0;
+const REFRESH_RETRY_DELAY = 5000; // 5 seconds between refresh attempts
+
+/**
+ * Attempt to refresh the access token
+ * @returns {Promise<boolean>} True if refresh succeeded, false otherwise
+ */
+export async function attemptTokenRefresh() {
+  // Prevent concurrent refresh attempts
+  if (refreshInProgress && refreshPromise) {
+    return refreshPromise;
+  }
+  
+  // Rate limit refresh attempts
+  const now = Date.now();
+  if (now - lastRefreshAttempt < REFRESH_RETRY_DELAY) {
+    return false;
+  }
+  
+  refreshInProgress = true;
+  lastRefreshAttempt = now;
+  
+  refreshPromise = (async () => {
+    try {
+      const refreshTokenValue = getRefreshToken();
+      if (!refreshTokenValue) {
+        console.warn('[Auth] No refresh token available');
+        return false;
+      }
+      
+      const tokenResponse = await refreshToken(refreshTokenValue);
+      storeTokens(tokenResponse);
+      console.log('[Auth] Token refreshed successfully');
+      return true;
+    } catch (error) {
+      console.error('[Auth] Token refresh failed:', error.message);
+      // Clear tokens on refresh failure
+      logout();
+      return false;
+    } finally {
+      refreshInProgress = false;
+      refreshPromise = null;
+    }
+  })();
+  
+  return refreshPromise;
+}
+
+/**
+ * Ensure access token is valid, refreshing if necessary
+ * @returns {Promise<boolean>} True if token is valid, false if authentication is required
+ */
+export async function ensureValidToken() {
+  if (!isAuthenticated()) {
+    return false;
+  }
+  
+  // If token is expired or about to expire, try to refresh
+  if (isTokenExpired()) {
+    const refreshed = await attemptTokenRefresh();
+    if (!refreshed) {
+      return false; // Refresh failed, need to re-authenticate
+    }
+  }
+  
+  return true;
+}
+

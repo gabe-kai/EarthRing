@@ -255,7 +255,21 @@ Handles 3D rendering using the chosen graphics library.
 - Smooth damping for camera movement
 - Zoom, rotate, and pan controls
 - Camera positioning from EarthRing coordinates
-- Keyboard movement controls (WASD/QE) with camera-relative movement
+- **Keyboard Controls**:
+  - **WASD**: Forward, left, backward, right movement (horizontal only, maintains elevation)
+  - **Q/E**: Rotate camera counter-clockwise/clockwise around target
+  - **R/F**: Pan camera up/down (vertical movement)
+  - **PageUp/PageDown**: Zoom in/out
+- **Mouse Controls**:
+  - **Scroll Wheel**: Zoom in/out
+  - **Middle Mouse Button (Hold)**: Pan and tilt camera
+  - **Left Mouse Button**: Rotate camera (OrbitControls default)
+  - **Right Mouse Button**: Pan camera (OrbitControls default)
+- **Elevation-based speed scaling**: Movement speed automatically adjusts based on camera height above ground (slower near ground for precise control, faster at higher elevations)
+  - Speed multiplier ranges from 0.1x (at 2m elevation) to 10.0x (at very high elevations)
+  - Uses logarithmic scaling for smooth transitions
+  - Reference elevation: 50m = 1.0x speed multiplier
+  - Applies to WASD movement and R/F panning
 - Programmatic camera movement (`moveToPosition()`) for smooth transitions
 
 **Key Features**:
@@ -394,9 +408,12 @@ Manages chunk loading and unloading based on viewport.
 
 **Zone UI Panel** (`client-web/src/ui/zone-ui.js`):
 - Provides interface for:
-  - Creating zones (GeoJSON polygon input)
-  - Getting/updating/deleting zones by ID
-  - Listing zones by area
+  - Creating zones (rectangular zones with name, type, floor, dimensions)
+  - Listing zones by owner with delete buttons
+  - Deleting zones with confirmation dialog
+  - Refreshing zones around camera position
+- Integrated with ZoneManager and GameStateManager for real-time updates
+- Delete functionality removes zones from scene and game state immediately
 - Future work: freeform drawing, vertex editing, overlap indicators
 
 **Usage Example**:
@@ -479,6 +496,14 @@ gridOverlay.setVisible(false); // Hide grid
 
 1. **Zones Not Appearing:**
    - Check authentication: `isAuthenticated()` must return true
+   
+**Authentication Service** (`client-web/src/auth/auth-service.js`):
+- Automatic token refresh: Tokens are automatically refreshed 2 minutes before expiration
+- Token expiration checking: `isTokenExpired()` validates token expiration with configurable buffer
+- Rate-limited refresh: Refresh attempts are rate-limited (5 second minimum between attempts) to prevent server overload
+- Graceful error handling: Failed refresh attempts clear tokens and require re-authentication
+- API request integration: All API requests automatically check and refresh tokens before making requests
+- Stops pinging server: Zone loading stops making requests when authentication fails, preventing "too many requests" errors
    - Check fetch throttling: Wait 4 seconds between manual fetches
    - Check visibility: `zoneManager.zonesVisible` and per-type visibility
    - Check console for errors: `zoneManager.logZoneState()` for debug info

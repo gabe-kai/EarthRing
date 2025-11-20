@@ -84,7 +84,15 @@ export class ZoneManager {
       });
       this.gameState.setZones(zones || []);
       this.lastFetchTime = performance.now();
+      // Clear error state on success
+      this.lastError = null;
     } catch (error) {
+      // Only log authentication errors once, and stop making requests
+      if (error.message.includes('Not authenticated') || error.message.includes('Session expired')) {
+        this.logErrorOnce(error);
+        // Stop making requests when not authenticated
+        return;
+      }
       this.logErrorOnce(error);
     } finally {
       this.pendingFetch = false;

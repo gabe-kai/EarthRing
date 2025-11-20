@@ -168,7 +168,10 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 6. ✅ Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
 7. ✅ Restricted zone type (red overlay for preventing/limiting procedural spawning)
 8. ✅ Zone UI panel (create, get, update, delete zones via REST API)
-9. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
+9. ✅ Zone delete functionality (delete buttons in zone list with confirmation dialog)
+10. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
+11. ✅ Authentication improvements (automatic token refresh, rate limiting, graceful error handling)
+12. ✅ Camera control improvements (elevation-based speed scaling, refined keyboard/mouse controls)
 
 **In Progress / Upcoming:**
 10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
@@ -181,7 +184,8 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Zones toolbar with visibility controls (grid and per-type toggles) - **COMPLETE**
 - ✅ Zone types supported (residential, commercial, industrial, mixed-use, park, restricted) - **COMPLETE**
 - ⏳ Zone conflicts are resolved (importance system, court ruling for ties) - **PENDING**
-- ⏳ Zone editor is functional (draw, edit vertices, delete zones) - **PENDING**
+- ✅ Zone delete functionality (delete buttons in zone list) - **COMPLETE**
+- ⏳ Zone editor enhancements (draw, edit vertices, advanced editing) - **PENDING**
 - ✅ Zones span chunks correctly (multi-chunk zones work seamlessly via ring wrapping) - **COMPLETE**
 
 **Dependencies**: Phase 2 complete
