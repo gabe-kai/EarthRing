@@ -1,34 +1,49 @@
-import * as THREE from 'three';
 import { fetchZonesByArea } from '../api/zone-service.js';
-import { toThreeJS, wrapRingPosition } from '../utils/coordinates.js';
 import { isAuthenticated } from '../auth/auth-service.js';
+import * as THREE from 'three';
+import { toThreeJS, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
 
 const DEFAULT_ZONE_RANGE = 5000; // meters along ring
 const DEFAULT_WIDTH_RANGE = 3000; // meters across width
+const RING_CIRCUMFERENCE = 264000000;
 
-const ZONE_COLORS = {
-  residential: 0x4caf50,
-  commercial: 0x2196f3,
-  industrial: 0xffeb3b,
-  'mixed-use': 0xffffff, // actual color driven by gradient
-  park: 0xb2ff59,
+const ZONE_STYLES = {
+  residential: { fill: 'rgba(111,207,151,0.35)', stroke: 'rgba(111,207,151,0.95)' },
+  commercial: { fill: 'rgba(86,204,242,0.35)', stroke: 'rgba(86,204,242,0.95)' },
+  industrial: { fill: 'rgba(242,201,76,0.4)', stroke: 'rgba(242,201,76,0.95)' },
+  'mixed-use': { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
+  mixed_use: { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
+  park: { fill: 'rgba(39,174,96,0.3)', stroke: 'rgba(46,204,113,0.95)' },
+  restricted: { fill: 'rgba(231,76,60,0.4)', stroke: 'rgba(192,57,43,0.95)' },
+  default: { fill: 'rgba(255,255,255,0.2)', stroke: 'rgba(255,255,255,0.9)' },
 };
 
-const MIXED_USE_GRADIENT = [0xffeb3b, 0x4caf50, 0x2196f3];
-const DEFAULT_ZONE_COLOR = 0xffffff;
-
+/**
+ * ZoneManager coordinates zone data fetching and renders zones as world-positioned meshes.
+ */
 export class ZoneManager {
-  constructor(sceneManager, gameStateManager, cameraController) {
-    this.sceneManager = sceneManager;
-    this.scene = sceneManager.getScene();
+  constructor(gameStateManager, cameraController, sceneManager) {
     this.gameState = gameStateManager;
     this.cameraController = cameraController;
+    this.sceneManager = sceneManager;
+    this.scene = sceneManager.getScene();
 
-    this.zoneMeshes = new Map();
+    this.zonesVisible = true;
     this.pendingFetch = false;
     this.lastFetchTime = 0;
     this.fetchThrottleMs = 4000;
-    this.heightOffset = 0.5;
+    this.zoneMeshes = new Map(); // Map<zoneID, THREE.Group>
+    this.lastError = { message: null, timestamp: 0 };
+    // Per-type visibility: Map<zoneType, boolean>
+    this.zoneTypeVisibility = new Map([
+      ['residential', true],
+      ['commercial', true],
+      ['industrial', true],
+      ['mixed-use', true],
+      ['mixed_use', true],
+      ['park', true],
+      ['restricted', true],
+    ]);
 
     this.setupListeners();
   }
@@ -41,11 +56,7 @@ export class ZoneManager {
   }
 
   async loadZonesAroundCamera(range = DEFAULT_ZONE_RANGE) {
-    if (this.pendingFetch || !this.cameraController) {
-      return;
-    }
-
-    if (!isAuthenticated()) {
+    if (!this.cameraController || this.pendingFetch || !isAuthenticated()) {
       return;
     }
 
@@ -55,17 +66,12 @@ export class ZoneManager {
     }
 
     const cameraPos = this.cameraController.getEarthRingPosition();
-    const floor = Math.round(cameraPos.z || 0);
+    const floor = 0; // Force floor 0 fetch until multi-floor zones are supported client-side
 
-    let minX = cameraPos.x - range;
-    let maxX = cameraPos.x + range;
+    const minX = cameraPos.x - range;
+    const maxX = cameraPos.x + range;
     const minY = cameraPos.y - DEFAULT_WIDTH_RANGE;
     const maxY = cameraPos.y + DEFAULT_WIDTH_RANGE;
-
-    // Keep positions within ring bounds (best effort - wrapping zones not yet supported)
-    const RING_CIRCUMFERENCE = 264000000;
-    minX = Math.max(0, Math.min(RING_CIRCUMFERENCE, minX));
-    maxX = Math.max(0, Math.min(RING_CIRCUMFERENCE, maxX));
 
     this.pendingFetch = true;
     try {
@@ -79,7 +85,7 @@ export class ZoneManager {
       this.gameState.setZones(zones || []);
       this.lastFetchTime = performance.now();
     } catch (error) {
-      console.error('Failed to load zones:', error);
+      this.logErrorOnce(error);
     } finally {
       this.pendingFetch = false;
     }
@@ -90,7 +96,6 @@ export class ZoneManager {
       return;
     }
 
-    // Remove existing mesh before re-rendering
     this.removeZone(zone.id);
 
     const polygons = parseGeometry(zone.geometry);
@@ -98,46 +103,139 @@ export class ZoneManager {
       return;
     }
 
-    const color = this.getBaseColor(zone.zone_type);
-    const group = new THREE.Group();
-    group.userData.zoneId = zone.id;
+    // Get camera position for wrapping
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x;
 
-    polygons.forEach(rings => {
-      if (!rings.length) {
+    // Normalize zone type (handle both mixed-use and mixed_use)
+    let zoneType = (zone.zone_type?.toLowerCase() || 'default');
+    if (zoneType === 'mixed_use') {
+      zoneType = 'mixed-use';
+    }
+    const typeVisible = this.zoneTypeVisibility.get(zoneType) ?? true;
+
+    const zoneGroup = new THREE.Group();
+    zoneGroup.renderOrder = 5; // Render above grid
+    zoneGroup.userData.zoneId = zone.id;
+    zoneGroup.userData.zoneType = zoneType;
+    zoneGroup.visible = this.zonesVisible && typeVisible;
+
+    // Look up style (handle both mixed-use and mixed_use)
+    const styleKey = zone.zone_type?.toLowerCase() === 'mixed_use' ? 'mixed-use' : zone.zone_type?.toLowerCase();
+    const style = ZONE_STYLES[styleKey] || ZONE_STYLES.default;
+    const floor = zone.floor ?? 0;
+    const floorHeight = floor * DEFAULT_FLOOR_HEIGHT;
+
+    polygons.forEach(polygonRings => {
+      const [outerRing, ...holes] = polygonRings;
+      if (!outerRing || outerRing.length < 3) {
         return;
       }
 
-      const outerRing = rings[0];
-      const lineGeometry = new THREE.BufferGeometry();
-      const points = outerRing.map(([x, y]) => {
-        const wrappedX = wrapRingPosition(x);
-        const threePos = toThreeJS({ x: wrappedX, y, z: zone.floor });
-        return new THREE.Vector3(threePos.x, threePos.y + this.heightOffset, threePos.z);
-      });
-      lineGeometry.setFromPoints(points);
+      // Wrap zone coordinates relative to camera (like chunks)
+      const wrapZoneX = (x) => {
+        const dx = x - cameraX;
+        const half = RING_CIRCUMFERENCE / 2;
+        let adjusted = dx;
+        while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
+        while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
+        return cameraX + adjusted;
+      };
 
-      const colorArray = this.getLineColors(zone.zone_type, points.length);
-      const lineMaterial = new THREE.LineBasicMaterial({
-        color,
+      // Create shape from outer ring
+      const shape = new THREE.Shape();
+      outerRing.forEach(([x, y], idx) => {
+        const wrappedX = wrapZoneX(x);
+        const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
+        if (idx === 0) {
+          shape.moveTo(worldPos.x, worldPos.z);
+        } else {
+          shape.lineTo(worldPos.x, worldPos.z);
+        }
+      });
+
+      // Add holes
+      holes.forEach(hole => {
+        if (!hole || hole.length < 3) return;
+        const holePath = new THREE.Path();
+        hole.forEach(([x, y], idx) => {
+          const wrappedX = wrapZoneX(x);
+          const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
+          if (idx === 0) {
+            holePath.moveTo(worldPos.x, worldPos.z);
+          } else {
+            holePath.lineTo(worldPos.x, worldPos.z);
+          }
+        });
+        shape.holes.push(holePath);
+      });
+
+      // Extract opacity from rgba string (e.g., "rgba(111,207,151,0.35)")
+      const fillOpacityMatch = style.fill.match(/[\d.]+\)$/);
+      const fillOpacity = fillOpacityMatch ? parseFloat(fillOpacityMatch[0].slice(0, -1)) : 0.35;
+      
+      // Extract RGB from rgba string
+      const fillRgbMatch = style.fill.match(/rgba?\(([\d.]+),([\d.]+),([\d.]+)/);
+      const fillColor = fillRgbMatch
+        ? new THREE.Color(
+            parseFloat(fillRgbMatch[1]) / 255,
+            parseFloat(fillRgbMatch[2]) / 255,
+            parseFloat(fillRgbMatch[3]) / 255
+          )
+        : new THREE.Color(style.fill);
+
+      // Create fill mesh
+      const fillGeometry = new THREE.ShapeGeometry(shape);
+      const fillMaterial = new THREE.MeshBasicMaterial({
+        color: fillColor,
         transparent: true,
-        opacity: 0.95,
-        vertexColors: !!colorArray,
+        opacity: fillOpacity,
+        depthWrite: false,
+        depthTest: false,
+        side: THREE.DoubleSide,
       });
-      if (colorArray) {
-        lineGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colorArray, 3));
-      }
+      const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
+      fillMesh.rotation.x = -Math.PI / 2;
+      fillMesh.position.y = floorHeight + 0.001; // Slightly above floor
+      zoneGroup.add(fillMesh);
 
-      const line = new THREE.LineLoop(lineGeometry, lineMaterial);
-      group.add(line);
+      // Extract opacity and RGB for stroke
+      const strokeOpacityMatch = style.stroke.match(/[\d.]+\)$/);
+      const strokeOpacity = strokeOpacityMatch ? parseFloat(strokeOpacityMatch[0].slice(0, -1)) : 0.95;
+      const strokeRgbMatch = style.stroke.match(/rgba?\(([\d.]+),([\d.]+),([\d.]+)/);
+      const outlineColor = strokeRgbMatch
+        ? new THREE.Color(
+            parseFloat(strokeRgbMatch[1]) / 255,
+            parseFloat(strokeRgbMatch[2]) / 255,
+            parseFloat(strokeRgbMatch[3]) / 255
+          )
+        : new THREE.Color(style.stroke);
 
-      const fillMesh = this.createZoneFillMesh(rings, zone);
-      if (fillMesh) {
-        group.add(fillMesh);
-      }
+      // Create outline (with wrapped coordinates)
+      const outlinePoints = outerRing.map(([x, y]) => {
+        const wrappedX = wrapZoneX(x);
+        const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
+        return new THREE.Vector3(worldPos.x, floorHeight + 0.002, worldPos.z);
+      });
+      const outlineGeometry = new THREE.BufferGeometry().setFromPoints(outlinePoints);
+      const outlineMaterial = new THREE.LineBasicMaterial({
+        color: outlineColor,
+        transparent: true,
+        opacity: strokeOpacity,
+        depthWrite: false,
+        depthTest: false,
+        linewidth: 2,
+      });
+      const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
+      zoneGroup.add(outline);
     });
 
-    this.scene.add(group);
-    this.zoneMeshes.set(zone.id, group);
+    if (zoneGroup.children.length === 0) {
+      return;
+    }
+
+    this.scene.add(zoneGroup);
+    this.zoneMeshes.set(zone.id, zoneGroup);
   }
 
   removeZone(zoneID) {
@@ -146,9 +244,7 @@ export class ZoneManager {
       return;
     }
     mesh.traverse(child => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
+      if (child.geometry) child.geometry.dispose();
       if (child.material) {
         if (Array.isArray(child.material)) {
           child.material.forEach(mat => mat.dispose());
@@ -161,9 +257,78 @@ export class ZoneManager {
     this.zoneMeshes.delete(zoneID);
   }
 
+  showZones() {
+    this.setVisibility(true);
+  }
+
+  hideZones() {
+    this.setVisibility(false);
+  }
+
+  toggleZones() {
+    this.setVisibility(!this.zonesVisible);
+  }
+
+  setVisibility(visible) {
+    this.zonesVisible = visible;
+    this.updateAllZoneVisibility();
+    console.info(`[Zones] ${visible ? 'shown' : 'hidden'} (meshes: ${this.zoneMeshes.size})`);
+  }
+
+  setZoneTypeVisibility(zoneType, visible) {
+    // Normalize zone type (mixed_use -> mixed-use)
+    const normalizedType = zoneType.toLowerCase().replace('_', '-');
+    this.zoneTypeVisibility.set(normalizedType, visible);
+    this.updateAllZoneVisibility();
+    console.info(`[Zones] ${normalizedType} ${visible ? 'shown' : 'hidden'}`);
+  }
+
+  updateAllZoneVisibility() {
+    this.zoneMeshes.forEach((mesh) => {
+      const zoneType = mesh.userData.zoneType || 'default';
+      const typeVisible = this.zoneTypeVisibility.get(zoneType) ?? true;
+      mesh.visible = this.zonesVisible && typeVisible;
+    });
+  }
+
   clearAllZones() {
     Array.from(this.zoneMeshes.keys()).forEach(zoneID => this.removeZone(zoneID));
     this.zoneMeshes.clear();
+  }
+
+  getStats() {
+    return {
+      cached: this.gameState.getAllZones().length,
+      rendered: this.zoneMeshes.size,
+      visible: this.zonesVisible,
+    };
+  }
+
+  logZoneState() {
+    const stats = this.getStats();
+    console.info(
+      `[Zones] cached=${stats.cached} rendered=${stats.rendered} visible=${stats.visible}`
+    );
+    if (stats.cached) {
+      console.table(
+        this.gameState.getAllZones().map(zone => ({
+          id: zone.id,
+          type: zone.zone_type,
+          floor: zone.floor,
+          area: zone.area?.toFixed?.(2) ?? zone.area,
+        }))
+      );
+    }
+  }
+
+  logErrorOnce(error) {
+    const message = error?.message || String(error);
+    const now = performance.now();
+    if (this.lastError.message === message && now - this.lastError.timestamp < 5000) {
+      return;
+    }
+    this.lastError = { message, timestamp: now };
+    console.error('Failed to load zones:', error);
   }
 }
 
@@ -182,104 +347,22 @@ function parseGeometry(geometry) {
     }
   }
 
+  if (!parsed) {
+    return [];
+  }
+
   if (parsed.type === 'Polygon') {
-    return [parsed.coordinates];
+    return [parsed.coordinates || []];
   }
 
   if (parsed.type === 'MultiPolygon') {
-    return parsed.coordinates;
+    return parsed.coordinates || [];
+  }
+
+  if (Array.isArray(parsed)) {
+    return parsed;
   }
 
   return [];
 }
-
-ZoneManager.prototype.getBaseColor = function (zoneType) {
-  const hex = ZONE_COLORS[zoneType?.toLowerCase()] ?? DEFAULT_ZONE_COLOR;
-  return new THREE.Color(hex);
-};
-
-ZoneManager.prototype.getLineColors = function (zoneType, pointCount) {
-  if (zoneType?.toLowerCase() !== 'mixed-use' || pointCount < 2) {
-    return null;
-  }
-  const gradient = MIXED_USE_GRADIENT.map(hex => new THREE.Color(hex));
-  const colors = [];
-  for (let i = 0; i < pointCount; i++) {
-    const t = i / (pointCount - 1);
-    const segment = t * (gradient.length - 1);
-    const idx = Math.floor(segment);
-    const frac = segment - idx;
-    const c1 = gradient[idx];
-    const c2 = gradient[Math.min(idx + 1, gradient.length - 1)];
-    const blended = c1.clone().lerp(c2, frac);
-    colors.push(blended.r, blended.g, blended.b);
-  }
-  return colors;
-};
-
-ZoneManager.prototype.createZoneFillMesh = function (rings, zone) {
-  const [outer, ...holes] = rings;
-  if (!outer || outer.length < 3) {
-    return null;
-  }
-
-  const baseHeight = toThreeJS({ x: 0, y: 0, z: zone.floor }).y + this.heightOffset - 0.02;
-  const shape = new THREE.Shape();
-  const outerVectors = outer.map(([x, y]) => {
-    const threePos = toThreeJS({
-      x: wrapRingPosition(x),
-      y,
-      z: zone.floor,
-    });
-    return new THREE.Vector2(threePos.x, threePos.z);
-  });
-
-  if (!outerVectors.length) {
-    return null;
-  }
-
-  shape.moveTo(outerVectors[0].x, outerVectors[0].y);
-  for (let i = 1; i < outerVectors.length; i++) {
-    shape.lineTo(outerVectors[i].x, outerVectors[i].y);
-  }
-
-  holes.forEach(holeCoords => {
-    if (!holeCoords.length) {
-      return;
-    }
-    const path = new THREE.Path();
-    holeCoords.forEach(([x, y], idx) => {
-      const threePos = toThreeJS({
-        x: wrapRingPosition(x),
-        y,
-        z: zone.floor,
-      });
-      if (idx === 0) {
-        path.moveTo(threePos.x, threePos.z);
-      } else {
-        path.lineTo(threePos.x, threePos.z);
-      }
-    });
-    shape.holes.push(path);
-  });
-
-  const geometry = new THREE.ShapeGeometry(shape);
-  const positions = geometry.attributes.position;
-  for (let i = 0; i < positions.count; i++) {
-    const xVal = positions.getX(i);
-    const zVal = positions.getY(i);
-    positions.setXYZ(i, xVal, baseHeight, zVal);
-  }
-
-  const fillColor = this.getBaseColor(zone.zone_type).clone().lerp(new THREE.Color(0xffffff), 0.4);
-  const material = new THREE.MeshBasicMaterial({
-    color: fillColor,
-    transparent: true,
-    opacity: zone.zone_type?.toLowerCase() === 'park' ? 0.35 : 0.25,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-
-  return new THREE.Mesh(geometry, material);
-};
 

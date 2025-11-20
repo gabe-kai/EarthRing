@@ -324,11 +324,11 @@ func (h *ZoneHandlers) ListZonesByOwner(w http.ResponseWriter, r *http.Request) 
 func extractZoneID(path string) (int64, error) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 3 || parts[0] != "api" || parts[1] != "zones" {
-		return 0, fmt.Errorf("Invalid path")
+		return 0, fmt.Errorf("invalid path")
 	}
 	id, err := strconv.ParseInt(parts[2], 10, 64)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("Invalid zone ID")
+		return 0, fmt.Errorf("invalid zone ID")
 	}
 	return id, nil
 }
@@ -336,11 +336,11 @@ func extractZoneID(path string) (int64, error) {
 func extractOwnerID(path string) (int64, error) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 4 || parts[0] != "api" || parts[1] != "zones" || parts[2] != "owner" {
-		return 0, fmt.Errorf("Invalid path")
+		return 0, fmt.Errorf("invalid path")
 	}
 	id, err := strconv.ParseInt(parts[3], 10, 64)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("Invalid owner ID")
+		return 0, fmt.Errorf("invalid owner ID")
 	}
 	return id, nil
 }

@@ -20,7 +20,7 @@ EarthRing is set on a massive orbital ring structure:
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
-- **Zone overlays & editor panel**: Authenticated players can load nearby zones from the REST API, view them as colored line overlays in the scene, and use the Zones panel to submit simple rectangular test zones.
+- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A left-side toolbar provides controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted). Zones remain fully visible regardless of camera position, while the grid fades around the camera.
 
 ## Prerequisites
 
@@ -199,16 +199,24 @@ npm run dev
 - **Version Management**: ✅ Implemented - Automatic version detection and regeneration, bulk invalidation, batch regeneration, version metadata storage
 
 **Zone Management:**
-- Open the **Zones** button (user info bar) to launch the panel:
-  - Load & visualize nearby zones using `GET /api/zones/area`.
-  - Create simple rectangular zones for testing (GeoJSON polygons posted to `POST /api/zones`).
-  - Fetch your zones via `GET /api/zones/owner/{owner_id}` for quick inspection.
-- REST endpoints:
-  - `POST /api/zones` – create zone (auth required, validates GeoJSON and ownership).
-  - `GET|PUT|DELETE /api/zones/{zone_id}` – manage a specific zone.
-  - `GET /api/zones/area?floor&min_x&min_y&max_x&max_y` – bounding-box query (used by overlays).
-  - `GET /api/zones/owner/{owner_id}` – list zones for the authenticated owner (restricted to self).
-- Rate limit: 200 requests per minute per user; authentication required for all zone routes.
+- **Zones Toolbar**: Click the "Z" icon on the left side of the screen to expand the zones toolbar:
+  - Grid visibility toggle (show/hide the 250m circular grid overlay)
+  - All Zones toggle (show/hide all zones at once)
+  - Per-zone-type visibility toggles (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+  - Each toggle shows current state (green "Hide" when visible, red "Show" when hidden)
+- **Zone UI Panel**: Click the **Zones** button (user info bar) to launch the management panel:
+  - Load & visualize nearby zones using `GET /api/zones/area` (automatically fetches zones around camera)
+  - Create zones (GeoJSON polygons posted to `POST /api/zones`)
+  - Get, update, or delete zones by ID
+  - Fetch your zones via `GET /api/zones/owner/{owner_id}` for quick inspection
+- **REST endpoints:**
+  - `POST /api/zones` – create zone (auth required, validates GeoJSON and ownership)
+  - `GET|PUT|DELETE /api/zones/{zone_id}` – manage a specific zone
+  - `GET /api/zones/area?floor&min_x&min_y&max_x&max_y` – bounding-box query (used by overlays)
+  - `GET /api/zones/owner/{owner_id}` – list zones for the authenticated owner (restricted to self)
+- **Zone Types**: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
+- **Rendering**: Zones are rendered as world-anchored translucent polygons with colored outlines, remaining fully visible regardless of camera position
+- **Rate limit**: 200 requests per minute per user; authentication required for all zone routes
 
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints
@@ -288,19 +296,25 @@ EarthRing/
 │   ├── go.mod                         # Go dependencies
 │   └── requirements.txt               # Python dependencies
 ├── client-web/                        # Three.js web client
-│   ├── src/                           # Source code (network, state, rendering, input, chunks, ui)
-│   │   ├── api/                       # API service modules (player, chunk)
+│   ├── src/                           # Source code (network, state, rendering, input, chunks, zones, ui)
+│   │   ├── api/                       # API service modules (player, chunk, zone)
+│   │   │   └── zone-service.js        # Zone API service (CRUD, area queries)
 │   │   ├── auth/                      # Authentication UI and service
 │   │   ├── network/                   # WebSocket client and network utilities
 │   │   ├── rendering/                 # Rendering engine
-│   │   │   └── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
+│   │   │   ├── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
+│   │   │   └── grid-overlay.js         # Grid overlay (circular grid with fade-out)
 │   │   ├── input/                     # Input handling
 │   │   │   └── camera-controller.js   # Camera controller (OrbitControls integration)
 │   │   ├── state/                     # Game state management
-│   │   │   └── game-state.js          # Game state manager (chunks, player, connection)
+│   │   │   └── game-state.js          # Game state manager (chunks, player, connection, zones)
 │   │   ├── chunks/                    # Chunk management
 │   │   │   └── chunk-manager.js       # Chunk manager (loading, caching, rendering)
-│   │   ├── ui/                        # UI components (player panel, chunk panel)
+│   │   ├── zones/                     # Zone management
+│   │   │   └── zone-manager.js        # Zone manager (fetching, rendering, visibility)
+│   │   ├── ui/                        # UI components (player panel, chunk panel, zones toolbar)
+│   │   │   ├── zones-toolbar.js       # Zones toolbar (grid and zone visibility controls)
+│   │   │   └── zone-ui.js             # Zone management panel
 │   │   ├── utils/                     # Utility modules
 │   │   │   ├── coordinates.js         # Coordinate conversion utilities (EarthRing ↔ Three.js ↔ Unreal)
 │   │   │   └── rendering.js           # Rendering utilities with coordinate conversion integration

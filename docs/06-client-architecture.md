@@ -364,37 +364,183 @@ Manages chunk loading and unloading based on viewport.
 - Integration with game state manager for caching
 - Compression ratio logging (2.6-3.1:1 achieved in production)
 
-#### Zone Rendering & Editor Scaffolding ✅ **INITIAL IMPLEMENTATION**
+#### Zone Rendering & Management ✅ **IMPLEMENTED**
 
 **Zone Manager** (`client-web/src/zones/zone-manager.js`):
-- Throttled bounding-box fetches (`GET /api/zones/area`) anchored to the camera position
-- Converts GeoJSON polygons/multipolygons to Three.js line overlays with zone-type color coding
-- Keeps zone meshes in sync with `GameStateManager` events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`)
-- Exposes `loadZonesAroundCamera()` for the renderer loop and manual refresh from the UI
+- Throttled bounding-box fetches (`GET /api/zones/area`) based on camera position
+- Renders zones as world-anchored Three.js meshes (not camera-relative) with ring wrapping support
+- Converts GeoJSON polygons/multipolygons to `THREE.ShapeGeometry` meshes with translucent fills and colored outlines
+- Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+- Keeps zone meshes in sync with `GameStateManager` events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`, `zonesCleared`)
+- Zone colors: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
+- Exposes `loadZonesAroundCamera()`, `setVisibility()`, `setZoneTypeVisibility()` for UI control
+
+**Grid Overlay** (`client-web/src/rendering/grid-overlay.js`):
+- Circular 250m radius grid overlay centered on camera target
+- 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
+- Soft radial fade-out at edges (grid only, zones remain fully visible)
+- World-aligned grid texture that scrolls based on camera position
+- Visibility control via `setVisible()` method
 
 **Zone Service** (`client-web/src/api/zone-service.js`):
 - Typed helpers for area queries, owner listing, and CRUD operations (auth-required)
 - Centralizes error handling / token injection for the new zone endpoints
 
+**Zones Toolbar** (`client-web/src/ui/zones-toolbar.js`):
+- Left-side vertical expandable toolbar with "Z" icon
+- Controls for grid visibility and all zone types
+- Per-zone-type visibility toggles (Show/Hide buttons)
+- Smooth expand/collapse animation
+
 **Zone UI Panel** (`client-web/src/ui/zone-ui.js`):
-- Provides a scaffolding interface to:
-  - Load overlays near the camera (wired to the renderer fetch)
-  - Create simple rectangular sample zones (GeoJSON polygon generator)
-  - Inspect zones by owner ID
-- Future work: freeform drawing, vertex editing, deletion controls, overlap indicators
+- Provides interface for:
+  - Creating zones (GeoJSON polygon input)
+  - Getting/updating/deleting zones by ID
+  - Listing zones by area
+- Future work: freeform drawing, vertex editing, overlap indicators
 
 **Usage Example**:
 ```javascript
-import { ChunkManager } from './chunks/chunk-manager.js';
+import { ZoneManager } from './zones/zone-manager.js';
+import { GridOverlay } from './rendering/grid-overlay.js';
+import { createZonesToolbar } from './ui/zones-toolbar.js';
 
-const chunkManager = new ChunkManager(sceneManager, gameStateManager);
+const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
+const gridOverlay = new GridOverlay(sceneManager, cameraController, { radius: 250 });
+createZonesToolbar(zoneManager, gridOverlay);
 
-// Request chunks by ID
-await chunkManager.requestChunks(['0_0', '0_1', '0_2'], 0);
+// Zones are automatically fetched and rendered based on camera position
+// Call in render loop:
+zoneManager.loadZonesAroundCamera();
 
-// Request chunks at a position (ring position, floor, radius, LOD)
-await chunkManager.requestChunksAtPosition(5000, 0, 2, 0);
+// Control visibility:
+zoneManager.setVisibility(true); // Show all zones
+zoneManager.setZoneTypeVisibility('industrial', false); // Hide industrial zones
+gridOverlay.setVisible(false); // Hide grid
 ```
+
+#### Technical Implementation Details
+
+**Zone Rendering Architecture:**
+
+1. **World-Anchored Rendering:**
+   - Zones are rendered as separate `THREE.Group` objects positioned at their actual world coordinates
+   - Each zone group contains:
+     - `THREE.Mesh` with `THREE.ShapeGeometry` for the translucent fill
+     - `THREE.LineLoop` with `THREE.BufferGeometry` for the colored outline
+   - Zones use `renderOrder = 5` to appear above the grid (`renderOrder = 1`)
+   - Materials use `depthWrite: false` and `depthTest: false` to prevent z-fighting with floor geometry
+
+2. **Ring Wrapping:**
+   - Zones wrap around the 264,000 km ring circumference using the same logic as chunks
+   - The `wrapZoneX()` function calculates the shortest path around the ring:
+     ```javascript
+     const wrapZoneX = (x) => {
+       const dx = x - cameraX;
+       const half = RING_CIRCUMFERENCE / 2;
+       let adjusted = dx;
+       while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
+       while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
+       return cameraX + adjusted;
+     };
+     ```
+   - This ensures zones always render at the copy closest to the camera, preventing gaps at the 0/263999 seam
+
+3. **Coordinate Conversion:**
+   - Zone coordinates (EarthRing X/Y/Z) are converted to Three.js coordinates using `toThreeJS()`:
+     - EarthRing X (ring position) → Three.js X (right)
+     - EarthRing Y (width) → Three.js Z (forward)
+     - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
+   - Shape geometry uses X/Z plane (horizontal), then rotated -90° around X-axis to lie flat
+
+4. **Fetching and Caching:**
+   - Zones are fetched via `GET /api/zones/area` with a bounding box around the camera
+   - Default fetch range: 5000m along ring (X), 3000m across width (Y)
+   - Fetch throttling: 4 seconds between requests (`fetchThrottleMs = 4000`)
+   - Zones are cached in `GameStateManager.zones` Map (keyed by zone ID)
+   - `GameStateManager.setZones()` emits `zoneAdded`, `zoneUpdated`, `zoneRemoved` events
+   - `ZoneManager` listens to these events and renders/updates meshes accordingly
+
+5. **Visibility System:**
+   - Two-level visibility control:
+     - Global: `zonesVisible` (all zones on/off)
+     - Per-type: `zoneTypeVisibility` Map (individual zone types)
+   - Zone visibility = `zonesVisible && zoneTypeVisibility.get(zoneType)`
+   - When visibility changes, `updateAllZoneVisibility()` updates all existing meshes
+   - New zones respect current visibility state when rendered
+
+6. **Grid Overlay Separation:**
+   - Grid is rendered separately as a circular canvas texture (`THREE.CanvasTexture`)
+   - Grid texture scrolls based on camera position but fades at edges
+   - Zones are NOT part of the grid texture (they're separate meshes)
+   - This allows zones to remain fully visible while grid fades, and zones stay world-anchored
+
+**Troubleshooting:**
+
+1. **Zones Not Appearing:**
+   - Check authentication: `isAuthenticated()` must return true
+   - Check fetch throttling: Wait 4 seconds between manual fetches
+   - Check visibility: `zoneManager.zonesVisible` and per-type visibility
+   - Check console for errors: `zoneManager.logZoneState()` for debug info
+   - Verify zone data: Check `gameStateManager.getAllZones()` for cached zones
+
+2. **Zones Moving with Camera:**
+   - This indicates wrapping logic failure - check `wrapZoneX()` function
+   - Ensure camera position is correctly retrieved: `cameraController.getEarthRingPosition()`
+   - Verify zone coordinates are in EarthRing space (not already converted)
+
+3. **Performance Issues:**
+   - Limit zone count: Current implementation handles ~100 zones efficiently
+   - Check mesh count: `zoneManager.zoneMeshes.size` - each zone creates 2-3 meshes (fill + outline per polygon)
+   - Reduce fetch range: Modify `DEFAULT_ZONE_RANGE` and `DEFAULT_WIDTH_RANGE`
+   - Increase fetch throttle: Modify `fetchThrottleMs` to reduce API calls
+
+4. **Visibility Not Working:**
+   - Check both global and per-type visibility: `zoneManager.zonesVisible` and `zoneManager.zoneTypeVisibility`
+   - Call `zoneManager.updateAllZoneVisibility()` after manual visibility changes
+   - Verify zone type normalization: `mixed_use` vs `mixed-use` handling
+
+**Expanding the System:**
+
+1. **Adding a New Zone Type:**
+   ```javascript
+   // 1. Add to ZONE_STYLES in zone-manager.js
+   const ZONE_STYLES = {
+     // ... existing types
+     'new-type': { fill: 'rgba(r,g,b,0.4)', stroke: 'rgba(r,g,b,0.95)' },
+   };
+   
+   // 2. Add to zoneTypeVisibility Map in constructor
+   this.zoneTypeVisibility = new Map([
+     // ... existing types
+     ['new-type', true],
+   ]);
+   
+   // 3. Add to zones-toolbar.js zoneTypes array
+   const zoneTypes = [
+     // ... existing types
+     { label: 'New Type', key: 'new-type' },
+   ];
+   
+   // 4. Update server-side validation if needed (server/internal/database/zones.go)
+   ```
+
+2. **Modifying Zone Rendering:**
+   - Fill material: Modify `fillMaterial` properties in `renderZone()` (opacity, color, side)
+   - Outline material: Modify `outlineMaterial` properties (linewidth, color, opacity)
+   - Elevation: Change `floorHeight + 0.001` offset for fill, `floorHeight + 0.002` for outline
+   - Geometry: Modify `THREE.Shape` creation or use different geometry types
+
+3. **Extending the API:**
+   - Add new endpoints in `server/internal/api/zone_handlers.go`
+   - Add corresponding service methods in `client-web/src/api/zone-service.js`
+   - Update `ZoneManager` to use new endpoints if needed
+
+4. **Architecture Decisions:**
+   - **Why world-anchored meshes?** Ensures zones stay fixed to their world positions, making them useful for building placement and spatial queries
+   - **Why separate from grid?** Allows independent visibility control and prevents zones from fading with the grid
+   - **Why ring wrapping?** Essential for seamless rendering across the 264,000 km ring boundary
+   - **Why per-type visibility?** Allows players to focus on specific zone types during planning and building
 
 #### Implementation (Future Enhancement)
 
@@ -471,15 +617,23 @@ client-web/
 │   │   └── camera-controller.js       ✅ Camera controller
 │   ├── chunks/
 │   │   └── chunk-manager.js           ✅ Chunk manager
+│   ├── zones/
+│   │   └── zone-manager.js            ✅ Zone manager
 │   ├── api/
 │   │   ├── player-service.js          ✅ Player API service
-│   │   └── chunk-service.js           ✅ Chunk API service
+│   │   ├── chunk-service.js           ✅ Chunk API service
+│   │   └── zone-service.js            ✅ Zone API service
 │   ├── auth/
 │   │   ├── auth-service.js            ✅ Authentication service
 │   │   └── auth-ui.js                 ✅ Authentication UI
 │   ├── ui/
 │   │   ├── player-ui.js               ✅ Player panel
-│   │   └── chunk-ui.js                ✅ Chunk panel
+│   │   ├── chunk-ui.js                ✅ Chunk panel
+│   │   ├── zone-ui.js                 ✅ Zone panel
+│   │   └── zones-toolbar.js           ✅ Zones toolbar
+│   ├── rendering/
+│   │   ├── scene-manager.js           ✅ Scene manager
+│   │   └── grid-overlay.js            ✅ Grid overlay
 │   ├── utils/
 │   │   ├── coordinates.js             ✅ Coordinate conversion
 │   │   └── rendering.js               ✅ Rendering utilities

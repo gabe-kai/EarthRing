@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -256,7 +257,11 @@ func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query zones by area: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows in ListZonesByArea: %v", closeErr)
+		}
+	}()
 
 	var zones []Zone
 	for rows.Next() {
@@ -291,7 +296,11 @@ func (s *ZoneStorage) ListZonesByOwner(ownerID int64) ([]Zone, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query zones by owner: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows in ListZonesByOwner: %v", closeErr)
+		}
+	}()
 
 	var zones []Zone
 	for rows.Next() {
@@ -367,13 +376,13 @@ func validateZoneInput(input ZoneCreateInput) error {
 	if err := validateZoneType(input.ZoneType); err != nil {
 		return err
 	}
-	if input.Floor < 0 {
-		return fmt.Errorf("zone floor must be >= 0")
-	}
 	if len(input.Geometry) == 0 {
 		return fmt.Errorf("zone geometry is required")
 	}
-	return validateZoneGeometry(input.Geometry)
+	if err := validateZoneGeometry(input.Geometry); err != nil {
+		return err
+	}
+	return validateZoneBounds(input.Geometry)
 }
 
 func validateZoneType(zoneType string) error {
@@ -437,6 +446,67 @@ func validateMultiPolygonCoordinates(raw json.RawMessage) error {
 			return fmt.Errorf("invalid polygon %d: %w", idx, err)
 		}
 	}
+	return nil
+}
+
+func validateZoneBounds(raw json.RawMessage) error {
+	var geo struct {
+		Type        string          `json:"type"`
+		Coordinates json.RawMessage `json:"coordinates"`
+	}
+	if err := json.Unmarshal(raw, &geo); err != nil {
+		return fmt.Errorf("invalid geometry: %w", err)
+	}
+
+	switch strings.ToLower(geo.Type) {
+	case "polygon":
+		return validatePolygonBounds(geo.Coordinates)
+	case "multipolygon":
+		var polygons []json.RawMessage
+		if err := json.Unmarshal(geo.Coordinates, &polygons); err != nil {
+			return fmt.Errorf("invalid multipolygon coordinates: %w", err)
+		}
+		for idx, polygon := range polygons {
+			if err := validatePolygonBounds(polygon); err != nil {
+				return fmt.Errorf("polygon %d out of bounds: %w", idx, err)
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported geometry type for bounds validation: %s", geo.Type)
+	}
+	return nil
+}
+
+func validatePolygonBounds(raw json.RawMessage) error {
+	var rings [][][]float64
+	if err := json.Unmarshal(raw, &rings); err != nil {
+		return fmt.Errorf("invalid polygon coordinates: %w", err)
+	}
+	if len(rings) == 0 {
+		return fmt.Errorf("polygon must contain at least one ring")
+	}
+
+	const ringCircumference = 264000000.0
+	const maxWidth = 2500.0
+
+	for _, ring := range rings {
+		for _, vertex := range ring {
+			if len(vertex) < 2 {
+				return fmt.Errorf("vertex has insufficient coordinates")
+			}
+			x, y := vertex[0], vertex[1]
+			if !isFinite(x) || !isFinite(y) {
+				return fmt.Errorf("vertex coordinates must be finite numbers")
+			}
+			if x < 0 || x > ringCircumference {
+				return fmt.Errorf("x coordinate out of bounds: %f (allowed 0..%f)", x, ringCircumference)
+			}
+			if y < -maxWidth || y > maxWidth {
+				return fmt.Errorf("y coordinate out of bounds: %f (allowed ±%f)", y, maxWidth)
+			}
+		}
+	}
+
 	return nil
 }
 

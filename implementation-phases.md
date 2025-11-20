@@ -42,7 +42,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Project structure initialized (directories created)
 
 **In Progress:**
-- ⏳ Phase 3: Zone System implementation (database layer, REST API, and client overlays complete; advanced editor + overlap rules pending)
+- ⏳ Phase 3: Zone System implementation (database layer, REST API, client rendering, and toolbar UI complete; advanced editor + overlap rules pending)
 
 **Status Summary:**
 - **Design Phase**: ✅ Complete (13 documents)
@@ -50,7 +50,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - **Foundation Phase**: ✅ Complete (Phase 0 - all setup tasks done)
 - **Phase 1 (Core Infrastructure)**: ✅ Complete
 - **Phase 2 (Map System Foundation)**: ✅ Complete
-- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + overlays done; editor tooling and conflict resolution upcoming)
+- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI complete; advanced editor + conflict resolution upcoming)
 
 ## Implementation Phases
 
@@ -162,20 +162,27 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 **Completed to date:**
 1. ✅ Zone creation API and validation (GeoJSON polygons validated server-side, PostGIS constraints)
 2. ✅ Zone storage in database (new `ZoneStorage`, spatial indexes, area queries, owner filters)
-3. ✅ Zone rendering in client (ZoneManager overlays + throttled camera fetches, scaffolded Zones panel)
+3. ✅ Zone rendering in client (world-anchored meshes with ring wrapping, translucent fills with colored outlines)
+4. ✅ Grid overlay system (250m circular grid with fade-out, separate from zones, world-aligned texture)
+5. ✅ Zones toolbar UI (left-side expandable toolbar with grid visibility and per-zone-type visibility toggles)
+6. ✅ Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+7. ✅ Restricted zone type (red overlay for preventing/limiting procedural spawning)
+8. ✅ Zone UI panel (create, get, update, delete zones via REST API)
+9. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
 
 **In Progress / Upcoming:**
-4. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators) – current panel supports rectangular samples and owner queries
-5. Zone overlap detection / importance scoring / conflict resolution
-6. Zone-to-chunk relationship mapping and chunk-based visual feedback
+10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
+11. Zone overlap detection / importance scoring / conflict resolution
+12. Zone-to-chunk relationship mapping and chunk-based visual feedback
 
 **Deliverables (Phase End Target):**
-- Players can create zones (freeform polygons, various zone types)
-- Zones are stored and rendered correctly (PostGIS storage, client visualization)
-- Zone conflicts are resolved (importance system, court ruling for ties)
-- Zone editor is functional (draw, edit vertices, delete zones)
-- Zones span chunks correctly (multi-chunk zones work seamlessly)
-- Zone types supported (residential, commercial, industrial, mixed-use, parks, etc.)
+- ✅ Players can create zones (freeform polygons, various zone types) - **COMPLETE**
+- ✅ Zones are stored and rendered correctly (PostGIS storage, client visualization) - **COMPLETE**
+- ✅ Zones toolbar with visibility controls (grid and per-type toggles) - **COMPLETE**
+- ✅ Zone types supported (residential, commercial, industrial, mixed-use, park, restricted) - **COMPLETE**
+- ⏳ Zone conflicts are resolved (importance system, court ruling for ties) - **PENDING**
+- ⏳ Zone editor is functional (draw, edit vertices, delete zones) - **PENDING**
+- ✅ Zones span chunks correctly (multi-chunk zones work seamlessly via ring wrapping) - **COMPLETE**
 
 **Dependencies**: Phase 2 complete
 

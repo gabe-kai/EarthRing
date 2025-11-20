@@ -14,6 +14,9 @@ import { CameraController } from './input/camera-controller.js';
 import { GameStateManager } from './state/game-state.js';
 import { ChunkManager } from './chunks/chunk-manager.js';
 import { ZoneManager } from './zones/zone-manager.js';
+import { GridOverlay } from './rendering/grid-overlay.js';
+import { DebugInfoPanel } from './ui/debug-info.js';
+import { createZonesToolbar } from './ui/zones-toolbar.js';
 import { wsClient } from './network/websocket-client.js';
 import { createMeshAtEarthRingPosition } from './utils/rendering.js';
 import { positionToChunkIndex } from './utils/coordinates.js';
@@ -29,12 +32,30 @@ const sceneManager = new SceneManager();
 const cameraController = new CameraController(
   sceneManager.getCamera(),
   sceneManager.getRenderer(),
-  sceneManager
+  sceneManager,
+  gameStateManager
 );
 
 // Initialize chunk manager (pass camera controller for position wrapping)
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController);
-const zoneManager = new ZoneManager(sceneManager, gameStateManager, cameraController);
+const gridOverlay = new GridOverlay(sceneManager, cameraController, {
+  radius: 250, // 250m radius circular grid
+  majorSpacing: 5,
+  minorSpacing: 1,
+  fadeStart: 0.7, // Start fading at 70% of radius
+});
+const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
+createZonesToolbar(zoneManager, gridOverlay);
+
+// Initialize debug info panel
+const debugPanel = new DebugInfoPanel(
+  sceneManager,
+  cameraController,
+  gridOverlay,
+  gameStateManager,
+  chunkManager,
+  zoneManager
+);
 
 // Add a test cube at EarthRing position (0, 0, 0) for demonstration
 const scene = sceneManager.getScene();
@@ -58,10 +79,6 @@ cameraController.setPositionFromEarthRing(cameraEarthRingPos);
 camera.position.y += 20; // Higher up for better overview
 camera.position.z += 30; // Back from the ring
 camera.lookAt(cubeThreeJSPos.x, cubeThreeJSPos.y, cubeThreeJSPos.z);
-
-// Add grid helper for better visibility
-const gridHelper = new THREE.GridHelper(100, 10, 0x444444, 0x222222);
-scene.add(gridHelper);
 
 // Add axes helper for reference
 const axesHelper = new THREE.AxesHelper(10);
@@ -137,6 +154,12 @@ sceneManager.onRender((deltaTime) => {
 
   // Refresh zone overlays (ZoneManager throttles internally)
   zoneManager.loadZonesAroundCamera();
+  
+  // Update grid overlay position to follow camera
+  gridOverlay.update();
+  
+  // Update debug info panel
+  debugPanel.update();
 });
 
 // Start rendering loop
@@ -270,6 +293,8 @@ window.earthring = {
   gameStateManager,
   chunkManager,
   zoneManager,
+  gridOverlay,
+  debugPanel,
   wsClient,
   debug: false, // Set to true to enable debug logging
   stations: {
