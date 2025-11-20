@@ -205,6 +205,24 @@ func TestGetChunkMetadata_InvalidFormat(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
+	// Create chunks table (needed even for invalid format tests since handler queries DB)
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
 	// Create config
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
@@ -261,14 +279,8 @@ func TestDeleteChunk(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
-
 	// Create tables
-	_, err = db.Exec(`
+	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS chunks (
 			id SERIAL PRIMARY KEY,
 			floor INTEGER NOT NULL,

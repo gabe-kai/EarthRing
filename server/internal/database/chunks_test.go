@@ -14,12 +14,6 @@ func TestChunkStorage_GetChunkMetadata(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
-
 	// Create tables
 	setupChunkTables(t, db)
 
@@ -99,12 +93,6 @@ func TestChunkStorage_GetChunkData(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
-
 	// Create tables
 	setupChunkTables(t, db)
 
@@ -178,12 +166,6 @@ func TestChunkStorage_GetChunkData(t *testing.T) {
 func TestChunkStorage_StoreChunk(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
 
 	// Create tables
 	setupChunkTables(t, db)
@@ -348,12 +330,6 @@ func TestChunkStorage_StoreChunk(t *testing.T) {
 func TestChunkStorage_ConvertPostGISToGeometry(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
 
 	// Create tables
 	setupChunkTables(t, db)
@@ -534,12 +510,6 @@ func TestChunkStorage_StoreChunk_EdgeCases(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
-
 	// Create tables
 	setupChunkTables(t, db)
 
@@ -610,12 +580,6 @@ func TestChunkStorage_StoreChunk_EdgeCases(t *testing.T) {
 func TestChunkStorage_ConvertPostGISToGeometry_EdgeCases(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
 
 	// Create tables
 	setupChunkTables(t, db)
@@ -708,12 +672,6 @@ func TestChunkStorage_ConvertPostGISToGeometry_EdgeCases(t *testing.T) {
 func TestChunkStorage_DeleteChunk(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
 
 	// Create tables
 	setupChunkTables(t, db)
@@ -927,16 +885,24 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 		)
 	`)
 	if err != nil {
-		t.Fatalf("Failed to create chunks table: %v", err)
+		// Check if error is due to table already existing (race condition)
+		if pqErr, ok := err.(*pq.Error); ok {
+			switch pqErr.Code {
+			case "42P07": // duplicate_table
+				t.Logf("Note: chunks table already exists (created by another test)")
+			case "23505": // unique_violation on pg_class_relname_nsp_index
+				t.Logf("Note: chunks table already exists (race condition)")
+			default:
+				t.Fatalf("Failed to create chunks table: %v", err)
+			}
+		} else {
+			t.Fatalf("Failed to create chunks table: %v", err)
+		}
 	}
 
-	// Drop and recreate chunk_data table to ensure it has the correct schema
-	_, err = db.Exec("DROP TABLE IF EXISTS chunk_data")
-	if err != nil {
-		t.Logf("Warning: failed to drop chunk_data table: %v", err)
-	}
+	// Use IF NOT EXISTS for chunk_data table to handle concurrent creation
 	_, err = db.Exec(`
-		CREATE TABLE chunk_data (
+		CREATE TABLE IF NOT EXISTS chunk_data (
 			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
 			geometry GEOMETRY(POLYGON, 0) NOT NULL,
 			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
@@ -948,7 +914,19 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 		)
 	`)
 	if err != nil {
-		t.Fatalf("Failed to create chunk_data table: %v", err)
+		// Check if error is due to table already existing (race condition)
+		if pqErr, ok := err.(*pq.Error); ok {
+			switch pqErr.Code {
+			case "42P07": // duplicate_table
+				t.Logf("Note: chunk_data table already exists (created by another test)")
+			case "23505": // unique_violation on pg_class_relname_nsp_index
+				t.Logf("Note: chunk_data table already exists (race condition)")
+			default:
+				t.Fatalf("Failed to create chunk_data table: %v", err)
+			}
+		} else {
+			t.Fatalf("Failed to create chunk_data table: %v", err)
+		}
 	}
 
 	// Clean up test data

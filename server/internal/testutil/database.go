@@ -11,13 +11,12 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 var (
 	envLoaded  bool
 	envLoadMux sync.Mutex
-	dbSetupMux sync.Mutex // Serialize database setup to prevent race conditions
 )
 
 // loadEnv loads .env file if not already loaded
@@ -110,13 +109,9 @@ func (c TestDBConfig) DatabaseURL() string {
 
 // SetupTestDB creates a test database connection and sets up PostGIS
 // Returns a connection that should be closed after tests
-// Uses a mutex to serialize database setup and prevent race conditions when tests run in parallel
+// Uses PostgreSQL advisory locks and improved concurrency handling for parallel test execution
 func SetupTestDB(t *testing.T) *sql.DB {
 	cfg := DefaultTestDBConfig()
-
-	// Serialize database setup to prevent race conditions
-	dbSetupMux.Lock()
-	defer dbSetupMux.Unlock()
 
 	// Connect to postgres database first to create test database
 	adminURL := fmt.Sprintf(
@@ -134,8 +129,25 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		}
 	}()
 
-	// Check if test database exists and terminate any existing connections
-	// This is necessary before we can drop it
+	// Use PostgreSQL advisory lock to coordinate database operations across parallel tests
+	// Hash the database name to create a unique lock ID
+	lockID := int64(hashString(cfg.Database))
+
+	// Acquire advisory lock (blocks until available)
+	acquireLockQuery := fmt.Sprintf("SELECT pg_advisory_lock(%d)", lockID)
+	if _, err := adminDB.Exec(acquireLockQuery); err != nil {
+		t.Fatalf("Failed to acquire advisory lock: %v", err)
+	}
+
+	// Ensure lock is released even if test fails
+	defer func() {
+		releaseLockQuery := fmt.Sprintf("SELECT pg_advisory_unlock(%d)", lockID)
+		if _, err := adminDB.Exec(releaseLockQuery); err != nil {
+			t.Logf("Warning: Failed to release advisory lock: %v", err)
+		}
+	}()
+
+	// Check if test database exists and is usable
 	checkDBQuery := fmt.Sprintf(`
 		SELECT 1 FROM pg_database WHERE datname = '%s'
 	`, cfg.Database)
@@ -143,11 +155,44 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	err = adminDB.QueryRow(checkDBQuery).Scan(&dbExists)
 	if err != nil && err != sql.ErrNoRows {
 		t.Logf("Note: Could not check if database exists: %v", err)
+		dbExists = false
 	}
 
+	// Try to connect to existing database to verify it's usable
+	if dbExists {
+		testDB, testErr := sql.Open("postgres", cfg.DatabaseURL())
+		if testErr == nil {
+			// Try to ping the database
+			if pingErr := testDB.Ping(); pingErr == nil {
+				// Database exists and is accessible, check if PostGIS is available
+				var extExists bool
+				extCheckQuery := `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'postgis')`
+				if extCheckErr := testDB.QueryRow(extCheckQuery).Scan(&extExists); extCheckErr == nil && extExists {
+					// Database is usable, close test connection and return a new one
+					if closeErr := testDB.Close(); closeErr != nil {
+						t.Logf("Warning: error closing test database connection: %v", closeErr)
+					}
+
+					// Return a fresh connection to the existing database
+					db, err := sql.Open("postgres", cfg.DatabaseURL())
+					if err != nil {
+						t.Fatalf("Failed to connect to test database: %v", err)
+					}
+					if err := db.Ping(); err != nil {
+						t.Fatalf("Failed to ping test database: %v", err)
+					}
+					return db
+				}
+			}
+			if closeErr := testDB.Close(); closeErr != nil {
+				t.Logf("Warning: error closing test database connection: %v", closeErr)
+			}
+		}
+	}
+
+	// Database doesn't exist or isn't usable, create/recreate it
 	if dbExists {
 		// Terminate any existing connections to the test database
-		// Use pg_terminate_backend to force disconnect all sessions
 		terminateQuery := fmt.Sprintf(`
 			SELECT pg_terminate_backend(pg_stat_activity.pid)
 			FROM pg_stat_activity
@@ -158,51 +203,58 @@ func SetupTestDB(t *testing.T) *sql.DB {
 			t.Logf("Note: Terminating connections (may fail if no connections exist): %v", err)
 		}
 
-		// Also try to revoke connect privileges to prevent new connections
-		revokeQuery := fmt.Sprintf(`
-			REVOKE CONNECT ON DATABASE %s FROM public
-		`, cfg.Database)
-		if _, err := adminDB.Exec(revokeQuery); err != nil {
-			t.Logf("Note: Revoking connect privileges (may fail): %v", err)
-		}
+		// Wait for connections to close
+		time.Sleep(100 * time.Millisecond)
 
-		// Drop test database if it exists (to ensure clean state)
-		// Retry logic to handle race conditions with parallel tests
-		maxRetries := 3
+		// Drop test database with exponential backoff retry
+		maxRetries := 5
 		var dropErr error
 		for attempt := 0; attempt < maxRetries; attempt++ {
-			_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", cfg.Database))
+			// Try DROP DATABASE WITH (FORCE) first (PostgreSQL 13+)
+			_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", cfg.Database))
 			if dropErr == nil {
-				break // Successfully dropped
+				break
 			}
 
-			// If drop fails, try terminating connections again and wait a bit
+			// If FORCE fails, try regular DROP
+			if attempt == 0 {
+				_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", cfg.Database))
+				if dropErr == nil {
+					break
+				}
+			}
+
+			// Check if error is because database doesn't exist (which is fine)
+			if pqErr, ok := dropErr.(*pq.Error); ok {
+				if pqErr.Code == "3D000" { // invalid_catalog_name - database doesn't exist
+					dropErr = nil
+					break
+				}
+			}
+
+			// Retry with exponential backoff
 			if attempt < maxRetries-1 {
-				t.Logf("Warning: Drop attempt %d failed: %v, retrying after re-terminating connections...", attempt+1, dropErr)
-				// Terminate connections again
+				backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
+				t.Logf("Warning: Drop attempt %d failed: %v, retrying in %v...", attempt+1, dropErr, backoff)
+				time.Sleep(backoff)
+
+				// Terminate connections again before retry
 				if _, termErr := adminDB.Exec(terminateQuery); termErr != nil {
 					t.Logf("Note: Re-terminating connections: %v", termErr)
 				}
-				// Wait a bit for connections to close
-				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
 		if dropErr != nil {
-			// Last resort: try with FORCE if supported (PostgreSQL 13+)
-			_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", cfg.Database))
-			if dropErr != nil {
-				t.Fatalf("Failed to drop test database after %d attempts: %v", maxRetries, dropErr)
-			}
+			t.Fatalf("Failed to drop test database after %d attempts: %v", maxRetries, dropErr)
 		}
 
-		// Wait a moment to ensure database is fully dropped before creating
-		time.Sleep(50 * time.Millisecond)
+		// Wait a moment to ensure database is fully dropped
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Create test database fresh
-	// Retry creation in case of race conditions with parallel tests
-	maxCreateRetries := 3
+	// Create test database with exponential backoff retry
+	maxCreateRetries := 5
 	var createErr error
 	for attempt := 0; attempt < maxCreateRetries; attempt++ {
 		_, createErr = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database))
@@ -215,26 +267,41 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		checkErr := adminDB.QueryRow(checkDBQuery).Scan(&exists)
 		if checkErr == nil && exists {
 			// Database exists, which is fine - another test created it
-			// We'll use the existing database
 			break
 		}
 
-		// If creation failed and database doesn't exist, wait and retry
+		// Check if error is because database already exists
+		if pqErr, ok := createErr.(*pq.Error); ok {
+			if pqErr.Code == "42P04" { // duplicate_database
+				// Database exists, verify it's usable
+				var exists bool
+				if checkErr := adminDB.QueryRow(checkDBQuery).Scan(&exists); checkErr == nil && exists {
+					break
+				}
+			}
+		}
+
+		// Retry with exponential backoff
 		if attempt < maxCreateRetries-1 {
-			time.Sleep(50 * time.Millisecond)
+			backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
+			t.Logf("Warning: Create attempt %d failed: %v, retrying in %v...", attempt+1, createErr, backoff)
+			time.Sleep(backoff)
 		}
 	}
 
 	if createErr != nil {
-		// Check one more time if database exists
+		// Final check if database exists
 		var exists bool
 		checkErr := adminDB.QueryRow(checkDBQuery).Scan(&exists)
 		if checkErr == nil && exists {
-			// Database exists now, use it - no error to report
+			// Database exists now, use it
 		} else {
 			t.Fatalf("Failed to create test database after %d attempts: %v", maxCreateRetries, createErr)
 		}
 	}
+
+	// Wait a moment for database to be ready
+	time.Sleep(50 * time.Millisecond)
 
 	// Connect to test database
 	db, err := sql.Open("postgres", cfg.DatabaseURL())
@@ -242,18 +309,58 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// Set up PostGIS extension
-	_, err = db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Fatalf("Failed to create PostGIS extension: %v", err)
+	// Verify connection with retry
+	maxPingRetries := 5
+	for attempt := 0; attempt < maxPingRetries; attempt++ {
+		if err := db.Ping(); err == nil {
+			break
+		}
+		if attempt < maxPingRetries-1 {
+			backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
+			time.Sleep(backoff)
+		} else {
+			t.Fatalf("Failed to ping test database after %d attempts: %v", maxPingRetries, err)
+		}
 	}
 
-	// Verify connection
-	if err := db.Ping(); err != nil {
-		t.Fatalf("Failed to ping test database: %v", err)
+	// Set up PostGIS extension with retry
+	maxExtRetries := 3
+	for attempt := 0; attempt < maxExtRetries; attempt++ {
+		_, err = db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
+		if err == nil {
+			break
+		}
+
+		// Check if error is due to extension already existing (race condition)
+		if pqErr, ok := err.(*pq.Error); ok {
+			if pqErr.Code == "23505" { // unique_violation
+				// Extension already exists, which is fine
+				break
+			}
+		}
+
+		if attempt < maxExtRetries-1 {
+			backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
+			time.Sleep(backoff)
+		} else {
+			t.Fatalf("Failed to create PostGIS extension after %d attempts: %v", maxExtRetries, err)
+		}
 	}
 
 	return db
+}
+
+// hashString creates a simple hash of a string for use as an advisory lock ID
+func hashString(s string) int64 {
+	var hash int64
+	for _, c := range s {
+		hash = hash*31 + int64(c)
+	}
+	// Ensure positive value (PostgreSQL advisory locks use signed integers)
+	if hash < 0 {
+		hash = -hash
+	}
+	return hash
 }
 
 // CloseDB registers a cleanup function that closes the provided database connection.

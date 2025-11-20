@@ -317,6 +317,61 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
+	// Create chunks table (needed for chunk_request message handling)
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunk_data (
+			chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+			geometry GEOMETRY(POLYGON, 0) NOT NULL,
+			geometry_detail GEOMETRY(MULTIPOLYGON, 0),
+			structure_ids INTEGER[],
+			zone_ids INTEGER[],
+			npc_data JSONB,
+			terrain_data JSONB,
+			last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunk_data table: %v", err)
+	}
+
+	// Create players table (needed for player_move message handling)
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS players (
+			id SERIAL PRIMARY KEY,
+			username VARCHAR(50) UNIQUE NOT NULL,
+			email VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			last_login TIMESTAMP,
+			level INTEGER DEFAULT 1,
+			experience_points BIGINT DEFAULT 0,
+			currency_amount BIGINT DEFAULT 0,
+			current_position POINT,
+			current_floor INTEGER DEFAULT 0,
+			metadata JSONB
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create players table: %v", err)
+	}
+
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
 			JWTSecret:     "test-secret-key-for-testing-only",
@@ -383,6 +438,24 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 func TestWebSocketHandlers_handlePing(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
+
+	// Create chunks table (needed for WebSocket handlers initialization)
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chunks (
+			id SERIAL PRIMARY KEY,
+			floor INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			version INTEGER DEFAULT 1,
+			last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_dirty BOOLEAN DEFAULT FALSE,
+			procedural_seed INTEGER,
+			metadata JSONB,
+			UNIQUE(floor, chunk_index)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create chunks table: %v", err)
+	}
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
@@ -608,14 +681,8 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Ensure PostGIS extension is available
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis")
-	if err != nil {
-		t.Skipf("PostGIS extension not available: %v", err)
-	}
-
 	// Create chunks table with full schema
-	_, err = db.Exec(`
+	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS chunks (
 			id SERIAL PRIMARY KEY,
 			floor INTEGER NOT NULL,
