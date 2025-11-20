@@ -4,9 +4,15 @@
  */
 
 import { getAPIURL } from '../config.js';
-import { getAccessToken } from '../auth/auth-service.js';
+import { getAccessToken, ensureValidToken } from '../auth/auth-service.js';
 
 async function authorizedRequest(path, { method = 'GET', body } = {}) {
+  // Ensure token is valid before making request
+  const tokenValid = await ensureValidToken();
+  if (!tokenValid) {
+    throw new Error('Not authenticated. Please log in again.');
+  }
+
   const token = getAccessToken();
   if (!token) {
     throw new Error('Not authenticated');
@@ -22,6 +28,41 @@ async function authorizedRequest(path, { method = 'GET', body } = {}) {
   });
 
   if (!response.ok) {
+    // Handle 401 Unauthorized - token expired or invalid
+    if (response.status === 401) {
+      // Try to refresh token once
+      const refreshed = await ensureValidToken();
+      if (!refreshed) {
+        throw new Error('Session expired. Please log in again.');
+      }
+      // Retry request with new token
+      const newToken = getAccessToken();
+      const retryResponse = await fetch(getAPIURL(path), {
+        method,
+        headers: {
+          'Authorization': `Bearer ${newToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      
+      if (!retryResponse.ok) {
+        let errorMessage = `Request failed (${retryResponse.status})`;
+        try {
+          const error = await retryResponse.json();
+          errorMessage = error.message || error.error || errorMessage;
+        } catch (err) {
+          errorMessage = `${errorMessage}: ${retryResponse.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      if (retryResponse.status === 204) {
+        return null;
+      }
+      return await retryResponse.json();
+    }
+    
     let errorMessage = `Request failed (${response.status})`;
     try {
       const error = await response.json();

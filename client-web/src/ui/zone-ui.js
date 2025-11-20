@@ -4,7 +4,7 @@
  */
 
 import { isAuthenticated, getCurrentUser } from '../auth/auth-service.js';
-import { createZone, fetchZonesByOwner } from '../api/zone-service.js';
+import { createZone, fetchZonesByOwner, deleteZone } from '../api/zone-service.js';
 
 let zonePanel = null;
 
@@ -82,6 +82,7 @@ export function showZonePanel() {
             </label>
             <button type="submit" class="action-button">Fetch Zones</button>
           </form>
+          <div id="zone-list" class="zone-list"></div>
           <div id="zone-owner-result" class="result-display"></div>
         </section>
       </div>
@@ -216,6 +217,48 @@ export function showZonePanel() {
       border-color: #f44336;
       color: #ff8a80;
     }
+    .zone-list {
+      margin-top: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .zone-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 6px;
+    }
+    .zone-item-info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      color: #ccc;
+      font-size: 0.9rem;
+    }
+    .zone-item-info strong {
+      color: #fff;
+    }
+    .zone-type, .zone-floor {
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .delete-button {
+      padding: 0.5rem 1rem;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .delete-button:hover {
+      background: #d32f2f;
+    }
   `;
 
   document.head.appendChild(style);
@@ -232,6 +275,8 @@ export function hideZonePanel() {
 }
 
 function setupZonePanelListeners() {
+  const zoneList = document.getElementById('zone-list');
+  
   document.getElementById('zone-panel-close').addEventListener('click', hideZonePanel);
 
   document.getElementById('zone-refresh-camera').addEventListener('click', async () => {
@@ -296,6 +341,7 @@ function setupZonePanelListeners() {
 
     result.textContent = 'Loading zones...';
     result.className = 'result-display show';
+    zoneList.innerHTML = '';
 
     try {
       const zones = await fetchZonesByOwner(ownerID);
@@ -303,14 +349,64 @@ function setupZonePanelListeners() {
         result.textContent = 'No zones found for this owner.';
         result.className = 'result-display show';
       } else {
-        result.textContent = JSON.stringify(zones, null, 2);
+        result.textContent = `Found ${zones.length} zone(s)`;
         result.className = 'result-display show success';
+        
+        // Display zones with delete buttons
+        zones.forEach(zone => {
+          const zoneItem = document.createElement('div');
+          zoneItem.className = 'zone-item';
+          zoneItem.innerHTML = `
+            <div class="zone-item-info">
+              <strong>${zone.name || `Zone ${zone.id}`}</strong>
+              <span class="zone-type">${zone.zone_type || 'default'}</span>
+              <span class="zone-floor">Floor ${zone.floor ?? 0}</span>
+            </div>
+            <button class="delete-button" data-zone-id="${zone.id}">Delete</button>
+          `;
+          zoneList.appendChild(zoneItem);
+        });
       }
     } catch (error) {
       result.textContent = `Error: ${error.message}`;
       result.className = 'result-display show error';
     }
   });
+
+  // Handle delete button clicks (use event delegation)
+  if (zoneList) {
+    zoneList.addEventListener('click', async (event) => {
+    if (event.target.classList.contains('delete-button')) {
+      const zoneID = parseInt(event.target.getAttribute('data-zone-id'), 10);
+      if (!confirm(`Are you sure you want to delete zone ${zoneID}?`)) {
+        return;
+      }
+
+      try {
+        await deleteZone(zoneID);
+        // Remove zone from UI
+        event.target.closest('.zone-item').remove();
+        // Remove zone from game state and scene
+        const zoneManager = window.earthring?.zoneManager;
+        const gameStateManager = window.earthring?.gameStateManager;
+        if (gameStateManager) {
+          gameStateManager.removeZone(zoneID);
+        }
+        if (zoneManager) {
+          zoneManager.removeZone(zoneID);
+        }
+        // Update result message
+        const result = document.getElementById('zone-owner-result');
+        result.textContent = `Zone ${zoneID} deleted successfully.`;
+        result.className = 'result-display show success';
+      } catch (error) {
+        const result = document.getElementById('zone-owner-result');
+        result.textContent = `Error deleting zone: ${error.message}`;
+        result.className = 'result-display show error';
+      }
+    }
+    });
+  }
 }
 
 function rectangleGeoJSON(centerX, centerY, length, width) {

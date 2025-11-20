@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -16,6 +17,7 @@ import (
 var (
 	envLoaded  bool
 	envLoadMux sync.Mutex
+	dbSetupMux sync.Mutex // Serialize database setup to prevent race conditions
 )
 
 // loadEnv loads .env file if not already loaded
@@ -108,8 +110,13 @@ func (c TestDBConfig) DatabaseURL() string {
 
 // SetupTestDB creates a test database connection and sets up PostGIS
 // Returns a connection that should be closed after tests
+// Uses a mutex to serialize database setup and prevent race conditions when tests run in parallel
 func SetupTestDB(t *testing.T) *sql.DB {
 	cfg := DefaultTestDBConfig()
+
+	// Serialize database setup to prevent race conditions
+	dbSetupMux.Lock()
+	defer dbSetupMux.Unlock()
 
 	// Connect to postgres database first to create test database
 	adminURL := fmt.Sprintf(
@@ -127,11 +134,106 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		}
 	}()
 
-	// Create test database if it doesn't exist
-	_, err = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database))
-	if err != nil {
-		// Database might already exist, which is fine
-		t.Logf("Test database creation: %v (may already exist)", err)
+	// Check if test database exists and terminate any existing connections
+	// This is necessary before we can drop it
+	checkDBQuery := fmt.Sprintf(`
+		SELECT 1 FROM pg_database WHERE datname = '%s'
+	`, cfg.Database)
+	var dbExists bool
+	err = adminDB.QueryRow(checkDBQuery).Scan(&dbExists)
+	if err != nil && err != sql.ErrNoRows {
+		t.Logf("Note: Could not check if database exists: %v", err)
+	}
+
+	if dbExists {
+		// Terminate any existing connections to the test database
+		// Use pg_terminate_backend to force disconnect all sessions
+		terminateQuery := fmt.Sprintf(`
+			SELECT pg_terminate_backend(pg_stat_activity.pid)
+			FROM pg_stat_activity
+			WHERE pg_stat_activity.datname = '%s'
+			AND pid <> pg_backend_pid()
+		`, cfg.Database)
+		if _, err := adminDB.Exec(terminateQuery); err != nil {
+			t.Logf("Note: Terminating connections (may fail if no connections exist): %v", err)
+		}
+
+		// Also try to revoke connect privileges to prevent new connections
+		revokeQuery := fmt.Sprintf(`
+			REVOKE CONNECT ON DATABASE %s FROM public
+		`, cfg.Database)
+		if _, err := adminDB.Exec(revokeQuery); err != nil {
+			t.Logf("Note: Revoking connect privileges (may fail): %v", err)
+		}
+
+		// Drop test database if it exists (to ensure clean state)
+		// Retry logic to handle race conditions with parallel tests
+		maxRetries := 3
+		var dropErr error
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", cfg.Database))
+			if dropErr == nil {
+				break // Successfully dropped
+			}
+
+			// If drop fails, try terminating connections again and wait a bit
+			if attempt < maxRetries-1 {
+				t.Logf("Warning: Drop attempt %d failed: %v, retrying after re-terminating connections...", attempt+1, dropErr)
+				// Terminate connections again
+				if _, termErr := adminDB.Exec(terminateQuery); termErr != nil {
+					t.Logf("Note: Re-terminating connections: %v", termErr)
+				}
+				// Wait a bit for connections to close
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		if dropErr != nil {
+			// Last resort: try with FORCE if supported (PostgreSQL 13+)
+			_, dropErr = adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", cfg.Database))
+			if dropErr != nil {
+				t.Fatalf("Failed to drop test database after %d attempts: %v", maxRetries, dropErr)
+			}
+		}
+
+		// Wait a moment to ensure database is fully dropped before creating
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Create test database fresh
+	// Retry creation in case of race conditions with parallel tests
+	maxCreateRetries := 3
+	var createErr error
+	for attempt := 0; attempt < maxCreateRetries; attempt++ {
+		_, createErr = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database))
+		if createErr == nil {
+			break // Successfully created
+		}
+
+		// Check if database already exists (another test might have created it)
+		var exists bool
+		checkErr := adminDB.QueryRow(checkDBQuery).Scan(&exists)
+		if checkErr == nil && exists {
+			// Database exists, which is fine - another test created it
+			// We'll use the existing database
+			break
+		}
+
+		// If creation failed and database doesn't exist, wait and retry
+		if attempt < maxCreateRetries-1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	if createErr != nil {
+		// Check one more time if database exists
+		var exists bool
+		checkErr := adminDB.QueryRow(checkDBQuery).Scan(&exists)
+		if checkErr == nil && exists {
+			// Database exists now, use it - no error to report
+		} else {
+			t.Fatalf("Failed to create test database after %d attempts: %v", maxCreateRetries, createErr)
+		}
 	}
 
 	// Connect to test database

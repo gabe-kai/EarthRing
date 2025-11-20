@@ -16,11 +16,19 @@ EarthRing is set on a massive orbital ring structure:
 
 ## Current Client Features
 
-- **Keyboard-relative camera movement**: WASD (forward/backward along camera view, left/right strafe), QE (vertical up/down), and OrbitControls can be used simultaneously. Movement is relative to camera orientation. Input is suppressed automatically while typing in UI fields.
+- **Camera controls**: 
+  - **WASD**: Move camera forward, left, backward, right (maintains elevation, horizontal movement only)
+  - **Mouse Scroll Wheel**: Zoom in/out
+  - **Middle Mouse Button (Hold)**: Pan and tilt camera
+  - **Q/E**: Rotate camera counter-clockwise/clockwise around target
+  - **R/F**: Pan camera up/down (vertical movement)
+  - **PageUp/PageDown**: Zoom in/out (keyboard alternative)
+  - **Elevation-based speed**: Movement speed scales with camera height (slower near ground for precise building placement, faster at higher elevations for quick navigation)
+  - Input is suppressed automatically while typing in UI fields
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
-- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A left-side toolbar provides controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted). Zones remain fully visible regardless of camera position, while the grid fades around the camera.
+- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A left-side toolbar provides controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor panel includes create, update, and delete functionality.
 
 ## Prerequisites
 
