@@ -7,7 +7,10 @@
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as THREE from 'three';
 import { setCameraPositionFromEarthRing, getEarthRingPositionFromCamera } from '../utils/rendering.js';
-import { toThreeJS, wrapRingPosition } from '../utils/coordinates.js';
+import { toThreeJS, wrapRingPosition, DEFAULT_FLOOR_HEIGHT, fromThreeJS } from '../utils/coordinates.js';
+
+const CAMERA_MIN_CLEARANCE = 2; // meters above current floor plane
+const POLAR_EPSILON = 0.01;
 
 /**
  * Camera Controller class
@@ -15,10 +18,11 @@ import { toThreeJS, wrapRingPosition } from '../utils/coordinates.js';
  * Includes keyboard movement controls for exploring the ring
  */
 export class CameraController {
-  constructor(camera, renderer, sceneManager) {
+  constructor(camera, renderer, sceneManager, gameStateManager) {
     this.camera = camera;
     this.renderer = renderer;
     this.sceneManager = sceneManager;
+    this.gameStateManager = gameStateManager;
     
     // Create OrbitControls
     this.controls = new OrbitControls(camera, renderer.domElement);
@@ -61,10 +65,9 @@ export class CameraController {
     // Enable panning
     this.controls.enablePan = true;
     
-    // Set rotation limits (optional - can be adjusted based on game needs)
-    // For a ring world, we might want to limit vertical rotation
-    // this.controls.minPolarAngle = Math.PI / 6; // 30 degrees
-    // this.controls.maxPolarAngle = Math.PI / 2; // 90 degrees
+    // Limit rotation so camera stays above the floor plane (horizontal to straight-down)
+    this.controls.minPolarAngle = POLAR_EPSILON; // Slightly above straight down
+    this.controls.maxPolarAngle = Math.PI / 2 - POLAR_EPSILON; // Just shy of horizontal
     
     // Set auto-rotate (optional - can be enabled for cinematic views)
     this.controls.autoRotate = false;
@@ -76,11 +79,87 @@ export class CameraController {
   }
   
   /**
+   * Get the current floor from player state (defaults to 0 if not available)
+   * @returns {number} Current floor number
+   */
+  getCurrentFloor() {
+    if (!this.gameStateManager) {
+      return 0;
+    }
+    const playerState = this.gameStateManager.getPlayerState();
+    if (!playerState || !playerState.position) {
+      return 0;
+    }
+    // Floor is the Z coordinate, round to nearest integer
+    return Math.round(playerState.position.z);
+  }
+
+  /**
+   * Get the base height (in meters) of the current floor.
+   * @returns {number}
+   */
+  getCurrentFloorBaseHeight() {
+    return this.getCurrentFloor() * DEFAULT_FLOOR_HEIGHT;
+  }
+
+  /**
+   * Minimum camera height (floor base + clearance)
+   * @returns {number}
+   */
+  getMinCameraHeight() {
+    return this.getCurrentFloorBaseHeight() + CAMERA_MIN_CLEARANCE;
+  }
+
+  /**
+   * Clamp Z position to not go below the current floor
+   * @param {Object} earthringPosition - EarthRing position {x, y, z}
+   * @returns {Object} Clamped EarthRing position
+   */
+  clampToFloor(earthringPosition) {
+    const minZ = this.getCurrentFloor() + CAMERA_MIN_CLEARANCE / DEFAULT_FLOOR_HEIGHT;
+    if (earthringPosition.z < minZ) {
+      earthringPosition.z = minZ;
+    }
+    return earthringPosition;
+  }
+
+  /**
+   * Ensure the OrbitControls target stays at or above the active floor plane.
+   */
+  clampTargetHeight() {
+    const minTargetHeight = this.getCurrentFloorBaseHeight();
+    if (this.controls.target.y < minTargetHeight) {
+      this.controls.target.y = minTargetHeight;
+    }
+  }
+
+  /**
+   * Clamp the camera's world-space height to stay above the floor plane.
+   */
+  clampCameraHeight() {
+    const minHeight = this.getMinCameraHeight();
+    if (this.camera.position.y < minHeight) {
+      this.camera.position.y = minHeight;
+    }
+  }
+
+  /**
+   * Clamp both camera and target heights.
+   */
+  clampHeights() {
+    this.clampTargetHeight();
+    this.clampCameraHeight();
+  }
+
+  /**
    * Set camera position using EarthRing coordinates
    * @param {Object} earthringPosition - EarthRing position {x, y, z}
    */
   setPositionFromEarthRing(earthringPosition) {
-    setCameraPositionFromEarthRing(this.camera, earthringPosition);
+    // Clamp Z to not go below current floor
+    const clamped = this.clampToFloor({ ...earthringPosition });
+    setCameraPositionFromEarthRing(this.camera, clamped);
+    this.clampCameraHeight();
     this.controls.update();
   }
   
@@ -91,6 +170,29 @@ export class CameraController {
   getEarthRingPosition() {
     return getEarthRingPositionFromCamera(this.camera);
   }
+
+  /**
+   * Get the OrbitControls target in EarthRing coordinates.
+   * @returns {Object} EarthRing position {x, y, z}
+   */
+  getTargetEarthRingPosition() {
+    const target = this.controls.target;
+    const earthTarget = fromThreeJS({
+      x: target.x,
+      y: target.y,
+      z: target.z,
+    });
+    earthTarget.x = wrapRingPosition(earthTarget.x);
+    return earthTarget;
+  }
+
+  /**
+   * Get the OrbitControls target in Three.js coordinates.
+   * @returns {THREE.Vector3}
+   */
+  getTargetThreePosition() {
+    return this.controls.target.clone();
+  }
   
   /**
    * Set controls target using EarthRing coordinates
@@ -99,6 +201,7 @@ export class CameraController {
   setTargetFromEarthRing(earthringPosition) {
     const threeJSPos = toThreeJS(earthringPosition);
     this.controls.target.set(threeJSPos.x, threeJSPos.y, threeJSPos.z);
+    this.clampTargetHeight();
     this.controls.update();
   }
   
@@ -273,6 +376,7 @@ export class CameraController {
     if (movement.length() > 0) {
       this.camera.position.add(movement);
       this.controls.target.add(movement);
+      this.clampHeights();
     }
   }
   
@@ -288,6 +392,7 @@ export class CameraController {
     
     // Update OrbitControls
     this.controls.update();
+    this.clampHeights();
   }
   
   /**
@@ -305,6 +410,7 @@ export class CameraController {
     const defaultPosition = { x: 1000, y: 0, z: 0 };
     this.setPositionFromEarthRing(defaultPosition);
     this.controls.target.set(0, 0, 0);
+    this.clampHeights();
     this.controls.update();
   }
   
@@ -367,8 +473,11 @@ export class CameraController {
       // Wrap ring position
       currentPos.x = wrapRingPosition(currentPos.x);
       
-      this.setPositionFromEarthRing(currentPos);
-      this.setTargetFromEarthRing(currentPos);
+      // Clamp Z to current floor (setPositionFromEarthRing will handle this, but we do it here too for consistency)
+      const clamped = this.clampToFloor(currentPos);
+      
+      this.setPositionFromEarthRing(clamped);
+      this.setTargetFromEarthRing(clamped);
       
       if (progress < 1) {
         requestAnimationFrame(animate);

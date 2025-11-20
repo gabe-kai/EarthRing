@@ -18,7 +18,7 @@
 
 This document outlines the implementation plan for EarthRing, tracking progress, decisions, and next steps. All critical architectural decisions have been made and documented. The project has completed the design and planning phases and is currently implementing Phase 2 (Map System Foundation).
 
-**Project Status**: Design Complete → Planning Complete → Implementation In Progress (Phase 2: Map System Foundation)
+**Project Status**: Design Complete → Planning Complete → Implementation In Progress (Phase 3: Zone System)
 
 ## Current Status
 
@@ -42,14 +42,15 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Project structure initialized (directories created)
 
 **In Progress:**
-- ⏳ Phase 2: Map System Foundation implementation
+- ⏳ Phase 3: Zone System implementation (database layer, REST API, client rendering, and toolbar UI complete; advanced editor + overlap rules pending)
 
 **Status Summary:**
 - **Design Phase**: ✅ Complete (13 documents)
 - **Planning Phase**: ✅ Complete (6 of 6 technical specs done)
 - **Foundation Phase**: ✅ Complete (Phase 0 - all setup tasks done)
 - **Phase 1 (Core Infrastructure)**: ✅ Complete
-- **Implementation Phase**: ⏳ In Progress (Phase 2 - Map System Foundation)
+- **Phase 2 (Map System Foundation)**: ✅ Complete
+- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI complete; advanced editor + conflict resolution upcoming)
 
 ## Implementation Phases
 
@@ -158,21 +159,30 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 ### Phase 3: Zone System (Weeks 9-12)
 **Goal**: Implement player zone creation and management.
 
-**Priority Order:**
-1. Zone creation API and validation (polygon validation, constraints)
-2. Zone storage in database (PostGIS polygons, spatial indexes)
-3. Zone rendering in client (polygon overlay, visual feedback)
-4. Zone editor UI (draw/edit polygons, vertex manipulation)
-5. Zone overlap detection and conflict resolution (importance system, court ruling)
-6. Zone-to-chunk relationship mapping (spatial queries, chunk updates)
+**Completed to date:**
+1. ✅ Zone creation API and validation (GeoJSON polygons validated server-side, PostGIS constraints)
+2. ✅ Zone storage in database (new `ZoneStorage`, spatial indexes, area queries, owner filters)
+3. ✅ Zone rendering in client (world-anchored meshes with ring wrapping, translucent fills with colored outlines)
+4. ✅ Grid overlay system (250m circular grid with fade-out, separate from zones, world-aligned texture)
+5. ✅ Zones toolbar UI (left-side expandable toolbar with grid visibility and per-zone-type visibility toggles)
+6. ✅ Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+7. ✅ Restricted zone type (red overlay for preventing/limiting procedural spawning)
+8. ✅ Zone UI panel (create, get, update, delete zones via REST API)
+9. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
 
-**Deliverables:**
-- Players can create zones (freeform polygons, various zone types)
-- Zones are stored and rendered correctly (PostGIS storage, client visualization)
-- Zone conflicts are resolved (importance system, court ruling for ties)
-- Zone editor is functional (draw, edit vertices, delete zones)
-- Zones span chunks correctly (multi-chunk zones work seamlessly)
-- Zone types supported (residential, commercial, industrial, mixed-use, parks, etc.)
+**In Progress / Upcoming:**
+10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
+11. Zone overlap detection / importance scoring / conflict resolution
+12. Zone-to-chunk relationship mapping and chunk-based visual feedback
+
+**Deliverables (Phase End Target):**
+- ✅ Players can create zones (freeform polygons, various zone types) - **COMPLETE**
+- ✅ Zones are stored and rendered correctly (PostGIS storage, client visualization) - **COMPLETE**
+- ✅ Zones toolbar with visibility controls (grid and per-type toggles) - **COMPLETE**
+- ✅ Zone types supported (residential, commercial, industrial, mixed-use, park, restricted) - **COMPLETE**
+- ⏳ Zone conflicts are resolved (importance system, court ruling for ties) - **PENDING**
+- ⏳ Zone editor is functional (draw, edit vertices, delete zones) - **PENDING**
+- ✅ Zones span chunks correctly (multi-chunk zones work seamlessly via ring wrapping) - **COMPLETE**
 
 **Dependencies**: Phase 2 complete
 
@@ -717,7 +727,7 @@ EarthRing has completed its design and planning phases with comprehensive docume
 - ✅ Phase 1 (Core Infrastructure): Complete (authentication, REST API, WebSocket, client structure, coordinate conversion)
 - ✅ Phase 2 (Map System Foundation): Complete (all deliverables including chunk compression/decompression complete)
 
-**Next Milestone**: Begin Phase 3 (Zone System).
+**Next Milestone**: Complete Phase 3 (advanced zone editor tooling, overlap/conflict handling, chunk-to-zone integration).
 
 **Progress Tracking:**
 - Design Phase: ✅ 100% Complete

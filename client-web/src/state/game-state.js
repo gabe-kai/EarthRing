@@ -13,6 +13,9 @@ export class GameStateManager {
     // chunkID format: "floor_chunk_index" (e.g., "0_12345")
     this.chunks = new Map();
     
+    // Zone cache: Map<zoneID, zoneData>
+    this.zones = new Map();
+    
     // Player state
     this.playerState = {
       id: null,
@@ -40,6 +43,10 @@ export class GameStateManager {
       chunkRemoved: [],
       playerStateChanged: [],
       connectionStateChanged: [],
+      zoneAdded: [],
+      zoneUpdated: [],
+      zoneRemoved: [],
+      zonesCleared: [],
     };
   }
   
@@ -100,6 +107,97 @@ export class GameStateManager {
     chunkIDs.forEach(chunkID => {
       this.emit('chunkRemoved', { chunkID });
     });
+  }
+
+  /**
+   * Replace the zone cache with the provided list.
+   * Emits add/update/remove events based on differences.
+   * @param {Array<Object>} zones
+   */
+  setZones(zones = []) {
+    if (!Array.isArray(zones)) {
+      return;
+    }
+
+    const incomingIDs = new Set();
+
+    zones.forEach(zone => {
+      if (!zone || typeof zone.id === 'undefined') {
+        return;
+      }
+      incomingIDs.add(zone.id);
+      if (this.zones.has(zone.id)) {
+        this.zones.set(zone.id, zone);
+        this.emit('zoneUpdated', { zone });
+      } else {
+        this.zones.set(zone.id, zone);
+        this.emit('zoneAdded', { zone });
+      }
+    });
+
+    // Remove zones that are no longer present
+    Array.from(this.zones.keys()).forEach(zoneID => {
+      if (!incomingIDs.has(zoneID)) {
+        const removedZone = this.zones.get(zoneID);
+        this.zones.delete(zoneID);
+        this.emit('zoneRemoved', { zoneID, zone: removedZone });
+      }
+    });
+  }
+
+  /**
+   * Add or update a single zone in the cache.
+   * @param {Object} zone
+   */
+  upsertZone(zone) {
+    if (!zone || typeof zone.id === 'undefined') {
+      return;
+    }
+    const exists = this.zones.has(zone.id);
+    this.zones.set(zone.id, zone);
+    this.emit(exists ? 'zoneUpdated' : 'zoneAdded', { zone });
+  }
+
+  /**
+   * Remove a zone by ID.
+   * @param {number|string} zoneID
+   */
+  removeZone(zoneID) {
+    if (!this.zones.has(zoneID)) {
+      return false;
+    }
+    const removedZone = this.zones.get(zoneID);
+    this.zones.delete(zoneID);
+    this.emit('zoneRemoved', { zoneID, zone: removedZone });
+    return true;
+  }
+
+  /**
+   * Clear all zones from cache.
+   */
+  clearZones() {
+    if (this.zones.size === 0) {
+      return;
+    }
+    this.zones.clear();
+    this.emit('zonesCleared');
+  }
+
+  /**
+   * Get a zone by ID.
+   * @param {number|string} zoneID
+   * @returns {Object|null}
+   */
+  getZone(zoneID) {
+    return this.zones.get(zoneID) || null;
+  }
+
+  /**
+   * Get all zones as an array.
+   * @returns {Array<Object>}
+   */
+  getAllZones() {
+    return Array.from(this.zones.values());
   }
   
   /**
@@ -191,6 +289,7 @@ export class GameStateManager {
    */
   reset() {
     this.clearChunks();
+    this.clearZones();
     this.playerState = {
       id: null,
       username: null,

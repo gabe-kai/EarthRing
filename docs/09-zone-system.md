@@ -96,7 +96,13 @@ Players can create zones of various types with freeform polygon shapes:
    - NPC Behavior: NPCs visit for recreation, improves happiness
    - Special: No buildings, only recreational structures
 
-8. **Special Purpose Zones**
+8. **Restricted Zones**
+   - Purpose: Prevent or limit procedural spawning
+   - Characteristics: Red overlay indicating restricted area
+   - NPC Behavior: No procedural generation, may limit NPC access
+   - Special: Used to mark areas where procedural generation should not occur
+
+9. **Special Purpose Zones**
    - Purpose: Custom player-defined purposes
    - Characteristics: Player-defined rules and properties
    - NPC Behavior: Customizable
@@ -567,6 +573,66 @@ Players can modify their zones:
 - May have buildable areas
 - Roads must respect pillar structure
 
+## Client-Side Implementation
+
+### Zone Rendering Architecture
+
+**Current Implementation** (see `docs/06-client-architecture.md` for full details):
+
+- **World-Anchored Meshes**: Zones are rendered as separate Three.js meshes positioned at their actual world coordinates, not relative to the camera. This ensures zones stay fixed to their locations on the ring.
+
+- **Ring Wrapping**: Zones wrap around the 264,000 km ring circumference using the same logic as chunks. The `wrapZoneX()` function calculates the shortest path around the ring, ensuring zones always render at the copy closest to the camera.
+
+- **Coordinate Conversion**: Zone coordinates (EarthRing X/Y/Z) are converted to Three.js coordinates:
+  - EarthRing X (ring position) → Three.js X (right)
+  - EarthRing Y (width) → Three.js Z (forward)  
+  - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
+
+- **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). Fetching is throttled to once per 4 seconds to prevent excessive API calls.
+
+- **Visibility System**: Two-level visibility control:
+  - Global visibility: All zones on/off
+  - Per-type visibility: Individual zone types can be shown/hidden independently
+  - Zones toolbar provides UI controls for both levels
+
+- **Grid Overlay Separation**: Grid is rendered separately as a circular canvas texture that fades at edges. Zones are NOT part of the grid texture, allowing zones to remain fully visible while grid fades.
+
+### Zone Type Support
+
+**Implemented Zone Types:**
+- `residential` - Green overlay
+- `commercial` - Blue overlay
+- `industrial` - Orange overlay
+- `mixed-use` / `mixed_use` - Yellow-orange gradient overlay
+- `park` - Light green overlay
+- `restricted` - Red overlay (prevents procedural spawning)
+
+**Adding New Zone Types:**
+1. Add color/style to `ZONE_STYLES` in `zone-manager.js`
+2. Add to `zoneTypeVisibility` Map in constructor
+3. Add to zones toolbar `zoneTypes` array
+4. Update server-side validation if needed
+
+### Troubleshooting Client-Side Issues
+
+**Zones Not Appearing:**
+- Check authentication: User must be logged in
+- Check fetch throttling: Wait 4 seconds between manual fetches
+- Check visibility: Both global and per-type visibility must be enabled
+- Check console: Use `zoneManager.logZoneState()` for debug info
+- Verify zone data: Check `gameStateManager.getAllZones()` for cached zones
+
+**Zones Moving with Camera:**
+- Indicates ring wrapping logic failure
+- Verify camera position retrieval: `cameraController.getEarthRingPosition()`
+- Check that zone coordinates are in EarthRing space before wrapping
+
+**Performance Issues:**
+- Current implementation handles ~100 zones efficiently
+- Each zone creates 2-3 meshes (fill + outline per polygon)
+- Reduce fetch range or increase throttle if needed
+- Monitor mesh count: `zoneManager.zoneMeshes.size`
+
 ## Performance Considerations
 
 ### Zone Queries
@@ -574,6 +640,14 @@ Players can modify their zones:
 - Spatial indexing (GIST) for fast point-in-polygon queries
 - Cache zone lookups for frequently accessed positions
 - Batch zone queries when possible
+- Client-side fetch throttling (4 second minimum between requests)
+
+### Client-Side Rendering
+
+- Zone meshes use `depthWrite: false` and `depthTest: false` to prevent z-fighting
+- Render order: Zones (`renderOrder = 5`) above grid (`renderOrder = 1`)
+- Mesh cleanup: Zones are properly disposed when removed
+- Performance target: ~100 zones rendered simultaneously without frame drops
 
 ### Transportation Generation
 
@@ -588,6 +662,7 @@ Players can modify their zones:
 - Validate polygons on creation/modification
 - Check for overlaps and conflicts
 - Optimize validation algorithms
+- Server-side validation ensures GeoJSON validity before storage
 
 ## Open Questions
 

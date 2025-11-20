@@ -59,6 +59,7 @@ func main() {
 
 	// Set up chunk metadata routes
 	api.SetupChunkRoutes(mux, db, cfg)
+	api.SetupZoneRoutes(mux, db, cfg)
 
 	// Apply global rate limiting (1000 requests per minute per IP)
 	// This applies to all routes after auth routes are set up

@@ -271,6 +271,37 @@ Response: {
 }
 ```
 
+#### Get Zones by Owner
+```
+GET /api/zones/owner/{owner_id}
+Headers: Authorization
+Response: [
+  {
+    "id": 456,
+    "name": "Downtown District",
+    "zone_type": "commercial",
+    "floor": 0,
+    "owner_id": 123,
+    "geometry": {... GeoJSON ...},
+    "area": 215000.0,
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+- Restricted to the authenticated owner's ID (users can only view their own zones).
+- Useful for tooling/overlays that need a player's personal zone list.
+
+**Zone Types:**
+- Supported zone types: `residential`, `commercial`, `industrial`, `mixed-use` (or `mixed_use`), `park`, `restricted`
+- `restricted` zones are used to prevent or limit procedural spawning in designated areas
+- Zone types are case-insensitive and normalized server-side
+
+**Zone Geometry Notes:**
+- All zone create/update requests accept GeoJSON `Polygon` or `MultiPolygon` payloads.
+- Responses return geometry as GeoJSON plus a computed `area` (via PostGIS) to assist client-side visualization.
+- Invalid GeoJSON (self-intersections, unclosed rings, unsupported types) results in `INVALID_ZONE` errors.
+
 ### Structure Management
 
 #### Place Structure
