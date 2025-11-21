@@ -489,6 +489,7 @@ gridOverlay.setVisible(false); // Hide grid
      - EarthRing Y (width) → Three.js Z (forward)
      - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
    - Shape geometry uses X/Z plane (horizontal), then rotated -90° around X-axis to lie flat
+   - **Negative Y Coordinate Handling**: When EarthRing Y coordinates are negative (Y- side of ring), the shape's Y coordinate (`worldPos.z`) is negated before creating the shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis.
 
 4. **Fetching and Caching:**
    - Zones are fetched via `GET /api/zones/area` with a bounding box around the camera

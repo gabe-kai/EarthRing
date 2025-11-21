@@ -1,7 +1,7 @@
 import { fetchZonesByArea } from '../api/zone-service.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 import * as THREE from 'three';
-import { toThreeJS, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
+import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates.js';
 
 const DEFAULT_ZONE_RANGE = 5000; // meters along ring
 const DEFAULT_WIDTH_RANGE = 3000; // meters across width
@@ -35,6 +35,9 @@ export class ZoneManager {
     this.zoneMeshes = new Map(); // Map<zoneID, THREE.Group>
     this.highlightedZones = new Set(); // Set of highlighted zone IDs
     this.lastError = { message: null, timestamp: 0 };
+    // Track last camera position for re-rendering wrapped zones
+    this.lastCameraX = null;
+    this.WRAP_RE_RENDER_THRESHOLD = 5000; // Re-render if camera moved more than 5km
     // Per-type visibility: Map<zoneType, boolean>
     this.zoneTypeVisibility = new Map([
       ['residential', true],
@@ -65,12 +68,48 @@ export class ZoneManager {
     if (now - this.lastFetchTime < this.fetchThrottleMs) {
       return;
     }
+    
+    // Validate range to prevent invalid bounding boxes
+    const RING_CIRCUMFERENCE = 264000000;
+    if (range <= 0 || range > RING_CIRCUMFERENCE / 2) {
+      console.warn(`Invalid zone range: ${range}, clamping to valid range`);
+      range = Math.min(Math.max(range, 100), RING_CIRCUMFERENCE / 2 - 1000);
+    }
 
     const cameraPos = this.cameraController.getEarthRingPosition();
     const floor = 0; // Force floor 0 fetch until multi-floor zones are supported client-side
 
-    const minX = cameraPos.x - range;
-    const maxX = cameraPos.x + range;
+    // Wrap camera X to valid range before calculating bounds
+    const cameraXWrapped = wrapRingPosition(cameraPos.x);
+    
+    // Calculate bounds relative to wrapped camera position
+    let minX = cameraXWrapped - range;
+    let maxX = cameraXWrapped + range;
+    
+    // Handle wrap-around: ensure minX < maxX after wrapping
+    // If wrapping causes minX > maxX, clamp to valid range
+    if (minX < 0) {
+      minX = wrapRingPosition(minX);
+    }
+    if (maxX >= RING_CIRCUMFERENCE) {
+      maxX = wrapRingPosition(maxX);
+    }
+    
+    // Ensure minX < maxX (if wrapping caused inversion, clamp to valid range)
+    if (minX >= maxX) {
+      // This happens when the range wraps around the ring boundary
+      // Clamp to valid range: [0, RING_CIRCUMFERENCE)
+      minX = Math.max(0, cameraXWrapped - range);
+      maxX = Math.min(RING_CIRCUMFERENCE, cameraXWrapped + range);
+      // Ensure they're still valid
+      if (minX >= maxX) {
+        // Fallback: use a smaller range centered on camera
+        const safeRange = Math.min(range, RING_CIRCUMFERENCE / 2 - 1);
+        minX = Math.max(0, cameraXWrapped - safeRange);
+        maxX = Math.min(RING_CIRCUMFERENCE, cameraXWrapped + safeRange);
+      }
+    }
+    
     const minY = cameraPos.y - DEFAULT_WIDTH_RANGE;
     const maxY = cameraPos.y + DEFAULT_WIDTH_RANGE;
 
@@ -94,6 +133,13 @@ export class ZoneManager {
         // Stop making requests when not authenticated
         return;
       }
+      // Don't retry on invalid bounding box or rate limit errors - these indicate a problem with our request
+      if (error.message.includes('invalid bounding box') || error.message.includes('Too many requests')) {
+        this.logErrorOnce(error);
+        // Reset lastFetchTime to prevent immediate retry
+        this.lastFetchTime = performance.now();
+        return;
+      }
       this.logErrorOnce(error);
     } finally {
       this.pendingFetch = false;
@@ -113,8 +159,23 @@ export class ZoneManager {
     }
 
     // Get camera position for wrapping
+    // Wrap camera X to valid range [0, RING_CIRCUMFERENCE) to handle negative/wrapped positions
+    // This is used by wrapZoneX to ensure zones render near the camera
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = cameraPos.x;
+    const cameraX = wrapRingPosition(cameraPos.x);
+
+    // DEBUG: Log rendering
+    if (window.DEBUG_ZONE_COORDS) {
+      const parsedGeometry = zone.geometry ? (typeof zone.geometry === 'string' ? JSON.parse(zone.geometry) : zone.geometry) : null;
+      console.log('[ZoneManager] renderZone:', {
+        zoneId: zone.id,
+        cameraPos: { ...cameraPos },
+        cameraX,
+        cameraXWrapped: wrapRingPosition(cameraPos.x),
+        zoneGeometry: parsedGeometry,
+        firstCoordinate: parsedGeometry?.coordinates?.[0]?.[0],
+      });
+    }
 
     // Normalize zone type (handle both mixed-use and mixed_use)
     let zoneType = (zone.zone_type?.toLowerCase() || 'default');
@@ -144,26 +205,64 @@ export class ZoneManager {
       }
 
       // Wrap zone coordinates relative to camera (like chunks)
+      // NOTE: Zone coordinates from DB are absolute [0, RING_CIRCUMFERENCE)
+      // We wrap them relative to camera for rendering
+      let wrapDebugCount = 0;
       const wrapZoneX = (x) => {
-        const dx = x - cameraX;
-        const half = RING_CIRCUMFERENCE / 2;
-        let adjusted = dx;
-        while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
-        while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
-        return cameraX + adjusted;
+        const wrapped = normalizeRelativeToCamera(x, cameraX);
+        
+        // DEBUG: Log wrapping for first few points
+        if (window.DEBUG_ZONE_COORDS && wrapDebugCount++ < 3) {
+          console.log('[ZoneManager] wrapZoneX:', {
+            absoluteX: x,
+            cameraX,
+            wrapped,
+          });
+        }
+        
+        return wrapped;
       };
 
       // Create shape from outer ring
+      // NOTE: ShapeGeometry creates shapes in the XY plane (Z=0)
+      // We use worldPos.x and worldPos.z to create the shape, then rotate -90° around X
+      // The issue: when EarthRing Y is negative, worldPos.z is negative, and after rotation
+      // the shape faces the wrong direction. Solution: negate worldPos.z for negative Y coordinates
       const shape = new THREE.Shape();
+      
+      // Check if Y coordinates are negative (Y- side of ring)
+      const hasNegativeY = outerRing.some(([_x, y]) => y < 0);
+      
       outerRing.forEach(([x, y], idx) => {
         const wrappedX = wrapZoneX(x);
         const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
+        // Use worldPos.x for shape X
+        // For shape Y, use worldPos.z (EarthRing Y), but negate it if Y is negative
+        // This ensures the shape faces the correct direction after rotation
+        const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
         if (idx === 0) {
-          shape.moveTo(worldPos.x, worldPos.z);
+          shape.moveTo(worldPos.x, shapeY);
         } else {
-          shape.lineTo(worldPos.x, worldPos.z);
+          shape.lineTo(worldPos.x, shapeY);
         }
       });
+      
+      // DEBUG: Log shape creation details
+      if (window.DEBUG_ZONE_COORDS) {
+        const firstCoord = outerRing[0];
+        const lastCoord = outerRing[outerRing.length - 1];
+        const firstWorldPos = toThreeJS({ x: wrapZoneX(firstCoord[0]), y: firstCoord[1], z: floor });
+        const lastWorldPos = toThreeJS({ x: wrapZoneX(lastCoord[0]), y: lastCoord[1], z: floor });
+        console.log('[ZoneManager] Creating shape:', {
+          ringLength: outerRing.length,
+          negatedY: hasNegativeY,
+          firstCoord: { x: firstCoord[0], y: firstCoord[1] },
+          lastCoord: { x: lastCoord[0], y: lastCoord[1] },
+          firstShapePos: { x: firstWorldPos.x, y: hasNegativeY ? -firstWorldPos.z : firstWorldPos.z },
+          lastShapePos: { x: lastWorldPos.x, y: hasNegativeY ? -lastWorldPos.z : lastWorldPos.z },
+          hasNegativeY,
+        });
+      }
 
       // Add holes
       holes.forEach(hole => {
@@ -306,6 +405,57 @@ export class ZoneManager {
     Array.from(this.zoneMeshes.keys()).forEach(zoneID => this.removeZone(zoneID));
     this.zoneMeshes.clear();
     this.highlightedZones.clear();
+  }
+
+  /**
+   * Check if zones need to be re-rendered due to camera movement (for wrapping)
+   * @returns {boolean} True if zones should be re-rendered
+   */
+  shouldReRenderZones() {
+    if (!this.cameraController) {
+      return false;
+    }
+    
+    const cameraPos = this.cameraController.getEarthRingPosition();
+    const currentCameraX = cameraPos.x || 0;
+    
+    if (this.lastCameraX === null) {
+      this.lastCameraX = currentCameraX;
+      return false;
+    }
+    
+    // Calculate distance moved (accounting for wrapping)
+    const directDistance = Math.abs(currentCameraX - this.lastCameraX);
+    const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+    const distanceMoved = Math.min(directDistance, wrappedDistance);
+    
+    if (distanceMoved > this.WRAP_RE_RENDER_THRESHOLD) {
+      this.lastCameraX = currentCameraX;
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Re-render all loaded zones (useful when camera moves significantly for wrapping)
+   * This updates zone positions based on camera movement for proper wrapping
+   */
+  reRenderAllZones() {
+    const zones = Array.from(this.zoneMeshes.keys()).map(zoneID => {
+      const mesh = this.zoneMeshes.get(zoneID);
+      return mesh?.userData?.zone;
+    }).filter(zone => zone != null);
+    
+    // Clear all meshes
+    this.clearAllZones();
+    
+    // Re-render all zones with updated camera position
+    zones.forEach(zone => {
+      if (zone && zone.geometry) {
+        this.renderZone(zone);
+      }
+    });
   }
   
   /**

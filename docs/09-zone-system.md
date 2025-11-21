@@ -591,6 +591,11 @@ Players can modify their zones:
   - EarthRing Y (width) → Three.js Z (forward)  
   - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
 
+- **Shape Geometry Creation**: Zones use `THREE.ShapeGeometry` created from `THREE.Shape` objects:
+  - Shape is created in the XY plane using `worldPos.x` (EarthRing X) and `worldPos.z` (EarthRing Y) as coordinates
+  - Shape is then rotated -90° around X-axis to lie flat on the ring floor
+  - **Negative Y Coordinate Handling**: When EarthRing Y coordinates are negative (Y- side of ring), the shape's Y coordinate (`worldPos.z`) is negated before creating the shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis.
+
 - **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). Fetching is throttled to once per 4 seconds to prevent excessive API calls.
 
 - **Visibility System**: Two-level visibility control:

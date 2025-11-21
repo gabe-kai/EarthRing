@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition } from '../utils/coordinates.js';
+import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, denormalizeFromCamera } from '../utils/coordinates.js';
 import { createZone, deleteZone } from '../api/zone-service.js';
 import { getCurrentUser } from '../auth/auth-service.js';
 
@@ -115,6 +115,8 @@ export class ZoneEditor {
   
   /**
    * Get EarthRing coordinates from mouse position via raycasting
+   * Returns coordinates normalized relative to camera (not wrapped to [0, 264000000))
+   * This prevents mirroring and ensures preview matches final geometry
    */
   getEarthRingPositionFromMouse(event) {
     this.updateMousePosition(event);
@@ -124,27 +126,24 @@ export class ZoneEditor {
     const intersects = this.raycaster.intersectObject(this.raycastPlane);
     if (intersects.length > 0) {
       const worldPos = intersects[0].point;
-      const earthRingPos = fromThreeJS(worldPos, this.currentFloor);
+      // Convert Three.js coordinates to EarthRing coordinates
+      // Note: floorHeight is used to calculate floor from Y, but we already know the floor
+      // So we use DEFAULT_FLOOR_HEIGHT and then override z with currentFloor
+      const earthRingPos = fromThreeJS(worldPos, DEFAULT_FLOOR_HEIGHT);
+      earthRingPos.z = this.currentFloor; // Override with actual floor
       
       // Get camera position to normalize coordinates relative to camera
       // This prevents zones from appearing mirrored on the other side of the ring
       const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
       const cameraX = cameraPos.x;
-      const RING_CIRCUMFERENCE = 264000000;
       
       // Normalize X coordinate relative to camera (like chunks)
       // This ensures zones are created near the camera, not wrapped to the other side
-      let x = earthRingPos.x;
-      const dx = x - cameraX;
-      const half = RING_CIRCUMFERENCE / 2;
-      let adjusted = dx;
-      while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
-      while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
-      x = cameraX + adjusted;
+      // DON'T wrap here - keep relative to camera for consistent preview/final geometry
+      const x = normalizeRelativeToCamera(earthRingPos.x, cameraX);
       
-      // Now wrap to valid range [0, 264000000)
-      x = wrapRingPosition(x);
-      
+      // Return coordinates normalized relative to camera (not wrapped)
+      // Wrapping will happen in geometry creation functions when creating GeoJSON
       return {
         x,
         y: earthRingPos.y,
@@ -170,6 +169,16 @@ export class ZoneEditor {
     
     const earthRingPos = this.getEarthRingPositionFromMouse(event);
     if (!earthRingPos) return;
+    
+    // DEBUG: Log click position
+    if (window.DEBUG_ZONE_COORDS) {
+      const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+      console.log('[ZoneEditor] Mouse DOWN:', {
+        earthRingPos: { ...earthRingPos },
+        cameraX: cameraPos.x,
+        tool: this.currentTool,
+      });
+    }
     
     // Prevent OrbitControls from interfering when a tool is active
     if (this.currentTool !== TOOLS.NONE) {
@@ -222,6 +231,17 @@ export class ZoneEditor {
     const earthRingPos = this.getEarthRingPositionFromMouse(event);
     if (!earthRingPos) return;
     
+    // DEBUG: Log release position
+    if (window.DEBUG_ZONE_COORDS) {
+      const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+      console.log('[ZoneEditor] Mouse UP:', {
+        earthRingPos: { ...earthRingPos },
+        cameraX: cameraPos.x,
+        tool: this.currentTool,
+        startPoint: this.startPoint,
+      });
+    }
+    
     // Finish drawing for drag-based tools
     if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
       this.finishDrawing(earthRingPos);
@@ -253,45 +273,56 @@ export class ZoneEditor {
    * Update preview geometry while drawing
    */
   updatePreview(currentPos) {
-    if (!this.startPoint) return;
+    if (!this.startPoint || !currentPos) return;
     
     // Remove old preview
     if (this.previewMesh) {
       this.scene.remove(this.previewMesh);
+      if (this.previewMesh.geometry) this.previewMesh.geometry.dispose();
+      if (this.previewMesh.material) this.previewMesh.material.dispose();
       this.previewMesh = null;
     }
     
     let geometry;
     
-    switch (this.currentTool) {
-      case TOOLS.RECTANGLE:
-        geometry = this.createRectanglePreview(this.startPoint, currentPos);
-        break;
-      case TOOLS.CIRCLE:
-        geometry = this.createCirclePreview(this.startPoint, currentPos);
-        break;
-      case TOOLS.TORUS:
-        geometry = this.createTorusPreview(this.startPoint, currentPos);
-        break;
-      case TOOLS.PAINTBRUSH:
-        this.paintbrushPath.push(currentPos);
-        geometry = this.createPaintbrushPreview(this.paintbrushPath);
-        break;
-      default:
-        return;
-    }
-    
-    if (geometry) {
-      const material = new THREE.MeshBasicMaterial({
-        color: this.getToolColor(),
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-      });
-      this.previewMesh = new THREE.Mesh(geometry, material);
-      this.previewMesh.rotation.x = -Math.PI / 2;
-      this.previewMesh.position.y = DEFAULT_FLOOR_HEIGHT + (this.currentFloor * 5) + 0.001;
-      this.scene.add(this.previewMesh);
+    try {
+      switch (this.currentTool) {
+        case TOOLS.RECTANGLE:
+          geometry = this.createRectanglePreview(this.startPoint, currentPos);
+          break;
+        case TOOLS.CIRCLE:
+          geometry = this.createCirclePreview(this.startPoint, currentPos);
+          break;
+        case TOOLS.TORUS:
+          geometry = this.createTorusPreview(this.startPoint, currentPos);
+          break;
+        case TOOLS.PAINTBRUSH:
+          // Don't modify paintbrushPath here - it's managed in onMouseMove
+          if (this.paintbrushPath.length > 0) {
+            geometry = this.createPaintbrushPreview(this.paintbrushPath);
+          }
+          break;
+        default:
+          return;
+      }
+      
+      if (geometry) {
+        const material = new THREE.MeshBasicMaterial({
+          color: this.getToolColor(),
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: false,
+        });
+        this.previewMesh = new THREE.Mesh(geometry, material);
+        this.previewMesh.rotation.x = -Math.PI / 2;
+        this.previewMesh.position.y = DEFAULT_FLOOR_HEIGHT + (this.currentFloor * 5) + 0.001;
+        this.previewMesh.renderOrder = 10; // Render above zones
+        this.scene.add(this.previewMesh);
+      }
+    } catch (error) {
+      console.error('Error creating preview geometry:', error);
     }
   }
   
@@ -324,6 +355,14 @@ export class ZoneEditor {
   async finishDrawing(endPos) {
     if (!this.startPoint) return;
     
+    // DEBUG: Log which tool is being used
+    console.log('[ZoneEditor] finishDrawing CALLED', {
+      currentTool: this.currentTool,
+      startPoint: this.startPoint,
+      endPos,
+      paintbrushPathLength: this.paintbrushPath?.length,
+    });
+    
     // Remove preview
     if (this.previewMesh) {
       this.scene.remove(this.previewMesh);
@@ -334,18 +373,26 @@ export class ZoneEditor {
     
     switch (this.currentTool) {
       case TOOLS.RECTANGLE:
+        console.log('[ZoneEditor] Using RECTANGLE tool');
         geometry = this.createRectangleGeometry(this.startPoint, endPos);
         break;
       case TOOLS.CIRCLE:
+        console.log('[ZoneEditor] Using CIRCLE tool');
         geometry = this.createCircleGeometry(this.startPoint, endPos);
         break;
       case TOOLS.TORUS:
+        console.log('[ZoneEditor] Using TORUS tool');
         geometry = this.createTorusGeometry(this.startPoint, endPos);
         break;
       case TOOLS.PAINTBRUSH:
+        console.log('[ZoneEditor] Using PAINTBRUSH tool', {
+          pathLength: this.paintbrushPath?.length,
+          path: this.paintbrushPath,
+        });
         geometry = this.createPaintbrushGeometry(this.paintbrushPath);
         break;
       default:
+        console.log('[ZoneEditor] Unknown tool or NONE:', this.currentTool);
         this.isDrawing = false;
         return;
     }
@@ -353,6 +400,51 @@ export class ZoneEditor {
     if (!geometry) {
       this.isDrawing = false;
       return;
+    }
+    
+    // Validate geometry before creating zone
+    if (!geometry || !geometry.coordinates || geometry.coordinates.length === 0) {
+      console.error('Invalid geometry created');
+      alert('Failed to create zone: Invalid geometry');
+      this.isDrawing = false;
+      return;
+    }
+    
+    // DEBUG: Log geometry before validation
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] finishDrawing - geometry before validation:', {
+        type: geometry.type,
+        coordinates: geometry.coordinates,
+        startPoint: this.startPoint,
+        endPos,
+      });
+    }
+    
+    // Validate coordinates are within valid range
+    const RING_CIRCUMFERENCE = 264000000;
+    const coords = geometry.coordinates[0];
+    const invalidCoords = coords.some(([x, y]) => {
+      return isNaN(x) || isNaN(y) || 
+             x < 0 || x >= RING_CIRCUMFERENCE ||
+             y < -2500 || y > 2500;
+    });
+    
+    if (invalidCoords) {
+      console.error('Invalid coordinates in geometry:', geometry);
+      alert('Failed to create zone: Coordinates out of bounds');
+      this.isDrawing = false;
+      return;
+    }
+    
+    // DEBUG: Log geometry being sent to API
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] finishDrawing - sending to API:', {
+        geometry: JSON.parse(JSON.stringify(geometry)), // Deep clone to see actual values
+        zoneType: this.currentZoneType,
+        floor: this.currentFloor,
+        startPoint: this.startPoint,
+        endPos,
+      });
     }
     
     // Create zone via API
@@ -369,6 +461,17 @@ export class ZoneEditor {
           owner_id: currentUser?.id,
         },
       });
+      
+      // DEBUG: Log created zone
+      if (window.DEBUG_ZONE_COORDS) {
+        const parsedGeometry = typeof zone.geometry === 'string' ? JSON.parse(zone.geometry) : zone.geometry;
+        console.log('[ZoneEditor] finishDrawing - zone created:', {
+          id: zone.id,
+          geometry: parsedGeometry,
+          firstCoordinate: parsedGeometry?.coordinates?.[0]?.[0],
+          allCoordinates: parsedGeometry?.coordinates?.[0],
+        });
+      }
       
       // Add to game state and render
       this.gameStateManager.upsertZone(zone);
@@ -635,31 +738,159 @@ export class ZoneEditor {
   // Geometry creation methods
   
   createRectanglePreview(start, end) {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const geometry = new THREE.PlaneGeometry(Math.abs(dx), Math.abs(dy));
-    const centerX = start.x + dx / 2;
-    const centerY = start.y + dy / 2;
-    const threeJSPos = toThreeJS({
-      x: centerX,
-      y: centerY,
-      z: this.currentFloor,
-    }, this.currentFloor);
-    geometry.translate(threeJSPos.x, 0, threeJSPos.z);
+    // Use the same coordinate conversion as final geometry to ensure preview matches
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    
+    // Convert to absolute coordinates (same as final geometry)
+    const absMinX = this.convertRelativeToAbsoluteX(minX);
+    const absMaxX = this.convertRelativeToAbsoluteX(maxX);
+    
+    // Create preview using the same wrapping logic as final rendering
+    // Wrap each corner point relative to camera (same as wrapZoneX in zone-manager.js)
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = wrapRingPosition(cameraPos.x);
+    
+    // Wrap coordinates relative to camera for preview (same as rendering)
+    const wrappedMinX = normalizeRelativeToCamera(absMinX, cameraX);
+    const wrappedMaxX = normalizeRelativeToCamera(absMaxX, cameraX);
+    
+    // Create shape from rectangle corners (same approach as zone rendering)
+    // Negate Y coordinate (worldPos.z) for negative Y to ensure correct face direction after rotation
+    const hasNegativeY = minY < 0 || maxY < 0;
+    const shape = new THREE.Shape();
+    const corners = [
+      [wrappedMinX, minY],
+      [wrappedMaxX, minY],
+      [wrappedMaxX, maxY],
+      [wrappedMinX, maxY],
+    ];
+    
+    let firstPos = null;
+    corners.forEach(([x, y], idx) => {
+      const worldPos = toThreeJS({ x, y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Negate worldPos.z (EarthRing Y) if Y is negative to fix face direction
+      const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    // Close the shape by returning to first point
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
+    }
+    
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
+    
+    // No logging here - this function is called on every mouse move during dragging
+    // Key information is logged in onMouseDown, onMouseUp, and finishDrawing
+    
     return geometry;
   }
   
+  /**
+   * Convert camera-relative X coordinate to absolute coordinate [0, RING_CIRCUMFERENCE)
+   * Coordinates from getEarthRingPositionFromMouse are normalized relative to camera.
+   * This function converts them to absolute coordinates for the API.
+   * @param {number} x - X coordinate relative to camera
+   * @returns {number} - Absolute X coordinate [0, RING_CIRCUMFERENCE)
+   */
+  convertRelativeToAbsoluteX(x) {
+    // Convert a coordinate that's normalized relative to the camera to an absolute coordinate [0, RING_CIRCUMFERENCE)
+    // This is used when creating final geometry for the API
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x;
+    
+    // Use the centralized helper function
+    const absoluteX = denormalizeFromCamera(x, cameraX);
+    
+    // No logging here - this function is called frequently during preview updates
+    // Logging happens in finishDrawing/createRectangleGeometry instead
+    
+    return absoluteX;
+  }
+
   createRectangleGeometry(start, end) {
+    // DEBUG: Log geometry creation
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectangleGeometry CALLED - START', {
+        start: { ...start },
+        end: { ...end },
+      });
+    }
+    
+    // Coordinates from getEarthRingPositionFromMouse are normalized relative to camera
+    // Convert them to absolute coordinates [0, RING_CIRCUMFERENCE) for the API
     let minX = Math.min(start.x, end.x);
     let maxX = Math.max(start.x, end.x);
     const minY = Math.min(start.y, end.y);
     const maxY = Math.max(start.y, end.y);
     
-    // Wrap X coordinates to valid range [0, 264000000)
-    minX = wrapRingPosition(minX);
-    maxX = wrapRingPosition(maxX);
+    // DEBUG: Log geometry input
+    console.log('[ZoneEditor] createRectangleGeometry CALLED', {
+      start: { ...start },
+      end: { ...end },
+      minX, maxX, minY, maxY,
+      DEBUG_FLAG: window.DEBUG_ZONE_COORDS,
+    });
     
-    return {
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectangleGeometry input:', {
+        start: { ...start },
+        end: { ...end },
+        minX, maxX, minY, maxY,
+        rawMinX: minX,
+        rawMaxX: maxX,
+      });
+    }
+    
+    // Convert relative coordinates to absolute using helper function
+    const originalMinX = minX;
+    const originalMaxX = maxX;
+    minX = this.convertRelativeToAbsoluteX(minX);
+    
+    // DEBUG: Log after first conversion
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectangleGeometry after minX conversion:', {
+        originalMinX,
+        convertedMinX: minX,
+      });
+    }
+    
+    maxX = this.convertRelativeToAbsoluteX(maxX);
+    
+    // DEBUG: Log after both conversions
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectangleGeometry after both conversions:', {
+        originalMinX,
+        originalMaxX,
+        convertedMinX: minX,
+        convertedMaxX: maxX,
+      });
+    }
+    
+    // Ensure minX < maxX (handle wrap-around case)
+    // If coordinates wrapped such that minX > maxX, the rectangle spans the wrap boundary
+    // In this case, we need to ensure the coordinates are valid
+    if (minX >= maxX) {
+      // This shouldn't happen with proper conversion, but handle it as a safety check
+      // Swap if needed (though this indicates a bug in conversion)
+      [minX, maxX] = [Math.min(minX, maxX), Math.max(minX, maxX)];
+      // If still invalid, clamp to valid range
+      if (minX >= maxX) {
+        const RING_CIRCUMFERENCE = 264000000;
+        minX = Math.max(0, minX - 1000); // Small buffer
+        maxX = Math.min(RING_CIRCUMFERENCE, maxX + 1000);
+      }
+    }
+    
+    const geometry = {
       type: 'Polygon',
       coordinates: [[
         [minX, minY],
@@ -669,6 +900,16 @@ export class ZoneEditor {
         [minX, minY],
       ]],
     };
+    
+    // DEBUG: Log final geometry
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectangleGeometry final:', {
+        minX, maxX, minY, maxY,
+        coordinates: geometry.coordinates[0],
+      });
+    }
+    
+    return geometry;
   }
   
   createCirclePreview(center, edge) {
@@ -676,7 +917,14 @@ export class ZoneEditor {
       Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
     );
     const geometry = new THREE.CircleGeometry(radius, 64);
-    const threeJSPos = toThreeJS(center, this.currentFloor);
+    
+    // Convert center to absolute coordinates (same as final geometry)
+    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
+    const threeJSPos = toThreeJS({
+      x: absCenterX,
+      y: center.y,
+      z: this.currentFloor,
+    }, this.currentFloor);
     geometry.translate(threeJSPos.x, 0, threeJSPos.z);
     return geometry;
   }
@@ -688,16 +936,20 @@ export class ZoneEditor {
     const segments = 64;
     const coordinates = [];
     
-    // Generate points around the circle (excluding the last duplicate)
+    // Convert center to absolute coordinates first
+    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate points around the circle using absolute center
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
-      let x = center.x + radius * Math.cos(angle);
-      const y = center.y + radius * Math.sin(angle);
+      const x = absCenterX + radius * Math.cos(angle);
+      const y = absCenterY + radius * Math.sin(angle);
       
-      // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
+      // Wrap X coordinate to valid range
+      const wrappedX = wrapRingPosition(x);
       
-      coordinates.push([x, y]);
+      coordinates.push([wrappedX, y]);
     }
     
     // Explicitly close the ring by adding the first point again
@@ -717,7 +969,14 @@ export class ZoneEditor {
     );
     const innerRadius = outerRadius * 0.6; // Torus inner radius is 60% of outer
     const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
-    const threeJSPos = toThreeJS(center, this.currentFloor);
+    
+    // Convert center to absolute coordinates (same as final geometry)
+    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
+    const threeJSPos = toThreeJS({
+      x: absCenterX,
+      y: center.y,
+      z: this.currentFloor,
+    }, this.currentFloor);
     geometry.translate(threeJSPos.x, 0, threeJSPos.z);
     return geometry;
   }
@@ -731,36 +990,40 @@ export class ZoneEditor {
     const outerCoords = [];
     const innerCoords = [];
     
-    // Generate outer ring points (excluding the last duplicate)
+    // Convert center to absolute coordinates first
+    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate outer ring points using absolute center
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
-      let x = center.x + outerRadius * cos;
-      const y = center.y + outerRadius * sin;
+      const x = absCenterX + outerRadius * cos;
+      const y = absCenterY + outerRadius * sin;
       
-      // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
+      // Wrap X coordinate to valid range
+      const wrappedX = wrapRingPosition(x);
       
-      outerCoords.push([x, y]);
+      outerCoords.push([wrappedX, y]);
     }
     // Close outer ring explicitly
     if (outerCoords.length > 0) {
       outerCoords.push([outerCoords[0][0], outerCoords[0][1]]);
     }
     
-    // Generate inner ring points (excluding the last duplicate)
+    // Generate inner ring points using absolute center
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
-      let x = center.x + innerRadius * cos;
-      const y = center.y + innerRadius * sin;
+      const x = absCenterX + innerRadius * cos;
+      const y = absCenterY + innerRadius * sin;
       
-      // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
+      // Wrap X coordinate to valid range
+      const wrappedX = wrapRingPosition(x);
       
-      innerCoords.push([x, y]);
+      innerCoords.push([wrappedX, y]);
     }
     // Close inner ring explicitly
     if (innerCoords.length > 0) {
@@ -811,9 +1074,10 @@ export class ZoneEditor {
   
   createPolygonGeometry(vertices) {
     const coordinates = vertices.map(v => {
-      // Wrap X coordinate to valid range [0, 264000000)
-      const x = wrapRingPosition(v.x);
-      return [x, v.y];
+      // Convert relative coordinate to absolute, then wrap
+      const absX = this.convertRelativeToAbsoluteX(v.x);
+      const wrappedX = wrapRingPosition(absX);
+      return [wrappedX, v.y];
     });
     // Close polygon
     if (coordinates.length > 0 && 
@@ -958,13 +1222,17 @@ export class ZoneEditor {
       const center = path[0];
       const segments = 32;
       const coords = [];
+      // Convert center to absolute first
+      const absCenterX = this.convertRelativeToAbsoluteX(center.x);
+      const absCenterY = center.y;
+      
       for (let i = 0; i <= segments; i++) {
         const angle = (i / segments) * Math.PI * 2;
-        let x = center.x + radius * Math.cos(angle);
-        const y = center.y + radius * Math.sin(angle);
+        const x = absCenterX + radius * Math.cos(angle);
+        const y = absCenterY + radius * Math.sin(angle);
         // Wrap X coordinate to valid range [0, 264000000)
-        x = wrapRingPosition(x);
-        coords.push([x, y]);
+        const wrappedX = wrapRingPosition(x);
+        coords.push([wrappedX, y]);
       }
       return coords;
     }
@@ -985,11 +1253,13 @@ export class ZoneEditor {
       const perpX = -dy / length;
       const perpY = dx / length;
       
-      let x = p1.x + perpX * radius;
+      // Convert relative coordinates to absolute
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * radius;
       const y = p1.y + perpY * radius;
       // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
-      expanded.push([x, y]);
+      const wrappedX = wrapRingPosition(x);
+      expanded.push([wrappedX, y]);
     }
     
     // Last point
@@ -1001,11 +1271,13 @@ export class ZoneEditor {
     if (length > 0) {
       const perpX = -dy / length;
       const perpY = dx / length;
-      let x = last.x + perpX * radius;
+      // Convert relative coordinate to absolute
+      const absLastX = this.convertRelativeToAbsoluteX(last.x);
+      const x = absLastX + perpX * radius;
       const y = last.y + perpY * radius;
       // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
-      expanded.push([x, y]);
+      const wrappedX = wrapRingPosition(x);
+      expanded.push([wrappedX, y]);
     }
     
     // Return path
@@ -1021,11 +1293,13 @@ export class ZoneEditor {
       const perpX = dy / length;
       const perpY = -dx / length;
       
-      let x = p1.x + perpX * radius;
+      // Convert relative coordinate to absolute
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * radius;
       const y = p1.y + perpY * radius;
       // Wrap X coordinate to valid range [0, 264000000)
-      x = wrapRingPosition(x);
-      expanded.push([x, y]);
+      const wrappedX = wrapRingPosition(x);
+      expanded.push([wrappedX, y]);
     }
     
     // Close polygon
