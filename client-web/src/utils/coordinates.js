@@ -220,3 +220,53 @@ export function validateEarthRingPoint(point) {
   };
 }
 
+/**
+ * Normalize a ring position relative to a camera position
+ * 
+ * This ensures coordinates are within [-RING_CIRCUMFERENCE/2, RING_CIRCUMFERENCE/2] of the camera,
+ * preventing coordinates from wrapping to the opposite side of the ring.
+ * 
+ * @param {number} ringPosition - Absolute ring position to normalize
+ * @param {number} cameraPosition - Camera's absolute ring position
+ * @returns {number} Normalized position relative to camera (can be negative)
+ */
+export function normalizeRelativeToCamera(ringPosition, cameraPosition) {
+  const RING_CIRCUMFERENCE = 264000000;
+  const dx = ringPosition - cameraPosition;
+  const half = RING_CIRCUMFERENCE / 2;
+  let adjusted = dx;
+  
+  // Normalize to [-half, half] range
+  while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
+  while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
+  
+  return cameraPosition + adjusted;
+}
+
+/**
+ * Convert a normalized (camera-relative) coordinate back to absolute coordinate
+ * 
+ * This converts a coordinate that was normalized relative to a camera position
+ * back to an absolute coordinate [0, RING_CIRCUMFERENCE).
+ * 
+ * @param {number} normalizedPosition - Normalized position (can be negative)
+ * @param {number} cameraPosition - Camera's absolute ring position
+ * @returns {number} Absolute ring position [0, RING_CIRCUMFERENCE)
+ */
+export function denormalizeFromCamera(normalizedPosition, cameraPosition) {
+  // Wrap camera position to get its absolute position [0, RING_CIRCUMFERENCE)
+  const cameraXWrapped = wrapRingPosition(cameraPosition);
+  
+  // The normalized position is: cameraPosition + adjusted, where adjusted is in [-half, half]
+  // So the offset from camera is: normalizedPosition - cameraPosition
+  const dx = normalizedPosition - cameraPosition;
+  
+  // Convert to absolute: cameraXWrapped + dx
+  // This can be negative if the normalized position is negative and cameraXWrapped is small
+  const absoluteX = cameraXWrapped + dx;
+  
+  // Wrap to valid range [0, RING_CIRCUMFERENCE)
+  // wrapRingPosition handles negative values correctly by wrapping them to the positive side
+  return wrapRingPosition(absoluteX);
+}
+

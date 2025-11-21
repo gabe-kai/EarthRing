@@ -177,7 +177,7 @@ export class ChunkManager {
     
     // Debug logging for chunk requests (especially useful at boundaries)
     if (window.earthring?.debug || centerChunkIndex < radius || centerChunkIndex >= CHUNK_COUNT - radius) {
-      console.log(`Requesting chunks around position ${ringPosition.toFixed(0)}m (chunk ${centerChunkIndex}):`, chunkIDs);
+      console.log(`[Chunks] Requesting ${chunkIDs.length} chunk(s) around position ${ringPosition.toFixed(0)}m (chunk ${centerChunkIndex})`);
     }
     
     return this.requestChunks(chunkIDs, lodLevel);
@@ -193,13 +193,27 @@ export class ChunkManager {
       return;
     }
     
-    console.log(`Received ${data.chunks.length} chunk(s) from server`);
+    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server`);
+    
+    // Track statistics for summary logging
+    const stats = {
+      total: data.chunks.length,
+      compressed: 0,
+      uncompressed: 0,
+      failed: 0,
+      totalCompressedSize: 0,
+      totalUncompressedSize: 0,
+      totalDecompressTime: 0,
+      withGeometry: 0,
+      withoutGeometry: 0,
+    };
     
     // Process chunks in parallel (decompress if needed)
     const processedChunks = await Promise.all(
       data.chunks.map(async (chunkData) => {
         if (!chunkData.id) {
-          console.error('Chunk data missing ID:', chunkData);
+          console.error('[Chunks] Chunk data missing ID:', chunkData);
+          stats.failed++;
           return null;
         }
         
@@ -213,34 +227,26 @@ export class ChunkManager {
           try {
             geometry = await decompressChunkGeometry(geometry);
             const decompressTime = performance.now() - startTime;
-            const compressionRatio = (chunkData.geometry.uncompressed_size / chunkData.geometry.size).toFixed(2);
+            const compressionRatio = chunkData.geometry.uncompressed_size / chunkData.geometry.size;
             
-            console.log(`✓ Decompressed chunk ${chunkData.id} geometry: ${chunkData.geometry.size} → ${chunkData.geometry.uncompressed_size} bytes (${compressionRatio}:1 ratio) in ${decompressTime.toFixed(2)}ms`);
+            stats.compressed++;
+            stats.totalCompressedSize += chunkData.geometry.size;
+            stats.totalUncompressedSize += chunkData.geometry.uncompressed_size;
+            stats.totalDecompressTime += decompressTime;
             
+            // Only log individual decompression in debug mode
             if (window.earthring?.debug) {
-              console.log(`  Decompression details:`, {
-                compressedSize: chunkData.geometry.size,
-                uncompressedSize: chunkData.geometry.uncompressed_size,
-                ratio: compressionRatio + ':1',
-                decompressTime: `${decompressTime.toFixed(2)}ms`,
-                vertices: geometry.vertices?.length || 0,
-                faces: geometry.faces?.length || 0
-              });
+              console.log(`[Chunks] Decompressed ${chunkData.id}: ${chunkData.geometry.size} → ${chunkData.geometry.uncompressed_size} bytes (${compressionRatio.toFixed(2)}:1) in ${decompressTime.toFixed(2)}ms`);
             }
           } catch (error) {
             const decompressTime = performance.now() - startTime;
-            console.error(`✗ Failed to decompress geometry for chunk ${chunkData.id} (took ${decompressTime.toFixed(2)}ms):`, error);
-            // Try to use original geometry if decompression fails (fallback to uncompressed)
-            // This ensures chunks still render even if compression/decompression has issues
-            console.warn(`Falling back to original geometry format for chunk ${chunkData.id}`);
+            stats.failed++;
+            console.error(`[Chunks] Failed to decompress ${chunkData.id} (${decompressTime.toFixed(2)}ms):`, error);
             // Return original chunk data (might be uncompressed or in a different format)
             return chunkData;
           }
         } else if (geometry && !isCompressedGeometry(geometry)) {
-          // Log when geometry is uncompressed (for debugging)
-          if (window.earthring?.debug) {
-            console.log(`Chunk ${chunkData.id} geometry is uncompressed (type: ${geometry.type || 'unknown'})`);
-          }
+          stats.uncompressed++;
         }
         
         // Create processed chunk data with decompressed geometry
@@ -249,22 +255,32 @@ export class ChunkManager {
           geometry
         };
         
-        // Only log detailed info if geometry exists or in debug mode
-        if (geometry || window.earthring?.debug) {
-          console.log(`Processing chunk ${processedChunk.id}:`, {
-            hasGeometry: !!geometry,
-            isCompressed: isCompressedGeometry(chunkData.geometry),
-            geometryType: geometry?.type,
-            width: geometry?.width,
-            length: geometry?.length,
-            structures: processedChunk.structures?.length || 0,
-            zones: processedChunk.zones?.length || 0,
-          });
+        // Track geometry stats
+        if (geometry) {
+          stats.withGeometry++;
+        } else {
+          stats.withoutGeometry++;
         }
         
         return processedChunk;
       })
     );
+    
+    // Log summary statistics
+    if (stats.compressed > 0) {
+      const avgRatio = (stats.totalUncompressedSize / stats.totalCompressedSize).toFixed(2);
+      const avgTime = (stats.totalDecompressTime / stats.compressed).toFixed(2);
+      console.log(`[Chunks] Decompressed ${stats.compressed} chunk(s): ${(stats.totalCompressedSize / 1024).toFixed(1)}KB → ${(stats.totalUncompressedSize / 1024).toFixed(1)}KB (avg ${avgRatio}:1) in ${avgTime}ms avg`);
+    }
+    if (stats.uncompressed > 0) {
+      console.log(`[Chunks] ${stats.uncompressed} chunk(s) already uncompressed`);
+    }
+    if (stats.withGeometry > 0 || stats.withoutGeometry > 0) {
+      console.log(`[Chunks] Processed: ${stats.withGeometry} with geometry, ${stats.withoutGeometry} without geometry`);
+    }
+    if (stats.failed > 0) {
+      console.warn(`[Chunks] ${stats.failed} chunk(s) failed to process`);
+    }
     
     // Store processed chunks in game state (this will trigger renderChunk via event listener)
     processedChunks.forEach(chunkData => {
@@ -386,40 +402,37 @@ export class ChunkManager {
     
     // Check if chunk has geometry data
     if (chunkData.geometry && chunkData.geometry.type === 'ring_floor') {
-      console.log(`Rendering chunk ${chunkID} with ring floor geometry (width: ${chunkData.geometry.width}m)`);
       // Render actual geometry (Phase 2)
       const mesh = this.createRingFloorMesh(chunkID, chunkData);
       if (mesh) {
         this.scene.add(mesh);
         this.chunkMeshes.set(chunkID, mesh);
         
-        // Log first vertex position for debugging (only if debug mode or near boundaries)
-        // Note: This logs the ORIGINAL position, not the wrapped position used for rendering
-        const geometry = chunkData.geometry;
-        if (window.earthring?.debug && geometry.vertices && geometry.vertices.length > 0) {
-          const firstVertex = geometry.vertices[0];
-          const earthringPos = { x: firstVertex[0], y: firstVertex[1], z: firstVertex[2] };
-          const threeJSPos = toThreeJS(earthringPos);
-          console.log(`✓ Successfully rendered chunk ${chunkID} mesh at EarthRing (${earthringPos.x.toFixed(1)}, ${earthringPos.y.toFixed(1)}, ${earthringPos.z}) → Three.js (${threeJSPos.x.toFixed(1)}, ${threeJSPos.y.toFixed(1)}, ${threeJSPos.z.toFixed(1)})`);
-        } else {
-          console.log(`✓ Successfully rendered chunk ${chunkID} mesh`);
+        // Only log individual chunk rendering in debug mode
+        if (window.earthring?.debug) {
+          const geometry = chunkData.geometry;
+          if (geometry.vertices && geometry.vertices.length > 0) {
+            const firstVertex = geometry.vertices[0];
+            const earthringPos = { x: firstVertex[0], y: firstVertex[1], z: firstVertex[2] };
+            const threeJSPos = toThreeJS(earthringPos);
+            console.log(`[Chunks] Rendered ${chunkID} (width: ${geometry.width}m) at EarthRing (${earthringPos.x.toFixed(1)}, ${earthringPos.y.toFixed(1)}, ${earthringPos.z}) → Three.js (${threeJSPos.x.toFixed(1)}, ${threeJSPos.y.toFixed(1)}, ${threeJSPos.z.toFixed(1)})`);
+          } else {
+            console.log(`[Chunks] Rendered ${chunkID} (width: ${geometry.width}m)`);
+          }
         }
         return;
       } else {
-        console.warn(`Failed to create mesh for chunk ${chunkID}, falling back to placeholder`);
+        console.warn(`[Chunks] Failed to create mesh for ${chunkID}, falling back to placeholder`);
       }
     } else {
       // Chunk has no geometry - this is expected for chunks that haven't been generated yet
-      // or failed to generate. We'll use a placeholder and the server will generate it
-      // on the next request if needed.
-      if (!chunkData.geometry) {
-        // Silently use placeholder for chunks without geometry (normal during exploration)
-        // Only log if we're debugging
-        if (window.earthring?.debug) {
-          console.log(`Chunk ${chunkID} has no geometry (not yet generated), using placeholder`);
+      // Only log if we're debugging
+      if (window.earthring?.debug) {
+        if (!chunkData.geometry) {
+          console.log(`[Chunks] ${chunkID} has no geometry (not yet generated), using placeholder`);
+        } else {
+          console.log(`[Chunks] ${chunkID} has wrong geometry type (${chunkData.geometry?.type || 'none'}), using placeholder`);
         }
-      } else {
-        console.log(`Chunk ${chunkID} has wrong geometry type (${chunkData.geometry?.type || 'none'}), using placeholder`);
       }
     }
     
@@ -428,7 +441,10 @@ export class ChunkManager {
     if (placeholder) {
       this.scene.add(placeholder);
       this.chunkMeshes.set(chunkID, placeholder);
-      console.log(`Rendered placeholder for chunk ${chunkID}`);
+      // Only log placeholder rendering in debug mode
+      if (window.earthring?.debug) {
+        console.log(`[Chunks] Rendered placeholder for ${chunkID}`);
+      }
     }
   }
   
@@ -442,16 +458,19 @@ export class ChunkManager {
     const geometry = chunkData.geometry;
     
     if (!geometry.vertices || !geometry.faces) {
-      console.error('Invalid geometry data for chunk:', chunkID, geometry);
+      console.error(`[Chunks] Invalid geometry data for ${chunkID}:`, geometry);
       return null;
     }
     
-    console.log(`Creating ring floor mesh for chunk ${chunkID}:`, {
-      vertexCount: geometry.vertices.length,
-      faceCount: geometry.faces.length,
-      width: geometry.width,
-      length: geometry.length,
-    });
+    // Only log mesh creation details in debug mode
+    if (window.earthring?.debug) {
+      console.log(`[Chunks] Creating mesh for ${chunkID}:`, {
+        vertexCount: geometry.vertices.length,
+        faceCount: geometry.faces.length,
+        width: geometry.width,
+        length: geometry.length,
+      });
+    }
     
     // Create Three.js geometry
     const threeGeometry = new THREE.BufferGeometry();

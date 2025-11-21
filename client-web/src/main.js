@@ -142,14 +142,20 @@ sceneManager.onRender((deltaTime) => {
       // Load chunks around camera position (radius of 4 chunks = 9 total chunks, within limit of 10)
       // Use floor 0 for now (camera Z coordinate conversion can be inaccurate due to camera offsets)
       const floor = 0;
-      console.log(`Loading chunks around position ${cameraPos.x.toFixed(0)}m (chunk ${currentChunkIndex}, floor ${floor})`);
+      // Only log chunk loading in debug mode
+      if (window.earthring?.debug) {
+        console.log(`[Chunks] Loading around position ${cameraPos.x.toFixed(0)}m (chunk ${currentChunkIndex}, floor ${floor})`);
+      }
       chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium')
         .then(() => {
-          console.log(`Successfully requested chunks around chunk ${currentChunkIndex}`);
+          // Only log success in debug mode
+          if (window.earthring?.debug) {
+            console.log(`[Chunks] Successfully requested chunks around chunk ${currentChunkIndex}`);
+          }
           pendingChunkLoad = false;
         })
         .catch(error => {
-          console.error('Failed to load chunks at camera position:', error);
+          console.error('[Chunks] Failed to load chunks at camera position:', error);
           pendingChunkLoad = false;
         });
     }
@@ -157,6 +163,11 @@ sceneManager.onRender((deltaTime) => {
 
   // Refresh zone overlays (ZoneManager throttles internally)
   zoneManager.loadZonesAroundCamera();
+  
+  // Re-render zones if camera moved significantly (for proper wrapping)
+  if (zoneManager.shouldReRenderZones()) {
+    zoneManager.reRenderAllZones();
+  }
   
   // Update grid overlay position to follow camera
   gridOverlay.update();
@@ -187,6 +198,28 @@ if (isAuthenticated()) {
 } else {
   showAuthUI();
   console.log('Showing authentication UI');
+}
+
+// Check if user is already authenticated on page load
+if (isAuthenticated()) {
+  console.log('User already authenticated on page load');
+  showUserInfo();
+  gameStateManager.updateConnectionState('api', { authenticated: true });
+  
+  // Initialize zones tab in toolbar
+  initializeZonesTab();
+  
+  // Connect WebSocket if already authenticated
+  wsClient.connect().then(() => {
+    gameStateManager.updateConnectionState('websocket', { connected: true });
+    console.log('WebSocket connected');
+  }).catch(error => {
+    console.error('Failed to connect WebSocket:', error);
+    gameStateManager.updateConnectionState('websocket', { 
+      connected: false, 
+      lastError: error.message 
+    });
+  });
 }
 
 // Listen for authentication events
@@ -270,9 +303,12 @@ wsClient.onOpen(async () => {
     // Load chunks at camera position (floor 0, radius 4 chunks = 9 total chunks)
     // Use floor 0 explicitly since camera Z coordinate conversion can be inaccurate
     await chunkManager.requestChunksAtPosition(cameraPos.x, 0, 4, 'medium');
-    console.log('Loaded chunks around camera position');
+    // Only log in debug mode
+    if (window.earthring?.debug) {
+      console.log('[Chunks] Loaded chunks around camera position');
+    }
   } catch (error) {
-    console.error('Failed to load initial chunks:', error);
+    console.error('[Chunks] Failed to load initial chunks:', error);
   }
 
   try {
@@ -310,6 +346,7 @@ window.earthring = {
   debugPanel,
   wsClient,
   debug: false, // Set to true to enable debug logging
+  DEBUG_ZONE_COORDS: false, // Set to true to enable zone coordinate debugging
   stations: {
     findNearestStation,
     getStationPosition,
@@ -331,6 +368,10 @@ window.earthring = {
     },
   },
 };
+
+// Global debug flag for zone coordinates (accessible via window.DEBUG_ZONE_COORDS)
+// Enable by running: window.DEBUG_ZONE_COORDS = true in the browser console
+window.DEBUG_ZONE_COORDS = false;
 
 // Client initialization complete
 console.log('EarthRing client initialized');
