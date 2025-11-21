@@ -12,7 +12,7 @@ export class DebugInfoPanel {
     this.chunkManager = chunkManager;
     this.zoneManager = zoneManager;
     this.panel = null;
-    this.isVisible = true;
+    this.isVisible = false; // Start minimized
     this.stats = {
       fps: 0,
       frameTime: 0,
@@ -72,8 +72,8 @@ export class DebugInfoPanel {
     style.textContent = `
       #debug-info-panel {
         position: fixed;
-        top: 10px;
-        left: 10px;
+        top: 80px;
+        right: 10px;
         background: rgba(0, 0, 0, 0.85);
         border: 1px solid #333;
         border-radius: 6px;
@@ -81,9 +81,9 @@ export class DebugInfoPanel {
         font-family: 'Courier New', monospace;
         font-size: 12px;
         color: #00ff00;
-        z-index: 10000;
+        z-index: 9998;
         max-width: 400px;
-        max-height: 90vh;
+        max-height: calc(90vh - 70px);
         overflow-y: auto;
       }
       .debug-panel-content {
@@ -170,6 +170,9 @@ export class DebugInfoPanel {
 
     // Set up event listeners
     this.setupEventListeners();
+    
+    // Initialize as minimized
+    this.togglePanel();
   }
 
   createSection(title, id, lines) {
