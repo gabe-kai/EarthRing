@@ -33,6 +33,7 @@ export class ZoneManager {
     this.lastFetchTime = 0;
     this.fetchThrottleMs = 4000;
     this.zoneMeshes = new Map(); // Map<zoneID, THREE.Group>
+    this.highlightedZones = new Set(); // Set of highlighted zone IDs
     this.lastError = { message: null, timestamp: 0 };
     // Per-type visibility: Map<zoneType, boolean>
     this.zoneTypeVisibility = new Map([
@@ -124,8 +125,10 @@ export class ZoneManager {
 
     const zoneGroup = new THREE.Group();
     zoneGroup.renderOrder = 5; // Render above grid
-    zoneGroup.userData.zoneId = zone.id;
+    zoneGroup.userData.zoneID = zone.id; // Use zoneID for consistency with editor
+    zoneGroup.userData.zoneId = zone.id; // Keep both for compatibility
     zoneGroup.userData.zoneType = zoneType;
+    zoneGroup.userData.zone = zone; // Store full zone object for easy access
     zoneGroup.visible = this.zonesVisible && typeVisible;
 
     // Look up style (handle both mixed-use and mixed_use)
@@ -302,6 +305,52 @@ export class ZoneManager {
   clearAllZones() {
     Array.from(this.zoneMeshes.keys()).forEach(zoneID => this.removeZone(zoneID));
     this.zoneMeshes.clear();
+    this.highlightedZones.clear();
+  }
+  
+  /**
+   * Highlight or unhighlight a zone
+   */
+  highlightZone(zoneID, highlight) {
+    const mesh = this.zoneMeshes.get(zoneID);
+    if (!mesh) return;
+    
+    if (highlight) {
+      this.highlightedZones.add(zoneID);
+      // Add highlight effect (brighter outline, glow, etc.)
+      mesh.traverse((child) => {
+        if (child.isLineLoop || child.isLine) {
+          // Make outline brighter and thicker
+          if (child.material) {
+            child.material.color.multiplyScalar(1.5);
+            child.material.opacity = 1.0;
+            child.material.linewidth = 4;
+          }
+        }
+      });
+    } else {
+      this.highlightedZones.delete(zoneID);
+      // Restore original appearance
+      const zone = mesh.userData.zone;
+      if (zone) {
+        // Re-render zone to restore original appearance
+        this.renderZone(zone);
+      }
+    }
+  }
+  
+  /**
+   * Get zone from mesh
+   */
+  getZoneFromMesh(mesh) {
+    let current = mesh;
+    while (current) {
+      if (current.userData && current.userData.zone) {
+        return current.userData.zone;
+      }
+      current = current.parent;
+    }
+    return null;
   }
 
   getStats() {

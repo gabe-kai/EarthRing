@@ -1,392 +1,286 @@
 /**
  * Zone Management UI
- * Basic scaffolding for listing and creating zones via the API.
+ * Tool-based zone editor integrated into bottom toolbar
  */
 
-import { isAuthenticated, getCurrentUser } from '../auth/auth-service.js';
-import { createZone, fetchZonesByOwner, deleteZone } from '../api/zone-service.js';
+import { isAuthenticated } from '../auth/auth-service.js';
+import { TOOLS } from '../zones/zone-editor.js';
+import { showZoneInfoWindow, hideZoneInfoWindow } from './zone-info-window.js';
+import { addTab, setTabContent, switchTab } from './bottom-toolbar.js';
 
-let zonePanel = null;
+let zoneEditor = null;
+let zonesTabInitialized = false;
 
-export function showZonePanel() {
-  if (zonePanel) {
+export function initializeZonesTab() {
+  if (zonesTabInitialized) {
     return;
   }
 
   if (!isAuthenticated()) {
-    alert('Please log in to manage zones.');
     return;
   }
 
-  const currentUser = getCurrentUser();
+  // Get zone editor instance
+  zoneEditor = window.earthring?.zoneEditor;
+  if (!zoneEditor) {
+    console.warn('Zone editor is not initialized');
+    return;
+  }
 
-  zonePanel = document.createElement('div');
-  zonePanel.id = 'zone-panel';
-  zonePanel.innerHTML = `
-    <div class="zone-panel-content">
-      <div class="zone-panel-header">
-        <h2>Zone Editor (Scaffolding)</h2>
-        <button id="zone-panel-close" class="close-button">×</button>
-      </div>
+  // Create Zones tab
+  addTab('Zones', 'zones');
+  
+  // Create toolbar content
+  createZonesToolbarContent();
+  
+  // Listen for tab changes
+  window.addEventListener('toolbar:tab-changed', (event) => {
+    if (event.detail.tabId === 'zones') {
+      createZonesToolbarContent();
+    }
+  });
 
-      <div class="zone-panel-body">
-        <section class="zone-section">
-          <h3>Overlay Controls</h3>
-          <p class="help-text">Load nearby zones and render them in the viewport.</p>
-          <button id="zone-refresh-camera" class="action-button">Load Zones Near Camera</button>
-          <div id="zone-status" class="result-display"></div>
-        </section>
-
-        <section class="zone-section">
-          <h3>Create Rectangle Zone</h3>
-          <form id="zone-create-form" class="zone-form">
-            <div class="form-grid">
-              <label>Zone Name
-                <input type="text" id="zone-name" value="New Zone" required />
-              </label>
-              <label>Zone Type
-                <select id="zone-type">
-                  <option value="residential">Residential</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="industrial">Industrial</option>
-                  <option value="mixed-use">Mixed Use</option>
-                  <option value="park">Park</option>
-                </select>
-              </label>
-              <label>Floor
-                <input type="number" id="zone-floor" value="0" min="0" max="15" step="1" required />
-              </label>
-              <label>Center X (m)
-                <input type="number" id="zone-center-x" value="1000" step="100" required />
-              </label>
-              <label>Center Y (m)
-                <input type="number" id="zone-center-y" value="0" step="10" required />
-              </label>
-              <label>Length (m)
-                <input type="number" id="zone-length" value="500" min="50" step="50" required />
-              </label>
-              <label>Width (m)
-                <input type="number" id="zone-width" value="200" min="50" step="10" required />
-              </label>
-            </div>
-            <button type="submit" class="action-button">Create Zone</button>
-          </form>
-          <div id="zone-create-result" class="result-display"></div>
-        </section>
-
-        <section class="zone-section">
-          <h3>My Zones</h3>
-          <form id="zone-owner-form" class="zone-form inline">
-            <label>Owner ID
-              <input type="number" id="zone-owner-id" value="${currentUser?.id || ''}" min="1" required />
-            </label>
-            <button type="submit" class="action-button">Fetch Zones</button>
-          </form>
-          <div id="zone-list" class="zone-list"></div>
-          <div id="zone-owner-result" class="result-display"></div>
-        </section>
-      </div>
-    </div>
-  `;
-
-  const style = document.createElement('style');
-  style.textContent = `
-    #zone-panel {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: #111;
-      border: 2px solid #4caf50;
-      border-radius: 12px;
-      padding: 0;
-      width: 95%;
-      max-width: 720px;
-      max-height: 90vh;
-      overflow-y: auto;
-      z-index: 10001;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
-    }
-    .zone-panel-content {
-      padding: 1.5rem;
-    }
-    .zone-panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-      border-bottom: 1px solid #333;
-      padding-bottom: 1rem;
-    }
-    .zone-panel-header h2 {
-      color: #4caf50;
-      margin: 0;
-    }
-    .close-button {
-      background: #f44336;
-      color: white;
-      border: none;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 1.25rem;
-      line-height: 1;
-    }
-    .zone-panel-body {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-    .zone-section h3 {
-      margin: 0 0 0.5rem 0;
-      color: #fff;
-    }
-    .zone-section {
-      background: #1c1c1c;
-      border: 1px solid #222;
-      border-radius: 10px;
-      padding: 1rem;
-    }
-    .help-text {
-      color: #888;
-      margin-bottom: 0.75rem;
-    }
-    .action-button {
-      padding: 0.65rem 1.25rem;
-      background: #4caf50;
-      color: #000;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .zone-form {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .zone-form.inline {
-      flex-direction: row;
-      align-items: flex-end;
-      flex-wrap: wrap;
-    }
-    .zone-form label {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-      color: #ccc;
-      font-size: 0.9rem;
-    }
-    .zone-form input,
-    .zone-form select {
-      padding: 0.5rem;
-      border-radius: 6px;
-      border: 1px solid #333;
-      background: #121212;
-      color: #eee;
-    }
-    .form-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 0.75rem;
-    }
-    .result-display {
-      margin-top: 0.75rem;
-      padding: 0.75rem;
-      border-radius: 6px;
-      background: #141414;
-      border: 1px solid #333;
-      color: #ccc;
-      font-family: 'Courier New', monospace;
-      font-size: 0.85rem;
-      white-space: pre-wrap;
-      max-height: 200px;
-      overflow-y: auto;
-      display: none;
-    }
-    .result-display.show {
-      display: block;
-    }
-    .result-display.success {
-      border-color: #4caf50;
-      color: #b9f6ca;
-    }
-    .result-display.error {
-      border-color: #f44336;
-      color: #ff8a80;
-    }
-    .zone-list {
-      margin-top: 0.75rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .zone-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.75rem;
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 6px;
-    }
-    .zone-item-info {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-      color: #ccc;
-      font-size: 0.9rem;
-    }
-    .zone-item-info strong {
-      color: #fff;
-    }
-    .zone-type, .zone-floor {
-      font-size: 0.85rem;
-      color: #888;
-    }
-    .delete-button {
-      padding: 0.5rem 1rem;
-      background: #f44336;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.85rem;
-    }
-    .delete-button:hover {
-      background: #d32f2f;
-    }
-  `;
-
-  document.head.appendChild(style);
-  document.body.appendChild(zonePanel);
-
-  setupZonePanelListeners();
+  zonesTabInitialized = true;
 }
 
-export function hideZonePanel() {
-  if (zonePanel) {
-    zonePanel.remove();
-    zonePanel = null;
+function createZonesToolbarContent() {
+  const content = document.createElement('div');
+  content.className = 'zones-toolbar-content';
+  
+  // Zone type selection section
+  const zoneTypeSection = document.createElement('div');
+  zoneTypeSection.className = 'toolbar-section';
+  const zoneTypeLabel = document.createElement('span');
+  zoneTypeLabel.className = 'toolbar-section-label';
+  zoneTypeLabel.textContent = 'Zone Type';
+  zoneTypeSection.appendChild(zoneTypeLabel);
+  
+  const zoneTypes = [
+    { id: 'residential', icon: '🏠', label: 'Residential' },
+    { id: 'commercial', icon: '🏪', label: 'Commercial' },
+    { id: 'industrial', icon: '🏭', label: 'Industrial' },
+    { id: 'mixed-use', icon: '🏢', label: 'Mixed-Use' },
+    { id: 'park', icon: '🌳', label: 'Park' },
+    { id: 'restricted', icon: '🚫', label: 'Restricted' },
+  ];
+  
+  zoneTypes.forEach(({ id, icon, label }) => {
+    const button = createToolbarButton(icon, label, `zone-type-${id}`);
+    button.addEventListener('click', () => {
+      selectZoneType(id);
+    });
+    zoneTypeSection.appendChild(button);
+  });
+  
+  // Tool selection section
+  const toolSection = document.createElement('div');
+  toolSection.className = 'toolbar-section';
+  const toolLabel = document.createElement('span');
+  toolLabel.className = 'toolbar-section-label';
+  toolLabel.textContent = 'Tools';
+  toolSection.appendChild(toolLabel);
+  
+  const tools = [
+    { id: TOOLS.SELECT, icon: '👆', label: 'Select' },
+    { id: TOOLS.RECTANGLE, icon: '▭', label: 'Rectangle' },
+    { id: TOOLS.CIRCLE, icon: '○', label: 'Circle' },
+    { id: TOOLS.TORUS, icon: '⊚', label: 'Torus' },
+    { id: TOOLS.POLYGON, icon: '⬟', label: 'Polygon' },
+    { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush' },
+  ];
+  
+  tools.forEach(({ id, icon, label }) => {
+    const button = createToolbarButton(icon, label, `tool-${id}`);
+    button.addEventListener('click', () => {
+      selectTool(id);
+    });
+    toolSection.appendChild(button);
+  });
+  
+  // Settings section (floor, paintbrush radius)
+  const settingsSection = document.createElement('div');
+  settingsSection.className = 'toolbar-section';
+  
+  // Floor selector
+  const floorLabel = document.createElement('label');
+  floorLabel.style.cssText = 'display: flex; align-items: center; gap: 0.5rem; color: #888; font-size: 0.85rem;';
+  floorLabel.innerHTML = `
+    Floor: <input type="number" id="zone-floor-input" value="0" min="0" max="15" step="1" 
+           style="width: 60px; padding: 0.25rem; background: #121212; border: 1px solid #333; border-radius: 4px; color: #eee;" />
+  `;
+  settingsSection.appendChild(floorLabel);
+  
+  // Paintbrush radius (hidden by default)
+  const paintbrushRadiusLabel = document.createElement('label');
+  paintbrushRadiusLabel.id = 'paintbrush-radius-label';
+  paintbrushRadiusLabel.style.cssText = 'display: none; align-items: center; gap: 0.5rem; color: #888; font-size: 0.85rem; margin-left: 1rem;';
+  paintbrushRadiusLabel.innerHTML = `
+    Radius: <input type="number" id="paintbrush-radius-input" value="50" min="10" max="500" step="10" 
+           style="width: 80px; padding: 0.25rem; background: #121212; border: 1px solid #333; border-radius: 4px; color: #eee;" />
+  `;
+  settingsSection.appendChild(paintbrushRadiusLabel);
+  
+  // Info section
+  const infoSection = document.createElement('div');
+  infoSection.className = 'toolbar-info';
+  infoSection.id = 'zones-toolbar-info';
+  infoSection.innerHTML = `
+    <span>Tool: <span class="toolbar-info-value" id="current-tool-display">None</span></span>
+    <span>Type: <span class="toolbar-info-value" id="current-type-display">Residential</span></span>
+  `;
+  
+  content.appendChild(zoneTypeSection);
+  content.appendChild(toolSection);
+  content.appendChild(settingsSection);
+  content.appendChild(infoSection);
+  
+  setTabContent('zones', content);
+  
+  // Set up event listeners
+  setupZonesToolbarListeners();
+  
+  // Set default zone type
+  selectZoneType('residential');
+}
+
+function createToolbarButton(icon, label, id) {
+  const button = document.createElement('div');
+  button.className = 'toolbar-button';
+  button.id = id;
+  button.innerHTML = `
+    <span class="toolbar-button-icon">${icon}</span>
+    <span class="toolbar-button-label">${label}</span>
+  `;
+  return button;
+}
+
+function selectZoneType(zoneType) {
+  // Update button states
+  const buttons = document.querySelectorAll('[id^="zone-type-"]');
+  buttons.forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.id === `zone-type-${zoneType}`) {
+      btn.classList.add('active');
+    }
+  });
+  
+  // Update editor
+  if (zoneEditor) {
+    zoneEditor.setZoneType(zoneType);
+  }
+  
+  // Update info display
+  const typeDisplay = document.getElementById('current-type-display');
+  if (typeDisplay) {
+    const labels = {
+      residential: 'Residential',
+      commercial: 'Commercial',
+      industrial: 'Industrial',
+      'mixed-use': 'Mixed-Use',
+      park: 'Park',
+      restricted: 'Restricted',
+    };
+    typeDisplay.textContent = labels[zoneType] || zoneType;
   }
 }
 
-function setupZonePanelListeners() {
-  const zoneList = document.getElementById('zone-list');
+function selectTool(tool) {
+  // Update button states
+  const buttons = document.querySelectorAll('[id^="tool-"]');
+  buttons.forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.id === `tool-${tool}`) {
+      btn.classList.add('active');
+    }
+  });
   
-  document.getElementById('zone-panel-close').addEventListener('click', hideZonePanel);
+  // Show/hide paintbrush radius control
+  const paintbrushRadiusLabel = document.getElementById('paintbrush-radius-label');
+  if (paintbrushRadiusLabel) {
+    paintbrushRadiusLabel.style.display = tool === TOOLS.PAINTBRUSH ? 'flex' : 'none';
+  }
+  
+  // Set tool in editor
+  if (zoneEditor) {
+    zoneEditor.setTool(tool);
+  }
+  
+  // Update info display
+  const toolDisplay = document.getElementById('current-tool-display');
+  if (toolDisplay) {
+    const toolLabels = {
+      [TOOLS.SELECT]: 'Select',
+      [TOOLS.RECTANGLE]: 'Rectangle',
+      [TOOLS.CIRCLE]: 'Circle',
+      [TOOLS.TORUS]: 'Torus',
+      [TOOLS.POLYGON]: 'Polygon',
+      [TOOLS.PAINTBRUSH]: 'Paintbrush',
+      [TOOLS.NONE]: 'None',
+    };
+    toolDisplay.textContent = toolLabels[tool] || 'None';
+  }
+}
 
-  document.getElementById('zone-refresh-camera').addEventListener('click', async () => {
-    const status = document.getElementById('zone-status');
-    status.textContent = 'Requesting zones near camera...';
-    status.className = 'result-display show';
-    try {
-      const zoneManager = window.earthring?.zoneManager;
-      if (!zoneManager) {
-        throw new Error('Zone manager is unavailable');
+function setupZonesToolbarListeners() {
+  // Floor input
+  const floorInput = document.getElementById('zone-floor-input');
+  if (floorInput) {
+    floorInput.addEventListener('change', (e) => {
+      const floor = parseInt(e.target.value, 10);
+      if (zoneEditor) {
+        zoneEditor.setFloor(floor);
       }
-      await zoneManager.loadZonesAroundCamera();
-      status.textContent = 'Zones refreshed around camera. Check the viewport for overlays.';
-      status.className = 'result-display show success';
-    } catch (error) {
-      status.textContent = `Error: ${error.message}`;
-      status.className = 'result-display show error';
-    }
-  });
-
-  document.getElementById('zone-create-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const result = document.getElementById('zone-create-result');
-
-    try {
-      const name = document.getElementById('zone-name').value.trim();
-      const zoneType = document.getElementById('zone-type').value;
-      const floor = parseInt(document.getElementById('zone-floor').value, 10);
-      const centerX = parseFloat(document.getElementById('zone-center-x').value);
-      const centerY = parseFloat(document.getElementById('zone-center-y').value);
-      const length = parseFloat(document.getElementById('zone-length').value);
-      const width = parseFloat(document.getElementById('zone-width').value);
-
-      const geometry = rectangleGeoJSON(centerX, centerY, length, width);
-
-      const zone = await createZone({
-        name,
-        zone_type: zoneType,
-        floor,
-        geometry,
-        properties: { created_by: 'client-ui' },
+    });
+  }
+  
+  // Paintbrush radius input
+  const paintbrushRadiusInput = document.getElementById('paintbrush-radius-input');
+  if (paintbrushRadiusInput) {
+    paintbrushRadiusInput.addEventListener('change', (e) => {
+      const radius = parseFloat(e.target.value);
+      if (zoneEditor) {
+        zoneEditor.setPaintbrushRadius(radius);
+      }
+    });
+  }
+  
+  // Zone editor callbacks
+  if (zoneEditor) {
+    zoneEditor.onToolChangeCallbacks.push((tool) => {
+      // Update UI when tool changes programmatically
+      const buttons = document.querySelectorAll('[id^="tool-"]');
+      buttons.forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.id === `tool-${tool}`) {
+          btn.classList.add('active');
+        }
       });
-
-      result.textContent = JSON.stringify(zone, null, 2);
-      result.className = 'result-display show success';
-
-      const zoneManager = window.earthring?.zoneManager;
-      if (zoneManager) {
-        window.earthring.gameStateManager?.upsertZone(zone);
-        zoneManager.renderZone(zone);
+      
+      // Update paintbrush radius visibility
+      const paintbrushRadiusLabel = document.getElementById('paintbrush-radius-label');
+      if (paintbrushRadiusLabel) {
+        paintbrushRadiusLabel.style.display = tool === TOOLS.PAINTBRUSH ? 'flex' : 'none';
       }
-    } catch (error) {
-      result.textContent = `Error: ${error.message}`;
-      result.className = 'result-display show error';
-    }
-  });
-
-  document.getElementById('zone-owner-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const result = document.getElementById('zone-owner-result');
-    const ownerID = parseInt(document.getElementById('zone-owner-id').value, 10);
-
-    result.textContent = 'Loading zones...';
-    result.className = 'result-display show';
-    zoneList.innerHTML = '';
-
-    try {
-      const zones = await fetchZonesByOwner(ownerID);
-      if (!zones || zones.length === 0) {
-        result.textContent = 'No zones found for this owner.';
-        result.className = 'result-display show';
-      } else {
-        result.textContent = `Found ${zones.length} zone(s)`;
-        result.className = 'result-display show success';
-        
-        // Display zones with delete buttons
-        zones.forEach(zone => {
-          const zoneItem = document.createElement('div');
-          zoneItem.className = 'zone-item';
-          zoneItem.innerHTML = `
-            <div class="zone-item-info">
-              <strong>${zone.name || `Zone ${zone.id}`}</strong>
-              <span class="zone-type">${zone.zone_type || 'default'}</span>
-              <span class="zone-floor">Floor ${zone.floor ?? 0}</span>
-            </div>
-            <button class="delete-button" data-zone-id="${zone.id}">Delete</button>
-          `;
-          zoneList.appendChild(zoneItem);
-        });
+      
+      // Update tool display
+      const toolDisplay = document.getElementById('current-tool-display');
+      if (toolDisplay) {
+        const toolLabels = {
+          [TOOLS.SELECT]: 'Select',
+          [TOOLS.RECTANGLE]: 'Rectangle',
+          [TOOLS.CIRCLE]: 'Circle',
+          [TOOLS.TORUS]: 'Torus',
+          [TOOLS.POLYGON]: 'Polygon',
+          [TOOLS.PAINTBRUSH]: 'Paintbrush',
+          [TOOLS.NONE]: 'None',
+        };
+        toolDisplay.textContent = toolLabels[tool] || 'None';
       }
-    } catch (error) {
-      result.textContent = `Error: ${error.message}`;
-      result.className = 'result-display show error';
-    }
-  });
+    });
 
-  // Handle delete button clicks (use event delegation)
-  if (zoneList) {
-    zoneList.addEventListener('click', async (event) => {
-    if (event.target.classList.contains('delete-button')) {
-      const zoneID = parseInt(event.target.getAttribute('data-zone-id'), 10);
-      if (!confirm(`Are you sure you want to delete zone ${zoneID}?`)) {
-        return;
-      }
-
-      try {
-        await deleteZone(zoneID);
-        // Remove zone from UI
-        event.target.closest('.zone-item').remove();
-        // Remove zone from game state and scene
+    zoneEditor.onZoneSelectedCallbacks.push((zone) => {
+      showZoneInfoWindow(zone, (zoneID) => {
+        // Handle zone deletion
         const zoneManager = window.earthring?.zoneManager;
         const gameStateManager = window.earthring?.gameStateManager;
         if (gameStateManager) {
@@ -395,37 +289,30 @@ function setupZonePanelListeners() {
         if (zoneManager) {
           zoneManager.removeZone(zoneID);
         }
-        // Update result message
-        const result = document.getElementById('zone-owner-result');
-        result.textContent = `Zone ${zoneID} deleted successfully.`;
-        result.className = 'result-display show success';
-      } catch (error) {
-        const result = document.getElementById('zone-owner-result');
-        result.textContent = `Error deleting zone: ${error.message}`;
-        result.className = 'result-display show error';
-      }
-    }
+        zoneEditor.deselectZone();
+      });
+    });
+
+    zoneEditor.onZoneCreatedCallbacks.push((zone) => {
+      console.log('Zone created:', zone);
     });
   }
 }
 
-function rectangleGeoJSON(centerX, centerY, length, width) {
-  const halfLength = length / 2;
-  const halfWidth = width / 2;
-
-  const coordinates = [
-    [
-      [centerX - halfLength, centerY - halfWidth],
-      [centerX + halfLength, centerY - halfWidth],
-      [centerX + halfLength, centerY + halfWidth],
-      [centerX - halfLength, centerY + halfWidth],
-      [centerX - halfLength, centerY - halfWidth],
-    ],
-  ];
-
-  return {
-    type: 'Polygon',
-    coordinates,
-  };
+export function showZonePanel() {
+  // Switch to zones tab if toolbar exists
+  switchTab('zones');
+  
+  // Initialize if not already done
+  if (!zonesTabInitialized) {
+    initializeZonesTab();
+  }
 }
 
+export function hideZonePanel() {
+  hideZoneInfoWindow();
+  // Deselect tool when panel closes
+  if (zoneEditor) {
+    zoneEditor.setTool(TOOLS.NONE);
+  }
+}

@@ -7,13 +7,15 @@ import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
-import { showZonePanel } from './ui/zone-ui.js';
+import { initializeZonesTab } from './ui/zone-ui.js';
+import { createBottomToolbar } from './ui/bottom-toolbar.js';
 import * as THREE from 'three';
 import { SceneManager } from './rendering/scene-manager.js';
 import { CameraController } from './input/camera-controller.js';
 import { GameStateManager } from './state/game-state.js';
 import { ChunkManager } from './chunks/chunk-manager.js';
 import { ZoneManager } from './zones/zone-manager.js';
+import { ZoneEditor } from './zones/zone-editor.js';
 import { GridOverlay } from './rendering/grid-overlay.js';
 import { DebugInfoPanel } from './ui/debug-info.js';
 import { createZonesToolbar } from './ui/zones-toolbar.js';
@@ -45,6 +47,7 @@ const gridOverlay = new GridOverlay(sceneManager, cameraController, {
   fadeStart: 0.7, // Start fading at 70% of radius
 });
 const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
+const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 createZonesToolbar(zoneManager, gridOverlay);
 
 // Initialize debug info panel
@@ -162,6 +165,9 @@ sceneManager.onRender((deltaTime) => {
   debugPanel.update();
 });
 
+// Initialize bottom toolbar
+createBottomToolbar();
+
 // Start rendering loop
 sceneManager.start();
 
@@ -175,6 +181,9 @@ if (isAuthenticated()) {
   if (token) {
     gameStateManager.updateConnectionState('api', { authenticated: true });
   }
+  
+  // Initialize zones tab in toolbar
+  initializeZonesTab();
 } else {
   showAuthUI();
   console.log('Showing authentication UI');
@@ -185,6 +194,9 @@ window.addEventListener('auth:login', async () => {
   console.log('User logged in');
   showUserInfo();
   gameStateManager.updateConnectionState('api', { authenticated: true });
+  
+  // Initialize zones tab in toolbar
+  initializeZonesTab();
   
   // Connect WebSocket after authentication
   try {
@@ -204,6 +216,9 @@ window.addEventListener('auth:register', async () => {
   console.log('User registered');
   showUserInfo();
   gameStateManager.updateConnectionState('api', { authenticated: true });
+  
+  // Initialize zones tab in toolbar
+  initializeZonesTab();
   
   // Connect WebSocket after registration
   try {
@@ -240,9 +255,6 @@ window.addEventListener('show:chunk-panel', () => {
   showChunkPanel();
 });
 
-window.addEventListener('show:zone-panel', () => {
-  showZonePanel();
-});
 
 // WebSocket connection event handlers
 wsClient.onOpen(async () => {
@@ -293,6 +305,7 @@ window.earthring = {
   gameStateManager,
   chunkManager,
   zoneManager,
+  zoneEditor,
   gridOverlay,
   debugPanel,
   wsClient,

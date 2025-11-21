@@ -400,31 +400,51 @@ Manages chunk loading and unloading based on viewport.
 - Typed helpers for area queries, owner listing, and CRUD operations (auth-required)
 - Centralizes error handling / token injection for the new zone endpoints
 
+**Bottom Toolbar** (`client-web/src/ui/bottom-toolbar.js`):
+- Horizontal toolbar fixed at the bottom of the screen
+- Tab-based system for different tool categories
+- "Zones" tab contains zone type selection, drawing tools, and settings
+- Zone type buttons: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted
+- Drawing tools: Select, Rectangle, Circle, Torus, Polygon, Paintbrush
+- Settings: Floor selector, Paintbrush radius (conditional)
+- Single-row horizontal layout with horizontal scrolling for overflow
+
 **Zones Toolbar** (`client-web/src/ui/zones-toolbar.js`):
-- Left-side vertical expandable toolbar with "Z" icon
+- Left-side vertical expandable toolbar with "Z" icon (legacy, may be deprecated)
 - Controls for grid visibility and all zone types
 - Per-zone-type visibility toggles (Show/Hide buttons)
 - Smooth expand/collapse animation
 
-**Zone UI Panel** (`client-web/src/ui/zone-ui.js`):
+**Zone UI** (`client-web/src/ui/zone-ui.js`):
+- Integrated into bottom toolbar "Zones" tab
 - Provides interface for:
-  - Creating zones (rectangular zones with name, type, floor, dimensions)
-  - Listing zones by owner with delete buttons
-  - Deleting zones with confirmation dialog
-  - Refreshing zones around camera position
-- Integrated with ZoneManager and GameStateManager for real-time updates
+  - Zone type selection (6 types: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+  - Drawing tool selection (Select, Rectangle, Circle, Torus, Polygon, Paintbrush)
+  - Floor selection for new zones
+  - Paintbrush radius setting (when paintbrush tool is active)
+  - Current tool and zone type display
+- Zone selection: Click zones to select and view info window with details and "Dezone" button
+- Integrated with ZoneEditor, ZoneManager, and GameStateManager for real-time updates
 - Delete functionality removes zones from scene and game state immediately
-- Future work: freeform drawing, vertex editing, overlap indicators
+- Future work: vertex editing, overlap indicators, advanced conflict resolution
 
 **Usage Example**:
 ```javascript
 import { ZoneManager } from './zones/zone-manager.js';
+import { ZoneEditor } from './zones/zone-editor.js';
 import { GridOverlay } from './rendering/grid-overlay.js';
-import { createZonesToolbar } from './ui/zones-toolbar.js';
+import { createBottomToolbar } from './ui/bottom-toolbar.js';
+import { initializeZonesTab } from './ui/zone-ui.js';
 
 const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
 const gridOverlay = new GridOverlay(sceneManager, cameraController, { radius: 250 });
-createZonesToolbar(zoneManager, gridOverlay);
+const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
+
+// Initialize bottom toolbar
+const toolbar = createBottomToolbar();
+
+// Initialize zones tab (after authentication)
+initializeZonesTab();
 
 // Zones are automatically fetched and rendered based on camera position
 // Call in render loop:
@@ -496,14 +516,6 @@ gridOverlay.setVisible(false); // Hide grid
 
 1. **Zones Not Appearing:**
    - Check authentication: `isAuthenticated()` must return true
-   
-**Authentication Service** (`client-web/src/auth/auth-service.js`):
-- Automatic token refresh: Tokens are automatically refreshed 2 minutes before expiration
-- Token expiration checking: `isTokenExpired()` validates token expiration with configurable buffer
-- Rate-limited refresh: Refresh attempts are rate-limited (5 second minimum between attempts) to prevent server overload
-- Graceful error handling: Failed refresh attempts clear tokens and require re-authentication
-- API request integration: All API requests automatically check and refresh tokens before making requests
-- Stops pinging server: Zone loading stops making requests when authentication fails, preventing "too many requests" errors
    - Check fetch throttling: Wait 4 seconds between manual fetches
    - Check visibility: `zoneManager.zonesVisible` and per-type visibility
    - Check console for errors: `zoneManager.logZoneState()` for debug info
@@ -524,6 +536,20 @@ gridOverlay.setVisible(false); // Hide grid
    - Check both global and per-type visibility: `zoneManager.zonesVisible` and `zoneManager.zoneTypeVisibility`
    - Call `zoneManager.updateAllZoneVisibility()` after manual visibility changes
    - Verify zone type normalization: `mixed_use` vs `mixed-use` handling
+
+**Authentication Service** (`client-web/src/auth/auth-service.js`):
+- Automatic token refresh: Tokens are automatically refreshed 2 minutes before expiration
+- Token expiration checking: `isTokenExpired()` validates token expiration with configurable buffer
+- Rate-limited refresh: Refresh attempts are rate-limited (5 second minimum between attempts) to prevent server overload
+- Graceful error handling: Failed refresh attempts clear tokens and require re-authentication
+- API request integration: All API requests automatically check and refresh tokens before making requests
+- Stops pinging server: Zone loading stops making requests when authentication fails, preventing "too many requests" errors
+
+**Authentication UI** (`client-web/src/auth/auth-ui.js`):
+- Login/registration overlay modal (centered on screen)
+- User info bar: Top-right panel showing "Logged In As [username]" with Player, Chunks, and Logout buttons
+- Zones button removed from user info bar (zone editor now accessible via bottom toolbar "Zones" tab)
+- Automatically shows/hides based on authentication state
 
 **Expanding the System:**
 
@@ -654,8 +680,11 @@ client-web/
 │   ├── ui/
 │   │   ├── player-ui.js               ✅ Player panel
 │   │   ├── chunk-ui.js                ✅ Chunk panel
-│   │   ├── zone-ui.js                 ✅ Zone panel
-│   │   └── zones-toolbar.js           ✅ Zones toolbar
+│   │   ├── zone-ui.js                 ✅ Zone UI (bottom toolbar integration)
+│   │   ├── zone-info-window.js        ✅ Zone info window
+│   │   ├── bottom-toolbar.js          ✅ Bottom toolbar (tabs system)
+│   │   ├── zones-toolbar.js           ✅ Zones toolbar (legacy, left-side)
+│   │   └── debug-info.js              ✅ Debug info panel
 │   ├── rendering/
 │   │   ├── scene-manager.js           ✅ Scene manager
 │   │   └── grid-overlay.js            ✅ Grid overlay
@@ -941,13 +970,26 @@ class GraphicsAbstraction {
 ### UI Components
 
 1. **HUD (Heads-Up Display)**
-   - Player info (level, currency)
-   - Minimap
-   - Notifications
+   - Player info (level, currency) - Top-right "Logged In As" panel
+   - Minimap - Future
+   - Notifications - Future
 
-2. **Zone Editor**
-   - Current scaffolding: zone panel (web) that loads nearby zones, renders overlays, and submits rectangular samples to the REST API
-   - Roadmap: polygon drawing/vertex editing, conflict indicators, zone list & metadata inspector
+2. **Debug Info Panel** (`client-web/src/ui/debug-info.js`):
+   - Positioned top-right, below user info panel
+   - Starts minimized (collapsed) by default
+   - Displays performance metrics (FPS, frame time, draw calls, triangles, geometries, textures)
+   - Shows camera position (EarthRing and Three.js coordinates), floor, and target
+   - Shows grid position, radius, and spacing
+   - Shows rendering stats (scene objects, chunks loaded, zones loaded, renderer size)
+   - Collapsible sections for each category
+   - Click header to expand/collapse entire panel
+
+3. **Zone Editor**
+   - Bottom toolbar "Zones" tab with zone type selection and drawing tools
+   - Tools: Select, Rectangle, Circle, Torus, Polygon, Paintbrush
+   - Zone selection with info window showing details and delete option
+   - Current implementation: zone creation, selection, deletion via REST API
+   - Roadmap: vertex editing, overlap indicators, advanced conflict resolution
 
 3. **Structure Placer**
    - Structure selection
@@ -1079,9 +1121,10 @@ class GraphicsAbstraction {
    - **Wide Mode** (wider than 16:9): Side panel UI with centered game viewport
 
 2. **Panel System**:
-   - Left panel: Toolbars, menus, zone editor
-   - Right panel: Information displays, minimap, chat, notifications
-   - Bottom panel: HUD elements (when in standard mode)
+   - **Top-right**: User info panel ("Logged In As [username]" with Player/Chunks/Logout buttons), Debug Info panel (below user info, starts minimized)
+   - **Bottom**: Horizontal toolbar with tabs (Zones tab contains zone editor tools: zone type selection, drawing tools, settings)
+   - **Left-side**: Legacy zones toolbar (may be deprecated in favor of bottom toolbar)
+   - **Future panels**: Minimap, chat, notifications (to be positioned as needed)
    - Panels slide in/out based on screen width and user preferences
 
 3. **Viewport Management**:
