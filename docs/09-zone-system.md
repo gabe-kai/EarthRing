@@ -161,8 +161,9 @@ The zone editor provides multiple tools for creating zones:
 1. **Drawing Workflow**
    - Select a drawing tool from the toolbar
    - Click and drag (for Rectangle, Circle, Torus, Paintbrush) or click multiple points (for Polygon)
-   - Preview appears while drawing
+   - Preview appears while drawing and matches the final zone exactly (preview coordinates are aligned with the zone rendering coordinate system)
    - Release mouse or finish polygon to create zone
+   - The preview and final zone both use the exact mouse release position for accurate placement
 
 2. **Validation Rules**
    - Minimum 3 vertices (triangle) for polygon tool

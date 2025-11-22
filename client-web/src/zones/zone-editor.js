@@ -69,6 +69,7 @@ export class ZoneEditor {
    */
   createRaycastPlane() {
     // Create a large plane at floor 0 for raycasting
+    // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT, so floor 0 is at Y=0
     const planeGeometry = new THREE.PlaneGeometry(1000000, 1000000);
     const planeMaterial = new THREE.MeshBasicMaterial({ 
       visible: false,
@@ -76,7 +77,7 @@ export class ZoneEditor {
     });
     this.raycastPlane = new THREE.Mesh(planeGeometry, planeMaterial);
     this.raycastPlane.rotation.x = -Math.PI / 2; // Horizontal plane
-    this.raycastPlane.position.y = DEFAULT_FLOOR_HEIGHT;
+    this.raycastPlane.position.y = this.currentFloor * DEFAULT_FLOOR_HEIGHT; // Match zone rendering position
     this.scene.add(this.raycastPlane);
   }
   
@@ -265,14 +266,25 @@ export class ZoneEditor {
     if (event.button !== 0) return;
     if (!this.isDrawing) return;
     
-    const earthRingPos = this.getEarthRingPositionFromMouse(event);
-    if (!earthRingPos) return;
+    // Get the actual mouse release position from the event
+    // This ensures the final zone goes exactly where the cursor is when released
+    const endPos = this.getEarthRingPositionFromMouse(event);
+    if (!endPos) return;
+    
+    // Update currentPoint to match
+    this.currentPoint = endPos;
+    
+    // Update preview one final time with the actual release position
+    // This ensures the preview shows exactly what will be created
+    if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
+      this.updatePreview(endPos);
+    }
     
     // DEBUG: Log release position
     if (window.DEBUG_ZONE_COORDS) {
       const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
       console.log('[ZoneEditor] Mouse UP:', {
-        earthRingPos: { ...earthRingPos },
+        earthRingPos: { ...endPos },
         cameraX: cameraPos.x,
         tool: this.currentTool,
         startPoint: this.startPoint,
@@ -281,7 +293,7 @@ export class ZoneEditor {
     
     // Finish drawing for drag-based tools
     if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
-      this.finishDrawing(earthRingPos);
+      this.finishDrawing(endPos);
     }
   }
   
@@ -312,14 +324,6 @@ export class ZoneEditor {
   updatePreview(currentPos) {
     if (!this.startPoint || !currentPos) return;
     
-    // Remove old preview
-    if (this.previewMesh) {
-      this.scene.remove(this.previewMesh);
-      if (this.previewMesh.geometry) this.previewMesh.geometry.dispose();
-      if (this.previewMesh.material) this.previewMesh.material.dispose();
-      this.previewMesh = null;
-    }
-    
     let geometry;
     
     try {
@@ -344,19 +348,32 @@ export class ZoneEditor {
       }
       
       if (geometry) {
-        const material = new THREE.MeshBasicMaterial({
-          color: this.getToolColor(),
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-          depthTest: false,
-        });
-        this.previewMesh = new THREE.Mesh(geometry, material);
-        this.previewMesh.rotation.x = -Math.PI / 2;
-        this.previewMesh.position.y = DEFAULT_FLOOR_HEIGHT + (this.currentFloor * 5) + 0.001;
-        this.previewMesh.renderOrder = 10; // Render above zones
-        this.scene.add(this.previewMesh);
+        // Reuse existing mesh and material if possible for better performance
+        if (this.previewMesh) {
+          // Dispose old geometry
+          if (this.previewMesh.geometry) {
+            this.previewMesh.geometry.dispose();
+          }
+          // Update geometry only (keeps material and mesh)
+          this.previewMesh.geometry = geometry;
+        } else {
+          // Create new mesh on first preview
+          const material = new THREE.MeshBasicMaterial({
+            color: this.getToolColor(),
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            depthTest: false,
+          });
+          this.previewMesh = new THREE.Mesh(geometry, material);
+          this.previewMesh.rotation.x = -Math.PI / 2;
+          // Use the same floor height calculation as zone rendering
+          const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+          this.previewMesh.position.y = floorHeight + 0.001;
+          this.previewMesh.renderOrder = 10; // Render above zones
+          this.scene.add(this.previewMesh);
+        }
       }
     } catch (error) {
       console.error('Error creating preview geometry:', error);
@@ -738,8 +755,11 @@ export class ZoneEditor {
    */
   setFloor(floor) {
     this.currentFloor = floor;
-    // Update raycast plane position
-    this.raycastPlane.position.y = DEFAULT_FLOOR_HEIGHT + (floor * 5); // Assuming 5m per floor
+    // Update raycast plane position to match zone rendering
+    // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT
+    if (this.raycastPlane) {
+      this.raycastPlane.position.y = floor * DEFAULT_FLOOR_HEIGHT;
+    }
   }
   
   /**
@@ -775,40 +795,96 @@ export class ZoneEditor {
   // Geometry creation methods
   
   createRectanglePreview(start, end) {
-    // Use the same coordinate conversion as final geometry to ensure preview matches
-    const minX = Math.min(start.x, end.x);
-    const maxX = Math.max(start.x, end.x);
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createRectangleGeometry)
+    let minX = Math.min(start.x, end.x);
+    let maxX = Math.max(start.x, end.x);
     const minY = Math.min(start.y, end.y);
     const maxY = Math.max(start.y, end.y);
     
-    // Convert to absolute coordinates (same as final geometry)
-    const absMinX = this.convertRelativeToAbsoluteX(minX);
-    const absMaxX = this.convertRelativeToAbsoluteX(maxX);
+    // DEBUG: Log preview input coordinates
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview input:', {
+        start: { ...start },
+        end: { ...end },
+        minX, maxX, minY, maxY,
+      });
+    }
     
-    // Create preview using the same wrapping logic as final rendering
-    // Wrap each corner point relative to camera (same as wrapZoneX in zone-manager.js)
+    // Convert to absolute coordinates (EXACT same conversion as final geometry)
+    const originalMinX = minX;
+    const originalMaxX = maxX;
+    minX = this.convertRelativeToAbsoluteX(minX);
+    maxX = this.convertRelativeToAbsoluteX(maxX);
+    
+    // DEBUG: Log after conversion
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview after conversion:', {
+        originalMinX,
+        originalMaxX,
+        convertedMinX: minX,
+        convertedMaxX: maxX,
+      });
+    }
+    
+    // Ensure minX < maxX (same as createRectangleGeometry)
+    if (minX >= maxX) {
+      [minX, maxX] = [Math.min(minX, maxX), Math.max(minX, maxX)];
+      if (minX >= maxX) {
+        const RING_CIRCUMFERENCE = 264000000;
+        minX = Math.max(0, minX - 1000);
+        maxX = Math.min(RING_CIRCUMFERENCE, maxX + 1000);
+      }
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
     const cameraX = wrapRingPosition(cameraPos.x);
     
-    // Wrap coordinates relative to camera for preview (same as rendering)
-    const wrappedMinX = normalizeRelativeToCamera(absMinX, cameraX);
-    const wrappedMaxX = normalizeRelativeToCamera(absMaxX, cameraX);
+    // DEBUG: Log camera and wrapping info
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview wrapping:', {
+        cameraPos: { ...cameraPos },
+        cameraX,
+        absMinX: minX,
+        absMaxX: maxX,
+      });
+    }
     
-    // Create shape from rectangle corners (same approach as zone rendering)
-    // Negate Y coordinate (worldPos.z) for negative Y to ensure correct face direction after rotation
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      const wrapped = normalizeRelativeToCamera(x, cameraX);
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] Preview wrapZoneX:', {
+          absoluteX: x,
+          cameraX,
+          wrapped,
+        });
+      }
+      return wrapped;
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
     const hasNegativeY = minY < 0 || maxY < 0;
     const shape = new THREE.Shape();
+    
+    // Use the exact stored absolute coordinates and wrap them (same as rendering)
     const corners = [
-      [wrappedMinX, minY],
-      [wrappedMaxX, minY],
-      [wrappedMaxX, maxY],
-      [wrappedMinX, maxY],
+      [minX, minY],  // These are the absolute coordinates that will be stored
+      [maxX, minY],
+      [maxX, maxY],
+      [minX, maxY],
     ];
     
+    // Build shape EXACTLY as zone-manager.js does (identical code)
     let firstPos = null;
     corners.forEach(([x, y], idx) => {
-      const worldPos = toThreeJS({ x, y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      // Negate worldPos.z (EarthRing Y) if Y is negative to fix face direction
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
       const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
       if (idx === 0) {
         firstPos = { x: worldPos.x, z: shapeY };
@@ -817,16 +893,26 @@ export class ZoneEditor {
         shape.lineTo(worldPos.x, shapeY);
       }
     });
-    // Close the shape by returning to first point
+    
+    // Explicitly close the shape
     if (firstPos) {
       shape.lineTo(firstPos.x, firstPos.z);
     }
     
+    // DEBUG: Log final preview shape info
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview final:', {
+        storedMinX: minX,
+        storedMaxX: maxX,
+        storedMinY: minY,
+        storedMaxY: maxY,
+        firstShapePos: firstPos,
+        hasNegativeY,
+      });
+    }
+    
     // Create geometry from shape (same as zone rendering)
     const geometry = new THREE.ShapeGeometry(shape);
-    
-    // No logging here - this function is called on every mouse move during dragging
-    // Key information is logged in onMouseDown, onMouseUp, and finishDrawing
     
     return geometry;
   }
