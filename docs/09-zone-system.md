@@ -164,6 +164,11 @@ The zone editor provides multiple tools for creating zones:
    - Preview appears while drawing and matches the final zone exactly (preview coordinates are aligned with the zone rendering coordinate system)
    - Release mouse or finish polygon to create zone
    - The preview and final zone both use the exact mouse release position for accurate placement
+   - **Preview Accuracy**: All tools (Rectangle, Circle, Torus, Polygon, Paintbrush) generate previews using the exact same coordinate system as the final zone rendering:
+     - Previews generate the exact absolute coordinates that will be stored in the database
+     - Coordinates are wrapped relative to the camera using unwrapped camera position (matching zone-manager.js behavior)
+     - Shape Y coordinates are always negated for fill shapes to ensure correct face orientation after rotation
+     - This ensures 100% match between preview and final rendered zone
 
 2. **Validation Rules**
    - Minimum 3 vertices (triangle) for polygon tool

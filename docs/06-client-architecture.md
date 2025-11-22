@@ -467,9 +467,19 @@ gridOverlay.setVisible(false); // Hide grid
      - `THREE.LineLoop` with `THREE.BufferGeometry` for the colored outline
    - Zones use `renderOrder = 5` to appear above the grid (`renderOrder = 1`)
    - Materials use `depthWrite: false` and `depthTest: false` to prevent z-fighting with floor geometry
+   - **Shape Coordinate System**: Fill shapes (ShapeGeometry) always negate `worldPos.z` for shape Y coordinates to ensure correct face orientation after -90° X rotation, regardless of whether the zone is on the Y+ or Y- side of the ring
 
 2. **Ring Wrapping:**
    - Zones wrap around the 264,000 km ring circumference using the same logic as chunks
+   - Zone coordinates are stored as absolute values [0, RING_CIRCUMFERENCE) in the database
+   - During rendering, coordinates are wrapped relative to the camera using unwrapped camera position
+   - `normalizeRelativeToCamera` expects unwrapped camera position and handles wrapping internally
+
+3. **Preview Rendering (Zone Editor):**
+   - All drawing tools (Rectangle, Circle, Torus, Polygon, Paintbrush) use identical coordinate conversion logic
+   - Previews generate the exact absolute coordinates that will be stored in the database
+   - Coordinates are then wrapped using the same logic as zone-manager.js (unwrapped camera position, always negate worldPos.z for fill shapes)
+   - This ensures 100% match between preview and final rendered zone
    - The `wrapZoneX()` function calculates the shortest path around the ring:
      ```javascript
      const wrapZoneX = (x) => {

@@ -1041,19 +1041,75 @@ export class ZoneEditor {
   }
   
   createCirclePreview(center, edge) {
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createCircleGeometry)
     const radius = Math.sqrt(
       Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
     );
-    const geometry = new THREE.CircleGeometry(radius, 64);
+    const segments = 64;
     
-    // Convert center to absolute coordinates (same as final geometry)
+    // Convert center to absolute coordinates first (same as final geometry)
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const threeJSPos = toThreeJS({
-      x: absCenterX,
-      y: center.y,
-      z: this.currentFloor,
-    }, this.currentFloor);
-    geometry.translate(threeJSPos.x, 0, threeJSPos.z);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate points around the circle using absolute center
+    // This matches the exact coordinates that will be stored
+    const absoluteCoords = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const x = absCenterX + radius * Math.cos(angle);
+      const y = absCenterY + radius * Math.sin(angle);
+      absoluteCoords.push([x, y]);
+    }
+    // Close the circle
+    if (absoluteCoords.length > 0) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
+    const shape = new THREE.Shape();
+    
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
+    }
+    
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1192,20 +1248,104 @@ export class ZoneEditor {
   }
   
   createTorusPreview(center, edge) {
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createTorusGeometry)
     const outerRadius = Math.sqrt(
       Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
     );
     const innerRadius = outerRadius * 0.6; // Torus inner radius is 60% of outer
-    const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
+    const segments = 64;
     
-    // Convert center to absolute coordinates (same as final geometry)
+    // Convert center to absolute coordinates first (same as final geometry)
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const threeJSPos = toThreeJS({
-      x: absCenterX,
-      y: center.y,
-      z: this.currentFloor,
-    }, this.currentFloor);
-    geometry.translate(threeJSPos.x, 0, threeJSPos.z);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate outer and inner ring points using absolute center
+    // This matches the exact coordinates that will be stored (before wrapping)
+    const outerAbsoluteCoords = [];
+    const innerAbsoluteCoords = [];
+    
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      
+      // Outer ring
+      const outerX = absCenterX + outerRadius * cos;
+      const outerY = absCenterY + outerRadius * sin;
+      outerAbsoluteCoords.push([outerX, outerY]);
+      
+      // Inner ring
+      const innerX = absCenterX + innerRadius * cos;
+      const innerY = absCenterY + innerRadius * sin;
+      innerAbsoluteCoords.push([innerX, innerY]);
+    }
+    
+    // Close rings
+    if (outerAbsoluteCoords.length > 0) {
+      outerAbsoluteCoords.push([outerAbsoluteCoords[0][0], outerAbsoluteCoords[0][1]]);
+    }
+    if (innerAbsoluteCoords.length > 0) {
+      innerAbsoluteCoords.push([innerAbsoluteCoords[0][0], innerAbsoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
+    const shape = new THREE.Shape();
+    
+    // Build outer ring EXACTLY as zone-manager.js does
+    let firstPos = null;
+    outerAbsoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close outer ring
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
+    }
+    
+    // Build inner ring (hole) - reverse for proper winding (donut hole)
+    const holePath = new THREE.Path();
+    innerAbsoluteCoords.reverse(); // Reverse for proper winding
+    innerAbsoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Holes use worldPos.z directly (not negated) - matching zone-manager.js behavior
+      if (idx === 0) {
+        holePath.moveTo(worldPos.x, worldPos.z);
+      } else {
+        holePath.lineTo(worldPos.x, worldPos.z);
+      }
+    });
+    
+    // Add hole to shape
+    shape.holes.push(holePath);
+    
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1283,20 +1423,67 @@ export class ZoneEditor {
   createPolygonPreview(vertices) {
     if (vertices.length < 2) return null;
     
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createPolygonGeometry)
+    // Convert vertices to absolute coordinates (same as final geometry)
+    const absoluteCoords = vertices.map(v => {
+      // Convert relative coordinate to absolute (same as createPolygonGeometry)
+      const absX = this.convertRelativeToAbsoluteX(v.x);
+      // Don't wrap here - we'll wrap during rendering to match zone-manager.js
+      return [absX, v.y];
+    });
+    
+    // Close polygon if not already closed
+    if (absoluteCoords.length > 0 && 
+        (absoluteCoords[0][0] !== absoluteCoords[absoluteCoords.length - 1][0] ||
+         absoluteCoords[0][1] !== absoluteCoords[absoluteCoords.length - 1][1])) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
     const shape = new THREE.Shape();
-    const first = toThreeJS(vertices[0], this.currentFloor);
-    shape.moveTo(first.x, first.z);
     
-    for (let i = 1; i < vertices.length; i++) {
-      const pos = toThreeJS(vertices[i], this.currentFloor);
-      shape.lineTo(pos.x, pos.z);
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
     }
     
-    if (vertices.length >= 3) {
-      shape.lineTo(first.x, first.z); // Close polygon
-    }
-    
+    // Create geometry from shape (same as zone rendering)
     const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1321,26 +1508,130 @@ export class ZoneEditor {
   }
   
   createPaintbrushPreview(path) {
-    if (path.length < 2) return null;
+    // Handle single point case (same as createPaintbrushGeometry)
+    if (path.length < 2) {
+      // Single point - create a circle (use circle preview logic)
+      return this.createCirclePreview(path[0], {
+        x: path[0].x + this.paintbrushRadius,
+        y: path[0].y,
+        z: path[0].z,
+      });
+    }
     
-    // Create a shape from the paintbrush path
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createPaintbrushGeometry via expandPathCoords)
+    // Expand path by paintbrush radius to generate absolute coordinates (before wrapping)
+    const absoluteCoords = [];
+    
+    // Forward path
+    for (let i = 0; i < path.length - 1; i++) {
+      const p1 = path[i];
+      const p2 = path[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      if (length === 0) continue;
+      
+      const perpX = -dy / length;
+      const perpY = dx / length;
+      
+      // Convert relative coordinates to absolute (same as expandPathCoords)
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * this.paintbrushRadius;
+      const y = p1.y + perpY * this.paintbrushRadius;
+      // Don't wrap here - we'll wrap during rendering to match zone-manager.js
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Last point
+    const last = path[path.length - 1];
+    const prev = path[path.length - 2];
+    const dx = last.x - prev.x;
+    const dy = last.y - prev.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    if (length > 0) {
+      const perpX = -dy / length;
+      const perpY = dx / length;
+      // Convert relative coordinate to absolute
+      const absLastX = this.convertRelativeToAbsoluteX(last.x);
+      const x = absLastX + perpX * this.paintbrushRadius;
+      const y = last.y + perpY * this.paintbrushRadius;
+      // Don't wrap here
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Return path (other side)
+    for (let i = path.length - 1; i > 0; i--) {
+      const p1 = path[i];
+      const p2 = path[i - 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      if (length === 0) continue;
+      
+      const perpX = dy / length;
+      const perpY = -dx / length;
+      
+      // Convert relative coordinate to absolute
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * this.paintbrushRadius;
+      const y = p1.y + perpY * this.paintbrushRadius;
+      // Don't wrap here
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Close polygon
+    if (absoluteCoords.length > 0) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
     const shape = new THREE.Shape();
-    const first = toThreeJS(path[0], this.currentFloor);
-    shape.moveTo(first.x, first.z);
     
-    for (let i = 1; i < path.length; i++) {
-      const pos = toThreeJS(path[i], this.currentFloor);
-      shape.lineTo(pos.x, pos.z);
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
     }
     
-    // Expand path by paintbrush radius
-    const expandedShape = this.expandPath(path, this.paintbrushRadius);
-    if (expandedShape) {
-      const geometry = new THREE.ShapeGeometry(expandedShape);
-      return geometry;
-    }
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
     
-    return null;
+    return geometry;
   }
   
   createPaintbrushGeometry(path) {
