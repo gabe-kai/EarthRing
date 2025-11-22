@@ -135,19 +135,40 @@ These zones have fixed layouts and cannot be modified by players:
 
 ### Polygon Definition
 
-Players define zones by drawing freeform polygons:
+Players define zones by drawing freeform polygons using various drawing tools in the zone editor.
 
-1. **Drawing Interface**
+#### Drawing Tools
+
+The zone editor provides multiple tools for creating zones:
+
+1. **Rectangle Tool**: Click and drag to create rectangular zones
+2. **Circle Tool**: Click and drag to create circular zones (from center point)
+3. **Torus Tool**: Click and drag to create torus-shaped zones
+4. **Polygon Tool**: Click multiple points to create custom polygon shapes
    - Click to place vertices
-   - Drag to adjust vertex positions
-   - Delete vertices to modify shape
-   - Close polygon to complete zone
+   - Right-click or double-click to finish polygon (minimum 3 vertices)
+5. **Paintbrush Tool**: Click and drag to create freeform zones by painting
+6. **Select Tool**: Default tool for selecting existing zones (click zones to select them)
+
+#### Tool Selection and Mouse Controls
+
+- **Left Mouse Button**: Default select tool - click zones to select them, or use with drawing tools when a tool is active
+- **Right Mouse Button**: Dismiss tool - returns to select mode when a zone drawing tool (circle, rectangle, etc.) is active
+- **Tool Persistence**: Tool selection persists in localStorage and survives page refreshes
+
+#### Drawing Interface
+
+1. **Drawing Workflow**
+   - Select a drawing tool from the toolbar
+   - Click and drag (for Rectangle, Circle, Torus, Paintbrush) or click multiple points (for Polygon)
+   - Preview appears while drawing
+   - Release mouse or finish polygon to create zone
 
 2. **Validation Rules**
-   - Minimum 3 vertices (triangle)
+   - Minimum 3 vertices (triangle) for polygon tool
    - Maximum vertices: TBD (performance consideration - needs testing with different clients)
    - Polygon must be simple (no self-intersections)
-   - Polygon must be within valid map bounds
+   - Polygon must be within valid map bounds (X coordinates in [0, 264,000,000), Y coordinates in [-2500, 2500])
    - Cannot overlap system zones (elevator stations, maglev)
    - Can overlap other player zones (see Zone Overlap section)
 
