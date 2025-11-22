@@ -438,6 +438,33 @@ NPCs use zone connectivity and transportation network for pathfinding:
    - Consider transportation availability (tram schedules, etc.)
    - Default to walking when no infrastructure available
 
+## Zone Area Calculation
+
+### Area Calculation Implementation
+
+Zone areas are calculated using PostGIS `ST_Area()` function, which returns the area in square meters. The area is automatically computed and included in all zone responses.
+
+**Area Calculation Details:**
+- **PostGIS Function**: `ST_Area()` calculates the area of polygon geometries
+- **Unit**: Square meters (m²)
+- **Normalization**: Zones that wrap around the X axis (crossing from near X=0 to near X=264,000,000) are normalized before area calculation to prevent incorrect area measurements
+
+### Wrap-Around Area Fix
+
+**Problem**: When a zone wraps around the X axis (e.g., a circle drawn at world origin with coordinates spanning from near 0 to near 264,000,000), PostGIS calculates the area as if the polygon spans the entire ring width, resulting in billions of m² instead of the correct area.
+
+**Solution**: A PostGIS function `normalize_zone_geometry_for_area()` was created to normalize coordinates before area calculation:
+- Detects when coordinates span more than half the ring circumference (132,000,000m)
+- Shifts coordinates that are > half_ring by subtracting the ring circumference (264,000,000m)
+- Makes coordinates contiguous so PostGIS calculates area correctly
+- Applied automatically to all zone area calculations
+
+**Example**: A 30m diameter circle at world origin:
+- **Before fix**: Area calculated as billions of m² (incorrect)
+- **After fix**: Area calculated as ~707 m² (π × 15², correct)
+
+**Implementation**: Migration `000015_normalize_zone_geometry_for_area` creates the normalization function, and all zone queries (`CreateZone`, `GetZoneByID`, `UpdateZone`, `ListZonesByArea`, `ListZonesByOwner`) use `ST_Area(normalize_zone_geometry_for_area(geometry))` instead of `ST_Area(geometry)`.
+
 ## Zone Properties and Effects
 
 ### Zone Properties

@@ -75,7 +75,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
 		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
 		RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
-		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(geometry),
+		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		          created_at, updated_at
 	`
 
@@ -107,7 +107,7 @@ func (s *ZoneStorage) GetZoneByID(id int64) (*Zone, error) {
 
 	query := `
 		SELECT id, name, zone_type, floor, owner_id, is_system_zone,
-		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(geometry),
+		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		       created_at, updated_at
 		FROM zones
 		WHERE id = $1
@@ -205,7 +205,7 @@ func (s *ZoneStorage) UpdateZone(id int64, input ZoneUpdateInput) (*Zone, error)
 		SET %s
 		WHERE id = $%d
 		RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
-		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(geometry),
+		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		          created_at, updated_at
 	`, strings.Join(setClauses, ", "), argIdx)
 
@@ -234,6 +234,30 @@ func (s *ZoneStorage) DeleteZone(id int64) error {
 	return nil
 }
 
+// CountZones returns the total number of zones in the database.
+func (s *ZoneStorage) CountZones() (int64, error) {
+	var count int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM zones`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count zones: %w", err)
+	}
+	return count, nil
+}
+
+// DeleteAllZones removes all zones from the database.
+// Returns the number of zones deleted.
+func (s *ZoneStorage) DeleteAllZones() (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM zones`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete all zones: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	return rowsAffected, nil
+}
+
 // ListZonesByArea returns all zones whose geometry intersects the provided bounding box on a floor.
 func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64) ([]Zone, error) {
 	if floor < 0 {
@@ -245,7 +269,7 @@ func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64)
 
 	query := `
 		SELECT id, name, zone_type, floor, owner_id, is_system_zone,
-		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(geometry),
+		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		       created_at, updated_at
 		FROM zones
 		WHERE floor = $1
@@ -285,7 +309,7 @@ func (s *ZoneStorage) ListZonesByOwner(ownerID int64) ([]Zone, error) {
 
 	query := `
 		SELECT id, name, zone_type, floor, owner_id, is_system_zone,
-		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(geometry),
+		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		       created_at, updated_at
 		FROM zones
 		WHERE owner_id = $1

@@ -235,6 +235,13 @@ CREATE INDEX idx_zones_owner ON zones(owner_id);
 CREATE INDEX idx_zones_floor ON zones(floor);
 ```
 
+**Zone Area Calculation:**
+- Zone areas are calculated using PostGIS `ST_Area()` function
+- **Function**: `normalize_zone_geometry_for_area(geometry)` - Normalizes coordinates for zones that wrap around the X axis before area calculation
+- **Implementation**: Created in migration `000015_normalize_zone_geometry_for_area`
+- **Usage**: All zone queries use `ST_Area(normalize_zone_geometry_for_area(geometry))` instead of `ST_Area(geometry)` to handle wrap-around cases correctly
+- **Purpose**: Fixes bug where zones crossing X axis (0/264,000,000 boundary) calculated area incorrectly (billions of m² instead of correct area)
+
 ### Structures
 
 Stores player-placed and procedural structures (buildings, objects, etc.).
