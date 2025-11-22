@@ -301,6 +301,7 @@ Response: [
 - All zone create/update requests accept GeoJSON `Polygon` or `MultiPolygon` payloads.
 - Responses return geometry as GeoJSON plus a computed `area` (via PostGIS) to assist client-side visualization.
 - Invalid GeoJSON (self-intersections, unclosed rings, unsupported types) results in `INVALID_ZONE` errors.
+- **Area Calculation**: Zone areas are calculated using PostGIS `ST_Area()` with automatic normalization for zones that wrap around the X axis (see `docs/09-zone-system.md` for details).
 
 ### Structure Management
 

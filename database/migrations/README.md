@@ -23,6 +23,8 @@ Migrations are numbered sequentially and follow the pattern:
 11. `000011_create_racing_results_table` - Create racing_results table
 12. `000012_create_player_actions_table` - Create player_actions table
 13. `000013_create_triggers` - Create database triggers
+14. `000014_bulk_update_chunk_versions` - Bulk update chunk versions function
+15. `000015_normalize_zone_geometry_for_area` - Normalize zone geometry for area calculation (fixes wrap-around bug)
 
 ## Installation
 
