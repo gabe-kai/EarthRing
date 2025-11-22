@@ -237,9 +237,11 @@ export class ZoneManager {
         const wrappedX = wrapZoneX(x);
         const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
         // Use worldPos.x for shape X
-        // For shape Y, use worldPos.z (EarthRing Y), but negate it if Y is negative
-        // This ensures the shape faces the correct direction after rotation
-        const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
+        // For shape Y, use worldPos.z (EarthRing Y)
+        // The outline uses worldPos.z directly and shows correctly on Y+,
+        // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+        // Based on testing: always negate worldPos.z for the fill shape
+        const shapeY = -worldPos.z;
         if (idx === 0) {
           shape.moveTo(worldPos.x, shapeY);
         } else {

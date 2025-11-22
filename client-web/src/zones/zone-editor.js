@@ -869,23 +869,27 @@ export class ZoneEditor {
     };
     
     // Step 3: Create shape using the EXACT same coordinates that will be rendered
-    const hasNegativeY = minY < 0 || maxY < 0;
-    const shape = new THREE.Shape();
-    
-    // Use the exact stored absolute coordinates and wrap them (same as rendering)
+    // Check if ANY Y coordinate is negative (same logic as zone-manager.js)
     const corners = [
       [minX, minY],  // These are the absolute coordinates that will be stored
       [maxX, minY],
       [maxX, maxY],
       [minX, maxY],
     ];
+    const hasNegativeY = corners.some(([_x, y]) => y < 0);
+    const shape = new THREE.Shape();
     
     // Build shape EXACTLY as zone-manager.js does (identical code)
     let firstPos = null;
     corners.forEach(([x, y], idx) => {
       const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
       const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
       if (idx === 0) {
         firstPos = { x: worldPos.x, z: shapeY };
         shape.moveTo(worldPos.x, shapeY);
