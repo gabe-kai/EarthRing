@@ -90,8 +90,17 @@ export class ZoneEditor {
     this.renderer.domElement.addEventListener('click', this.onClick.bind(this));
     this.renderer.domElement.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      // Right-click to finish polygon
-      if (this.currentTool === TOOLS.POLYGON && this.polygonVertices.length >= 3) {
+      // Right-click to dismiss tool and return to select mode
+      if (this.currentTool !== TOOLS.NONE && this.currentTool !== TOOLS.SELECT) {
+        // Cancel any active drawing
+        if (this.isDrawing) {
+          this.cancelDrawing();
+        }
+        // Return to select mode
+        this.setTool(TOOLS.SELECT);
+      }
+      // Right-click to finish polygon (if in polygon mode)
+      else if (this.currentTool === TOOLS.POLYGON && this.polygonVertices.length >= 3) {
         this.finishPolygon();
       }
     });
@@ -158,15 +167,53 @@ export class ZoneEditor {
    * Handle mouse down event
    */
   onMouseDown(event) {
-    // Don't interfere with OrbitControls if no tool is active
-    if (this.currentTool === TOOLS.NONE) return;
-    
     // Don't interfere if clicking on UI elements
     if (event.target !== this.renderer.domElement) return;
     
-    // Only handle left mouse button for drawing tools
-    if (event.button !== 0 && this.currentTool !== TOOLS.SELECT) return;
+    // Right mouse button (2): Dismiss tool and return to select mode
+    if (event.button === 2) {
+      if (this.currentTool !== TOOLS.NONE && this.currentTool !== TOOLS.SELECT) {
+        // Cancel any active drawing
+        if (this.isDrawing) {
+          this.cancelDrawing();
+        }
+        // Return to select mode
+        this.setTool(TOOLS.SELECT);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      // If already in select mode or no tool, let OrbitControls handle it (pan)
+      return;
+    }
     
+    // Left mouse button (0) when no tool is active: default to select tool
+    if (this.currentTool === TOOLS.NONE && event.button === 0) {
+      this.setTool(TOOLS.SELECT);
+      // Fall through to handle the selection
+    }
+    
+    // If still no tool active after handling defaults, let OrbitControls handle it
+    if (this.currentTool === TOOLS.NONE) {
+      return;
+    }
+    
+    // Only handle left mouse button (0) for tools
+    if (event.button !== 0) return;
+    
+    // Prevent OrbitControls from interfering when a tool is active
+    if (this.currentTool !== TOOLS.NONE) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
+    // Handle selection tool - doesn't need earthRingPos (uses raycasting)
+    if (this.currentTool === TOOLS.SELECT) {
+      this.handleZoneSelection(event);
+      return;
+    }
+    
+    // Other tools need earthRingPos
     const earthRingPos = this.getEarthRingPositionFromMouse(event);
     if (!earthRingPos) return;
     
@@ -177,18 +224,8 @@ export class ZoneEditor {
         earthRingPos: { ...earthRingPos },
         cameraX: cameraPos.x,
         tool: this.currentTool,
+        button: event.button,
       });
-    }
-    
-    // Prevent OrbitControls from interfering when a tool is active
-    if (this.currentTool !== TOOLS.NONE) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-    
-    if (this.currentTool === TOOLS.SELECT) {
-      this.handleZoneSelection(event);
-      return;
     }
     
     if (this.currentTool === TOOLS.POLYGON) {

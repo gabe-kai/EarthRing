@@ -73,15 +73,18 @@ export class CameraController {
     this.controls.maxDistance = 50000;
     this.controls.zoomSpeed = 1.0;
     
-    // Enable rotation (left mouse button)
+    // Enable rotation (middle mouse button)
     this.controls.enableRotate = true;
     
-    // Enable panning (right mouse button or middle mouse button)
+    // Enable panning (right mouse button)
     this.controls.enablePan = true;
-    // Middle mouse button for panning/tilting
+    // Mouse button mapping:
+    // - LEFT: Disabled (used for select tool by default)
+    // - MIDDLE: Rotate/orbit camera (tilt and orbit target)
+    // - RIGHT: Pan camera
     this.controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.DOLLY_PAN, // Pan and zoom with middle mouse
+      LEFT: null, // Disabled - left mouse is for selection tools
+      MIDDLE: THREE.MOUSE.ROTATE, // Middle mouse for orbit/tilt
       RIGHT: THREE.MOUSE.PAN,
     };
     

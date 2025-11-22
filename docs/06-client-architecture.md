@@ -262,9 +262,9 @@ Handles 3D rendering using the chosen graphics library.
   - **PageUp/PageDown**: Zoom in/out
 - **Mouse Controls**:
   - **Scroll Wheel**: Zoom in/out
-  - **Middle Mouse Button (Hold)**: Pan and tilt camera
-  - **Left Mouse Button**: Rotate camera (OrbitControls default)
-  - **Right Mouse Button**: Pan camera (OrbitControls default)
+  - **Middle Mouse Button (Hold)**: Rotate/orbit and tilt camera around target
+  - **Right Mouse Button (Hold)**: Pan camera
+  - **Left Mouse Button**: Select tool (default) - used for zone selection and drawing tools when active
 - **Elevation-based speed scaling**: Movement speed automatically adjusts based on camera height above ground (slower near ground for precise control, faster at higher elevations)
   - Speed multiplier ranges from 0.1x (at 2m elevation) to 10.0x (at very high elevations)
   - Uses logarithmic scaling for smooth transitions
