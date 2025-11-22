@@ -241,6 +241,7 @@ CREATE INDEX idx_zones_floor ON zones(floor);
 - **Implementation**: Created in migration `000015_normalize_zone_geometry_for_area`
 - **Usage**: All zone queries use `ST_Area(normalize_zone_geometry_for_area(geometry))` instead of `ST_Area(geometry)` to handle wrap-around cases correctly
 - **Purpose**: Fixes bug where zones crossing X axis (0/264,000,000 boundary) calculated area incorrectly (billions of m² instead of correct area)
+- **IMPORTANT**: This function should ONLY be used for read-only operations (area calculation, distance checks, etc.). Do NOT use it in transformation pipelines (merge, union, etc.) as the JSON manipulation creates structures that corrupt when further transformed. For merging wrapped zones, use `ST_DumpPoints` + `ST_MakePolygon` instead. See `WRAP_POINT_FIX_SUMMARY.md` for details.
 
 ### Structures
 

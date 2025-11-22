@@ -609,6 +609,438 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 	}
 }
 
+// TestZoneStorage_MergeOverlappingZones tests basic zone merging functionality
+func TestZoneStorage_MergeOverlappingZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone: rectangle from (0,0) to (20,20)
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[20,0],[20,20],[0,20],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone1",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+	zone1Area := zone1.Area
+
+	// Create second zone: overlapping rectangle from (10,10) to (30,30)
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[10,10],[30,10],[30,30],[10,30],[10,10]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone2",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// After merge, zone2 should have the ID of zone1 (oldest zone)
+	if zone2.ID != zone1ID {
+		t.Errorf("Expected merged zone to have ID %d (oldest zone), got %d", zone1ID, zone2.ID)
+	}
+
+	// Zone1 should no longer exist (replaced by merged zone)
+	stored1, _ := storage.GetZoneByID(zone1ID)
+	if stored1 == nil {
+		t.Fatal("Expected zone1 to still exist (with merged geometry)")
+	}
+	if stored1.ID != zone1ID {
+		t.Errorf("Expected zone1 ID to remain %d, got %d", zone1ID, stored1.ID)
+	}
+
+	// Merged zone should have larger area than individual zones
+	// Area of rect1: 400 m², rect2: 400 m², merged: ~700 m² (400 + 400 - 100 overlap)
+	expectedMinArea := 600.0
+	if zone2.Area < expectedMinArea {
+		t.Errorf("Expected merged area >= %.0f m², got %.2f m²", expectedMinArea, zone2.Area)
+	}
+	if zone2.Area <= zone1Area {
+		t.Errorf("Expected merged area (%.2f) > original area (%.2f)", zone2.Area, zone1Area)
+	}
+
+	t.Logf("Zone1 area: %.2f m²", zone1Area)
+	t.Logf("Merged zone area: %.2f m²", zone2.Area)
+}
+
+// TestZoneStorage_MergeWrappedZones tests merging zones that wrap around X-axis
+// This test verifies the wrap-point handling in zone merging using the simplified coordinate
+// transformation approach that follows the same pattern as chunk wrapping, zone rendering, and zone editing.
+func TestZoneStorage_MergeWrappedZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone: rectangle near X-axis boundary (doesn't wrap)
+	// Rectangle from (263999900, 0) to (263999950, 50)
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[263999900,0],[263999950,0],[263999950,50],[263999900,50],[263999900,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone1",
+		ZoneType: "commercial",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+	zone1Area := zone1.Area
+
+	// Create second zone: overlapping rectangle that wraps across boundary
+	// Rectangle from (263999945, 10) to (5, 40) - wraps from high X to low X
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[263999945,10],[5,10],[5,40],[263999945,40],[263999945,10]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone2",
+		ZoneType: "commercial",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// After merge, should preserve zone1 ID (oldest)
+	if zone2.ID != zone1ID {
+		t.Errorf("Expected merged zone to have ID %d (oldest zone), got %d", zone1ID, zone2.ID)
+	}
+
+	// Merged zone should have valid geometry and reasonable area
+	if zone2.Area <= 0 {
+		t.Errorf("Expected merged area > 0, got %.2f m²", zone2.Area)
+	}
+	if zone2.Area <= zone1Area {
+		t.Errorf("Expected merged area (%.2f) > original area (%.2f)", zone2.Area, zone1Area)
+	}
+
+	// Verify geometry is valid Polygon (not MultiPolygon)
+	if len(zone2.Geometry) == 0 {
+		t.Fatal("Expected merged zone to have geometry")
+	}
+	var geomMap map[string]interface{}
+	if err := json.Unmarshal(zone2.Geometry, &geomMap); err != nil {
+		t.Fatalf("Failed to parse merged geometry: %v", err)
+	}
+	geomType, ok := geomMap["type"].(string)
+	if !ok || geomType != "Polygon" {
+		t.Errorf("Expected merged geometry type 'Polygon', got '%v'", geomType)
+	}
+
+	t.Logf("Zone1 area: %.2f m²", zone1Area)
+	t.Logf("Merged zone area: %.2f m²", zone2.Area)
+	t.Logf("Merged geometry type: %s", geomType)
+}
+
+// TestZoneStorage_MergePreservesOldestID tests that the oldest zone ID is preserved
+func TestZoneStorage_MergePreservesOldestID(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create three zones with overlapping geometries
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "OldestZone",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	oldestID := zone1.ID
+
+	// Create second zone that overlaps with first
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[5,5],[15,5],[15,15],[5,15],[5,5]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "MiddleZone",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zone2 should merge with zone1, preserving zone1's ID
+	if zone2.ID != oldestID {
+		t.Errorf("Expected merged zone to have oldest ID %d, got %d", oldestID, zone2.ID)
+	}
+
+	// Create third zone that overlaps with merged zone
+	rect3 := json.RawMessage(`{"type":"Polygon","coordinates":[[[12,12],[22,12],[22,22],[12,22],[12,12]]]}`)
+	zone3, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "NewestZone",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect3,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone3: %v", err)
+	}
+
+	// Zone3 should also merge, still preserving the original oldest ID
+	if zone3.ID != oldestID {
+		t.Errorf("Expected merged zone to still have oldest ID %d after third merge, got %d", oldestID, zone3.ID)
+	}
+
+	t.Logf("Oldest zone ID: %d", oldestID)
+	t.Logf("Final merged zone ID: %d", zone3.ID)
+	t.Logf("Final merged zone area: %.2f m²", zone3.Area)
+}
+
+// TestZoneStorage_NoMergeDifferentTypes tests that zones of different types don't merge
+func TestZoneStorage_NoMergeDifferentTypes(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone: residential
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[20,0],[20,20],[0,20],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "ResidentialZone",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+
+	// Create second zone: commercial (different type, overlapping geometry)
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[10,10],[30,10],[30,30],[10,30],[10,10]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "CommercialZone",
+		ZoneType: "commercial",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zones should NOT merge - different types
+	if zone2.ID == zone1ID {
+		t.Errorf("Expected zones NOT to merge (different types), but zone2.ID (%d) == zone1.ID (%d)", zone2.ID, zone1ID)
+	}
+
+	// Both zones should still exist
+	stored1, _ := storage.GetZoneByID(zone1ID)
+	if stored1 == nil {
+		t.Fatal("Expected zone1 to still exist")
+	}
+	stored2, _ := storage.GetZoneByID(zone2.ID)
+	if stored2 == nil {
+		t.Fatal("Expected zone2 to still exist")
+	}
+
+	t.Logf("Zone1 (residential) ID: %d, area: %.2f m²", zone1ID, zone1.Area)
+	t.Logf("Zone2 (commercial) ID: %d, area: %.2f m²", zone2.ID, zone2.Area)
+}
+
+// TestZoneStorage_NoMergeDifferentFloors tests that zones on different floors don't merge
+func TestZoneStorage_NoMergeDifferentFloors(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone: floor 0
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[20,0],[20,20],[0,20],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Floor0Zone",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+
+	// Create second zone: floor 1 (different floor, same type, overlapping geometry)
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[10,10],[30,10],[30,30],[10,30],[10,10]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Floor1Zone",
+		ZoneType: "residential",
+		Floor:    1,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zones should NOT merge - different floors
+	if zone2.ID == zone1ID {
+		t.Errorf("Expected zones NOT to merge (different floors), but zone2.ID (%d) == zone1.ID (%d)", zone2.ID, zone1ID)
+	}
+
+	t.Logf("Zone1 (floor 0) ID: %d", zone1ID)
+	t.Logf("Zone2 (floor 1) ID: %d", zone2.ID)
+}
+
+// TestZoneStorage_MergeMultipleZones tests merging 3+ overlapping zones
+func TestZoneStorage_MergeMultipleZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[15,0],[15,15],[0,15],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone1",
+		ZoneType: "industrial",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	oldestID := zone1.ID
+
+	// Create second zone (overlaps with zone1)
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[10,10],[25,10],[25,25],[10,25],[10,10]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone2",
+		ZoneType: "industrial",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zone2 should merge with zone1
+	if zone2.ID != oldestID {
+		t.Errorf("Expected zone2 to merge with zone1 (ID %d), got ID %d", oldestID, zone2.ID)
+	}
+
+	// Create third zone (overlaps with merged zone)
+	rect3 := json.RawMessage(`{"type":"Polygon","coordinates":[[[20,20],[35,20],[35,35],[20,35],[20,20]]]}`)
+	zone3, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone3",
+		ZoneType: "industrial",
+		Floor:    0,
+		Geometry: rect3,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone3: %v", err)
+	}
+
+	// Zone3 should merge with merged zone, preserving oldest ID
+	if zone3.ID != oldestID {
+		t.Errorf("Expected zone3 to merge with existing merged zone (ID %d), got ID %d", oldestID, zone3.ID)
+	}
+
+	// Verify only one zone exists with this ID
+	finalZone, err := storage.GetZoneByID(oldestID)
+	if err != nil {
+		t.Fatalf("Failed to get final merged zone: %v", err)
+	}
+	if finalZone == nil {
+		t.Fatal("Expected final merged zone to exist")
+	}
+
+	// Final merged area should be larger than individual zones
+	if finalZone.Area < zone1.Area*1.5 {
+		t.Errorf("Expected merged area (%.2f) to be significantly larger than first zone (%.2f)", finalZone.Area, zone1.Area)
+	}
+
+	t.Logf("Oldest zone ID: %d", oldestID)
+	t.Logf("Final merged zone area: %.2f m²", finalZone.Area)
+}
+
+// TestZoneStorage_MergeNonOverlappingZones tests that non-overlapping zones don't merge
+func TestZoneStorage_MergeNonOverlappingZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+
+	// Create first zone
+	rect1 := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone1",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+
+	// Create second zone: far away, non-overlapping
+	rect2 := json.RawMessage(`{"type":"Polygon","coordinates":[[[100,100],[110,100],[110,110],[100,110],[100,100]]]}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Zone2",
+		ZoneType: "residential",
+		Floor:    0,
+		Geometry: rect2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zones should NOT merge - they don't overlap
+	if zone2.ID == zone1ID {
+		t.Errorf("Expected zones NOT to merge (non-overlapping), but zone2.ID (%d) == zone1.ID (%d)", zone2.ID, zone1ID)
+	}
+
+	// Both zones should exist independently
+	stored1, _ := storage.GetZoneByID(zone1ID)
+	if stored1 == nil {
+		t.Fatal("Expected zone1 to still exist")
+	}
+	stored2, _ := storage.GetZoneByID(zone2.ID)
+	if stored2 == nil {
+		t.Fatal("Expected zone2 to still exist")
+	}
+
+	// Areas should be identical to original (no merging occurred)
+	if stored1.Area != zone1.Area {
+		t.Errorf("Expected zone1 area to remain %.2f, got %.2f", zone1.Area, stored1.Area)
+	}
+	if stored2.Area != zone2.Area {
+		t.Errorf("Expected zone2 area to remain %.2f, got %.2f", zone2.Area, stored2.Area)
+	}
+
+	t.Logf("Zone1 ID: %d, area: %.2f m²", zone1ID, zone1.Area)
+	t.Logf("Zone2 ID: %d, area: %.2f m²", zone2.ID, zone2.Area)
+}
+
 func jsonEqual(a, b json.RawMessage) bool {
 	normalizedA := normalizeJSON(a)
 	normalizedB := normalizeJSON(b)

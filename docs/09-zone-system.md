@@ -612,9 +612,30 @@ Players can modify their zones:
 
 ### Zone Merging
 
-- Players can merge adjacent zones of same type
-- Merged zones combine properties
-- Polygon union operation
+**Automatic Merging** (Implemented):
+
+When a player creates or updates a zone that overlaps with existing zones of the same type, floor, and owner, the zones are automatically merged:
+
+1. **Overlap Detection**: System detects overlapping zones with matching properties
+2. **Union Operation**: PostGIS `ST_Union` merges all overlapping zones into one
+3. **ID Preservation**: The oldest zone's ID is kept, others are deleted
+4. **Property Handling**: Oldest zone's name and properties are preserved
+
+**Wrap-Around Handling**:
+
+Zones crossing the X-axis boundary (e.g., rectangles from X=15 to X=263,999,970) require special handling:
+
+- **Problem**: Wrapped zones span almost the entire ring coordinate space
+- **Solution**: Per-coordinate normalization using `ST_DumpPoints` + `ST_MakePolygon`
+  - Detects wrapping when `span > 132,000 km (half ring)`
+  - Shifts individual coordinates where `X > 132,000,000` by `-264,000,000`
+  - Rebuilds polygon with contiguous coordinates
+  - Performs union in normalized space
+  - Wraps result back to `[0, 264,000,000)` range
+
+This ensures wrapped zones merge correctly with overlapping zones, producing proper union shapes.
+
+See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
 
 ### Zone Splitting
 
