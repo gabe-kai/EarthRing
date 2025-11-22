@@ -646,6 +646,8 @@ Players can modify their zones:
   - **Y Coordinate Handling**: The shape's Y coordinate (`worldPos.z`) is always negated before creating the fill shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis. The outline (stroke) uses `worldPos.z` directly without negation, as it renders correctly regardless of Y sign.
 
 - **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). Fetching is throttled to once per 4 seconds to prevent excessive API calls.
+  - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
+  - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization to ensure zones near X=0 remain visible even when the camera is at a different position.
 
 - **Visibility System**: Two-level visibility control:
   - Global visibility: All zones on/off

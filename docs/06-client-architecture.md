@@ -496,8 +496,10 @@ gridOverlay.setVisible(false); // Hide grid
    - Default fetch range: 5000m along ring (X), 3000m across width (Y)
    - Fetch throttling: 4 seconds between requests (`fetchThrottleMs = 4000`)
    - Zones are cached in `GameStateManager.zones` Map (keyed by zone ID)
+   - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
    - `GameStateManager.setZones()` emits `zoneAdded`, `zoneUpdated`, `zoneRemoved` events
    - `ZoneManager` listens to these events and renders/updates meshes accordingly
+   - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization. The `normalizeRelativeToCamera` function handles wrapping internally and expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE)) rather than a pre-wrapped position.
 
 5. **Visibility System:**
    - Two-level visibility control:

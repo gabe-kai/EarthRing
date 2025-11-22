@@ -842,8 +842,9 @@ export class ZoneEditor {
     
     // Step 2: Now render this exact geometry exactly as zone-manager.js does
     // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = wrapRingPosition(cameraPos.x);
+    const cameraX = cameraPos.x; // Use unwrapped camera position
     
     // DEBUG: Log camera and wrapping info
     if (window.DEBUG_ZONE_COORDS) {
