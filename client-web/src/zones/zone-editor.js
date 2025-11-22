@@ -1341,25 +1341,69 @@ export class ZoneEditor {
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
     const absCenterY = center.y; // Y doesn't need conversion
     
-    // Generate outer and inner ring points using absolute center
-    // This matches the exact coordinates that will be stored (before wrapping)
-    const outerAbsoluteCoords = [];
-    const innerAbsoluteCoords = [];
+    const RING_CIRCUMFERENCE = 264000000;
+    
+    // Generate RAW coordinates (before wrapping) for both rings
+    const rawOuterCoords = [];
+    const rawInnerCoords = [];
     
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
       
-      // Outer ring
-      const outerX = absCenterX + outerRadius * cos;
-      const outerY = absCenterY + outerRadius * sin;
-      outerAbsoluteCoords.push([outerX, outerY]);
+      rawOuterCoords.push({
+        x: absCenterX + outerRadius * cos,
+        y: absCenterY + outerRadius * sin
+      });
       
-      // Inner ring
-      const innerX = absCenterX + innerRadius * cos;
-      const innerY = absCenterY + innerRadius * sin;
-      innerAbsoluteCoords.push([innerX, innerY]);
+      rawInnerCoords.push({
+        x: absCenterX + innerRadius * cos,
+        y: absCenterY + innerRadius * sin
+      });
+    }
+    
+    // Check if torus crosses the ring boundary (same logic as createTorusGeometry)
+    const wrappedOuterX = rawOuterCoords.map(p => wrapRingPosition(p.x));
+    const minWrappedX = Math.min(...wrappedOuterX);
+    const maxWrappedX = Math.max(...wrappedOuterX);
+    const wrappedSpan = maxWrappedX - minWrappedX;
+    
+    let outerAbsoluteCoords = [];
+    let innerAbsoluteCoords = [];
+    
+    // If torus crosses boundary, apply shifting to keep coordinates contiguous
+    if (wrappedSpan > RING_CIRCUMFERENCE / 2) {
+      // Apply same shifting logic as createTorusGeometry
+      const centerWrapped = wrapRingPosition(absCenterX);
+      const minRawX = Math.min(...rawOuterCoords.map(p => p.x));
+      const baseShift = -minRawX;
+      const newCenterAfterBaseShift = absCenterX + baseShift;
+      const newCenterAfterBaseShiftWrapped = wrapRingPosition(newCenterAfterBaseShift);
+      
+      let additionalShift = 0;
+      if (newCenterAfterBaseShiftWrapped !== centerWrapped) {
+        const diff = centerWrapped - newCenterAfterBaseShiftWrapped;
+        additionalShift = Math.abs(diff) > RING_CIRCUMFERENCE / 2 
+          ? (diff > 0 ? diff - RING_CIRCUMFERENCE : diff + RING_CIRCUMFERENCE)
+          : diff;
+      }
+      
+      const totalShift = baseShift + additionalShift;
+      
+      // Apply SAME shift to BOTH rings
+      outerAbsoluteCoords = rawOuterCoords.map(p => [
+        wrapRingPosition(p.x + totalShift), 
+        p.y
+      ]);
+      innerAbsoluteCoords = rawInnerCoords.map(p => [
+        wrapRingPosition(p.x + totalShift), 
+        p.y
+      ]);
+    } else {
+      // Normal case - just wrap coordinates
+      outerAbsoluteCoords = rawOuterCoords.map(p => [wrapRingPosition(p.x), p.y]);
+      innerAbsoluteCoords = rawInnerCoords.map(p => [wrapRingPosition(p.x), p.y]);
     }
     
     // Close rings
@@ -1433,44 +1477,138 @@ export class ZoneEditor {
     );
     const innerRadius = outerRadius * 0.6;
     const segments = 64;
-    const outerCoords = [];
-    const innerCoords = [];
     
     // Convert center to absolute coordinates first
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
     const absCenterY = center.y; // Y doesn't need conversion
     
-    // Generate outer ring points using absolute center
+    const RING_CIRCUMFERENCE = 264000000;
+    
+    // Generate RAW coordinates (before wrapping) for both rings
+    const rawOuterCoords = [];
+    const rawInnerCoords = [];
+    
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
-      const x = absCenterX + outerRadius * cos;
-      const y = absCenterY + outerRadius * sin;
       
-      // Wrap X coordinate to valid range
-      const wrappedX = wrapRingPosition(x);
+      rawOuterCoords.push({
+        x: absCenterX + outerRadius * cos,
+        y: absCenterY + outerRadius * sin
+      });
       
-      outerCoords.push([wrappedX, y]);
+      rawInnerCoords.push({
+        x: absCenterX + innerRadius * cos,
+        y: absCenterY + innerRadius * sin
+      });
     }
+    
+    // Check if torus crosses the ring boundary (use outer ring as reference)
+    // A torus crosses the boundary if any point would wrap to a very different X value
+    const wrappedOuterX = rawOuterCoords.map(p => wrapRingPosition(p.x));
+    const minWrappedX = Math.min(...wrappedOuterX);
+    const maxWrappedX = Math.max(...wrappedOuterX);
+    const wrappedSpan = maxWrappedX - minWrappedX;
+    
+    // DEBUG: Log torus geometry creation
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createTorusGeometry:', {
+        center: { x: absCenterX, y: absCenterY },
+        outerRadius,
+        innerRadius,
+        minWrappedX,
+        maxWrappedX,
+        wrappedSpan,
+        crossesBoundary: wrappedSpan > RING_CIRCUMFERENCE / 2,
+      });
+    }
+    
+    let outerCoords = [];
+    let innerCoords = [];
+    
+    // If wrapped span is > half the ring, the torus crosses the boundary
+    // In this case, we need to keep coordinates in one contiguous range
+    // CRITICAL: Apply SAME shift to BOTH outer and inner rings to maintain hole geometry
+    if (wrappedSpan > RING_CIRCUMFERENCE / 2) {
+      // Torus crosses boundary - shift coordinates to keep them contiguous
+      // Use the same logic as circle tool
+      const centerWrapped = wrapRingPosition(absCenterX);
+      
+      // Find the minimum raw X value (from outer ring)
+      const minRawX = Math.min(...rawOuterCoords.map(p => p.x));
+      const maxRawX = Math.max(...rawOuterCoords.map(p => p.x));
+      
+      // Calculate shift to keep center at centerWrapped while making coordinates contiguous
+      const baseShift = -minRawX; // Makes minimum become 0, center moves to radius
+      const newCenterAfterBaseShift = absCenterX + baseShift;
+      const newCenterAfterBaseShiftWrapped = wrapRingPosition(newCenterAfterBaseShift);
+      
+      // Calculate additional shift to move center back to centerWrapped
+      let additionalShift = 0;
+      if (newCenterAfterBaseShiftWrapped !== centerWrapped) {
+        // Calculate the difference, accounting for wrapping
+        const diff = centerWrapped - newCenterAfterBaseShiftWrapped;
+        // If difference is > half ring, go the other way
+        additionalShift = Math.abs(diff) > RING_CIRCUMFERENCE / 2 
+          ? (diff > 0 ? diff - RING_CIRCUMFERENCE : diff + RING_CIRCUMFERENCE)
+          : diff;
+      }
+      
+      const totalShift = baseShift + additionalShift;
+      
+      // Apply SAME shift to BOTH rings
+      rawOuterCoords.forEach(p => {
+        const shiftedX = p.x + totalShift;
+        const wrappedX = wrapRingPosition(shiftedX);
+        outerCoords.push([wrappedX, p.y]);
+      });
+      
+      rawInnerCoords.forEach(p => {
+        const shiftedX = p.x + totalShift;
+        const wrappedX = wrapRingPosition(shiftedX);
+        innerCoords.push([wrappedX, p.y]);
+      });
+      
+      if (window.DEBUG_ZONE_COORDS) {
+        const finalMinX = Math.min(...outerCoords.map(c => c[0]));
+        const finalMaxX = Math.max(...outerCoords.map(c => c[0]));
+        const finalSpan = finalMaxX - finalMinX;
+        const finalCenterX = (finalMinX + finalMaxX) / 2;
+        console.log('[ZoneEditor] Torus crosses boundary - shifted coordinates:', {
+          centerX: absCenterX,
+          centerWrapped,
+          minRawX,
+          maxRawX,
+          baseShift,
+          newCenterAfterBaseShiftWrapped,
+          additionalShift,
+          totalShift,
+          finalMinX,
+          finalMaxX,
+          finalCenterX,
+          finalSpan,
+          expectedSpan: outerRadius * 2,
+        });
+      }
+    } else {
+      // Torus doesn't cross boundary - wrap normally
+      rawOuterCoords.forEach(p => {
+        const wrappedX = wrapRingPosition(p.x);
+        outerCoords.push([wrappedX, p.y]);
+      });
+      
+      rawInnerCoords.forEach(p => {
+        const wrappedX = wrapRingPosition(p.x);
+        innerCoords.push([wrappedX, p.y]);
+      });
+    }
+    
     // Close outer ring explicitly
     if (outerCoords.length > 0) {
       outerCoords.push([outerCoords[0][0], outerCoords[0][1]]);
     }
     
-    // Generate inner ring points using absolute center
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const x = absCenterX + innerRadius * cos;
-      const y = absCenterY + innerRadius * sin;
-      
-      // Wrap X coordinate to valid range
-      const wrappedX = wrapRingPosition(x);
-      
-      innerCoords.push([wrappedX, y]);
-    }
     // Close inner ring explicitly
     if (innerCoords.length > 0) {
       innerCoords.push([innerCoords[0][0], innerCoords[0][1]]);
@@ -1479,22 +1617,11 @@ export class ZoneEditor {
     // Reverse inner ring for proper winding (donut hole)
     innerCoords.reverse();
     
-    // Combine outer and inner rings into a single polygon
-    // The polygon should be: outer ring (clockwise) + inner ring (counter-clockwise)
-    const combinedCoords = outerCoords.concat(innerCoords);
-    
-    // Ensure the combined polygon is closed
-    if (combinedCoords.length > 0) {
-      const first = combinedCoords[0];
-      const last = combinedCoords[combinedCoords.length - 1];
-      if (first[0] !== last[0] || first[1] !== last[1]) {
-        combinedCoords.push([first[0], first[1]]);
-      }
-    }
-    
+    // Return polygon with hole (outer ring + inner ring)
+    // GeoJSON format: first ring is outer, subsequent rings are holes
     return {
       type: 'Polygon',
-      coordinates: [combinedCoords],
+      coordinates: [outerCoords, innerCoords],
     };
   }
   
