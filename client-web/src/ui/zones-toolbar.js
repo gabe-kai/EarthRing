@@ -58,7 +58,8 @@ export function createZonesToolbar(zoneManager, gridOverlay) {
     .zones-toolbar-panel {
       position: absolute;
       left: 60px;
-      top: 0;
+      top: 50%;
+      transform: translateY(-50%);
       background: rgba(0, 0, 0, 0.9);
       border: 2px solid #00ff00;
       border-radius: 8px;
@@ -66,8 +67,28 @@ export function createZonesToolbar(zoneManager, gridOverlay) {
       min-width: 200px;
       max-height: 80vh;
       overflow-y: auto;
+      overflow-x: hidden;
       display: none;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* Custom scrollbar styling for the panel */
+    .zones-toolbar-panel::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    .zones-toolbar-panel::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+    }
+    
+    .zones-toolbar-panel::-webkit-scrollbar-thumb {
+      background: rgba(0, 255, 0, 0.3);
+      border-radius: 4px;
+    }
+    
+    .zones-toolbar-panel::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 255, 0, 0.5);
     }
 
     .zones-toolbar-panel.expanded {

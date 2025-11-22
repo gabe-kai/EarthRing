@@ -61,6 +61,9 @@ func main() {
 	api.SetupChunkRoutes(mux, db, cfg)
 	api.SetupZoneRoutes(mux, db, cfg)
 
+	// Set up admin routes
+	api.SetupAdminRoutes(mux, db, cfg)
+
 	// Apply global rate limiting (1000 requests per minute per IP)
 	// This applies to all routes after auth routes are set up
 	globalRateLimit := api.RateLimitMiddleware(1000, 1*time.Minute)

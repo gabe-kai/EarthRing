@@ -494,3 +494,43 @@ func (s *ChunkStorage) DeleteChunk(floor, chunkIndex int) error {
 
 	return nil
 }
+
+// DeleteAllChunks deletes all chunks and their associated data from the database.
+// Returns the number of chunks deleted.
+func (s *ChunkStorage) DeleteAllChunks() (int64, error) {
+	// Start a transaction to ensure atomic deletion
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			// Log error but don't fail - transaction may already be committed
+			log.Printf("Warning: failed to rollback transaction: %v", err)
+		}
+	}()
+
+	// Delete all chunk_data first
+	_, err = tx.Exec(`DELETE FROM chunk_data`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete chunk_data: %w", err)
+	}
+
+	// Delete all chunks
+	result, err := tx.Exec(`DELETE FROM chunks`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete chunks: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return rowsAffected, nil
+}

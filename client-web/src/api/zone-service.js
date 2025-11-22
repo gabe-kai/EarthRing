@@ -124,3 +124,22 @@ export async function deleteZone(zoneID) {
   });
 }
 
+/**
+ * Get the total count of zones in the database
+ * @returns {Promise<Object>} Success response with count
+ */
+export async function getZoneCount() {
+  return authorizedRequest('/api/admin/zones/count');
+}
+
+/**
+ * Delete all zones from the database
+ * WARNING: This is a destructive operation that cannot be undone
+ * @returns {Promise<Object>} Success response with deleted count
+ */
+export async function deleteAllZones() {
+  return authorizedRequest('/api/admin/zones/reset', {
+    method: 'DELETE',
+  });
+}
+

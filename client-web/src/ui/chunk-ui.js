@@ -10,21 +10,24 @@ import { isAuthenticated } from '../auth/auth-service.js';
 let chunkPanel = null;
 
 /**
- * Show chunk management panel
+ * Create chunk panel content (can be embedded in a container)
+ * @param {HTMLElement} container - Container to render into (optional, creates new panel if not provided)
+ * @returns {HTMLElement} The container element
  */
-export function showChunkPanel() {
-  if (chunkPanel) {
-    return; // Already shown
-  }
-
+export function createChunkPanelContent(container = null) {
   if (!isAuthenticated()) {
     alert('Please log in first');
-    return;
+    return null;
   }
 
-  chunkPanel = document.createElement('div');
-  chunkPanel.id = 'chunk-panel';
-  chunkPanel.innerHTML = `
+  const isEmbedded = container !== null;
+  const contentContainer = container || document.createElement('div');
+  
+  if (!isEmbedded) {
+    contentContainer.id = 'chunk-panel';
+  }
+  
+  contentContainer.innerHTML = `
     <div class="chunk-panel-content">
       <div class="chunk-panel-header">
         <h2>Chunk Metadata</h2>
@@ -288,11 +291,33 @@ export function showChunkPanel() {
     }
   `;
 
-  document.head.appendChild(style);
-  document.body.appendChild(chunkPanel);
+  // Only add styles if not already added (check if style exists)
+  if (!document.getElementById('chunk-panel-styles')) {
+    style.id = 'chunk-panel-styles';
+    document.head.appendChild(style);
+  } else if (!isEmbedded) {
+    document.head.appendChild(style);
+  }
+
+  if (!isEmbedded) {
+    document.body.appendChild(contentContainer);
+    chunkPanel = contentContainer;
+  }
 
   // Set up event listeners
-  setupChunkPanelListeners();
+  setupChunkPanelListeners(contentContainer);
+
+  return contentContainer;
+}
+
+/**
+ * Show chunk management panel (standalone modal)
+ */
+export function showChunkPanel() {
+  if (chunkPanel) {
+    return; // Already shown
+  }
+  createChunkPanelContent();
 }
 
 /**
@@ -308,12 +333,15 @@ export function hideChunkPanel() {
 /**
  * Handle chunk metadata request
  */
-async function handleChunkRequest() {
-  const resultDisplay = document.getElementById('chunk-result');
-  const submitButton = document.querySelector('#chunk-form button[type="submit"]');
+async function handleChunkRequest(container = null) {
+  const panel = container || chunkPanel;
+  if (!panel) return;
   
-  const floor = document.getElementById('chunk-floor').value;
-  const chunkIndex = document.getElementById('chunk-index').value;
+  const resultDisplay = panel.querySelector('#chunk-result');
+  const submitButton = panel.querySelector('#chunk-form button[type="submit"]');
+  
+  const floor = panel.querySelector('#chunk-floor').value;
+  const chunkIndex = panel.querySelector('#chunk-index').value;
   const chunkID = `${floor}_${chunkIndex}`;
   
   resultDisplay.textContent = 'Loading...';
@@ -341,12 +369,15 @@ async function handleChunkRequest() {
 /**
  * Handle chunk deletion
  */
-async function handleChunkDelete() {
-  const resultDisplay = document.getElementById('chunk-result');
-  const deleteButton = document.getElementById('delete-chunk-btn');
+async function handleChunkDelete(container = null) {
+  const panel = container || chunkPanel;
+  if (!panel) return;
   
-  const floor = document.getElementById('chunk-floor').value;
-  const chunkIndex = document.getElementById('chunk-index').value;
+  const resultDisplay = panel.querySelector('#chunk-result');
+  const deleteButton = panel.querySelector('#delete-chunk-btn');
+  
+  const floor = panel.querySelector('#chunk-floor').value;
+  const chunkIndex = panel.querySelector('#chunk-index').value;
   const chunkID = `${floor}_${chunkIndex}`;
   
   // Confirm deletion
@@ -381,11 +412,14 @@ async function handleChunkDelete() {
 /**
  * Handle position to chunk index conversion
  */
-function handlePositionToChunk() {
-  const resultDisplay = document.getElementById('position-to-chunk-result');
-  const submitButton = document.querySelector('#position-to-chunk-form button[type="submit"]');
+function handlePositionToChunk(container = null) {
+  const panel = container || chunkPanel;
+  if (!panel) return;
   
-  const positionInput = document.getElementById('position-input');
+  const resultDisplay = panel.querySelector('#position-to-chunk-result');
+  const submitButton = panel.querySelector('#position-to-chunk-form button[type="submit"]');
+  
+  const positionInput = panel.querySelector('#position-input');
   const ringPosition = parseFloat(positionInput.value);
   
   if (isNaN(ringPosition) || ringPosition < 0 || ringPosition > 264000000) {
@@ -423,37 +457,54 @@ function handlePositionToChunk() {
 /**
  * Set up event listeners for chunk panel
  */
-function setupChunkPanelListeners() {
-  // Close button
-  document.getElementById('chunk-panel-close').addEventListener('click', () => {
-    hideChunkPanel();
-  });
+function setupChunkPanelListeners(container = null) {
+  const panel = container || chunkPanel;
+  if (!panel) return;
+  
+  // Close button (only if standalone panel)
+  const closeBtn = panel.querySelector('#chunk-panel-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      hideChunkPanel();
+    });
+  }
 
   // Chunk form
-  document.getElementById('chunk-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    await handleChunkRequest();
-  });
+  const chunkForm = panel.querySelector('#chunk-form');
+  if (chunkForm) {
+    chunkForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await handleChunkRequest(panel);
+    });
+  }
 
   // Delete chunk button
-  document.getElementById('delete-chunk-btn').addEventListener('click', async () => {
-    await handleChunkDelete();
-  });
+  const deleteBtn = panel.querySelector('#delete-chunk-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      await handleChunkDelete(panel);
+    });
+  }
 
   // Position to chunk form
-  document.getElementById('position-to-chunk-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    handlePositionToChunk();
-  });
+  const positionForm = panel.querySelector('#position-to-chunk-form');
+  if (positionForm) {
+    positionForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      handlePositionToChunk(panel);
+    });
+  }
 
   // Quick example buttons
-  document.querySelectorAll('.example-button').forEach(button => {
+  panel.querySelectorAll('.example-button').forEach(button => {
     button.addEventListener('click', async () => {
       const chunkID = button.dataset.chunk;
       const [floor, chunkIndex] = chunkID.split('_');
-      document.getElementById('chunk-floor').value = floor;
-      document.getElementById('chunk-index').value = chunkIndex;
-      await handleChunkRequest();
+      const floorInput = panel.querySelector('#chunk-floor');
+      const indexInput = panel.querySelector('#chunk-index');
+      if (floorInput) floorInput.value = floor;
+      if (indexInput) indexInput.value = chunkIndex;
+      await handleChunkRequest(panel);
     });
   });
 }

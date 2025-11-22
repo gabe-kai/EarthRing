@@ -9,22 +9,25 @@ import { getCurrentUser } from '../auth/auth-service.js';
 let playerPanel = null;
 
 /**
- * Show player management panel
+ * Create player panel content (can be embedded in a container)
+ * @param {HTMLElement} container - Container to render into (optional, creates new panel if not provided)
+ * @returns {HTMLElement} The container element
  */
-export function showPlayerPanel() {
-  if (playerPanel) {
-    return; // Already shown
-  }
-
+export function createPlayerPanelContent(container = null) {
   const user = getCurrentUser();
   if (!user) {
     alert('Please log in first');
-    return;
+    return null;
   }
 
-  playerPanel = document.createElement('div');
-  playerPanel.id = 'player-panel';
-  playerPanel.innerHTML = `
+  const isEmbedded = container !== null;
+  const contentContainer = container || document.createElement('div');
+  
+  if (!isEmbedded) {
+    contentContainer.id = 'player-panel';
+  }
+  
+  contentContainer.innerHTML = `
     <div class="player-panel-content">
       <div class="player-panel-header">
         <h2>Player Management</h2>
@@ -215,11 +218,33 @@ export function showPlayerPanel() {
     }
   `;
 
-  document.head.appendChild(style);
-  document.body.appendChild(playerPanel);
+  // Only add styles if not already added (check if style exists)
+  if (!document.getElementById('player-panel-styles')) {
+    style.id = 'player-panel-styles';
+    document.head.appendChild(style);
+  } else if (!isEmbedded) {
+    document.head.appendChild(style);
+  }
+
+  if (!isEmbedded) {
+    document.body.appendChild(contentContainer);
+    playerPanel = contentContainer;
+  }
 
   // Set up event listeners
-  setupPlayerPanelListeners(user.id);
+  setupPlayerPanelListeners(user.id, contentContainer);
+
+  return contentContainer;
+}
+
+/**
+ * Show player management panel (standalone modal)
+ */
+export function showPlayerPanel() {
+  if (playerPanel) {
+    return; // Already shown
+  }
+  createPlayerPanelContent();
 }
 
 /**
@@ -235,15 +260,23 @@ export function hidePlayerPanel() {
 /**
  * Set up event listeners for player panel
  */
-function setupPlayerPanelListeners(playerID) {
-  // Close button
-  document.getElementById('player-panel-close').addEventListener('click', () => {
-    hidePlayerPanel();
-  });
+function setupPlayerPanelListeners(playerID, container = null) {
+  const panel = container || playerPanel;
+  if (!panel) return;
+  
+  // Close button (only if standalone panel)
+  const closeBtn = panel.querySelector('#player-panel-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      hidePlayerPanel();
+    });
+  }
 
   // Load profile button
-  document.getElementById('load-profile-btn').addEventListener('click', async () => {
-    const display = document.getElementById('profile-display');
+  const loadBtn = panel.querySelector('#load-profile-btn');
+  if (loadBtn) {
+    loadBtn.addEventListener('click', async () => {
+      const display = panel.querySelector('#profile-display');
     display.textContent = 'Loading...';
     display.className = 'result-display show';
     
@@ -268,17 +301,20 @@ function setupPlayerPanelListeners(playerID) {
       display.textContent = `Error: ${error.message}`;
       display.className = 'result-display show error';
     }
-  });
+    });
+  }
 
   // Position form
-  document.getElementById('position-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const resultDisplay = document.getElementById('position-result');
-    const submitButton = e.target.querySelector('button[type="submit"]');
-    
-    const x = document.getElementById('position-x').value;
-    const y = document.getElementById('position-y').value;
-    const floor = document.getElementById('position-floor').value;
+  const positionForm = panel.querySelector('#position-form');
+  if (positionForm) {
+    positionForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const resultDisplay = panel.querySelector('#position-result');
+      const submitButton = e.target.querySelector('button[type="submit"]');
+      
+      const x = panel.querySelector('#position-x').value;
+      const y = panel.querySelector('#position-y').value;
+      const floor = panel.querySelector('#position-floor').value;
     
     resultDisplay.textContent = 'Updating position...';
     resultDisplay.className = 'result-display show';
@@ -303,7 +339,8 @@ function setupPlayerPanelListeners(playerID) {
       
       // Reload profile to show updated position
       setTimeout(() => {
-        document.getElementById('load-profile-btn').click();
+        const loadBtn = panel.querySelector('#load-profile-btn');
+        if (loadBtn) loadBtn.click();
       }, 500);
     } catch (error) {
       resultDisplay.textContent = `Error: ${error.message}`;
@@ -311,6 +348,7 @@ function setupPlayerPanelListeners(playerID) {
     } finally {
       submitButton.disabled = false;
     }
-  });
+    });
+  }
 }
 
