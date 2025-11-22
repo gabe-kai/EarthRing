@@ -148,6 +148,12 @@ The zone editor provides multiple tools for creating zones:
    - Click to place vertices
    - Right-click or double-click to finish polygon (minimum 3 vertices)
 5. **Paintbrush Tool**: Click and drag to create freeform zones by painting
+   - Brush size adjustable via UI control or keyboard shortcuts `[` and `]`
+   - Default brush size: 10m radius
+   - Single clicks create circular zones
+   - Dragging creates continuous stroke zones with smooth connections
+   - Closed loops (circles) are automatically detected and connected smoothly
+   - Closed loop detection: Paths where first and last points are within 3x brush radius are treated as closed loops
 6. **Select Tool**: Default tool for selecting existing zones (click zones to select them)
 
 #### Tool Selection and Mouse Controls
@@ -161,8 +167,23 @@ The zone editor provides multiple tools for creating zones:
 1. **Drawing Workflow**
    - Select a drawing tool from the toolbar
    - Click and drag (for Rectangle, Circle, Torus, Paintbrush) or click multiple points (for Polygon)
-   - Preview appears while drawing
+   - Preview appears while drawing and matches the final zone exactly (preview coordinates are aligned with the zone rendering coordinate system)
+   - Preview is positioned precisely at the cursor location from the start of drawing
    - Release mouse or finish polygon to create zone
+   - The preview and final zone both use the exact mouse release position for accurate placement
+   - **Preview Accuracy**: All tools (Rectangle, Circle, Torus, Polygon, Paintbrush) generate previews using the exact same coordinate system as the final zone rendering:
+     - Previews generate the exact absolute coordinates that will be stored in the database
+     - Coordinates are wrapped relative to the camera using unwrapped camera position (matching zone-manager.js behavior)
+     - Shape Y coordinates are always negated for fill shapes to ensure correct face orientation after rotation
+     - Preview mesh position is set to `(0, floorHeight + 0.001, 0)` since geometry coordinates are already in world space
+     - This ensures 100% match between preview and final rendered zone, with perfect cursor alignment
+
+2. **Paintbrush Tool Details**
+   - **Closed Loop Detection**: Paths that form closed loops (where first and last points are within 3x brush radius) are automatically detected
+   - **Smooth Connection**: For closed loops, the first and last points use the same perpendicular direction and identical positions to ensure seamless connection
+   - **Stroke Generation**: The brush expands the path by the brush radius on both sides, creating a thick stroke polygon
+   - **Single Clicks**: Create circular zones with the brush radius
+   - **Dragging**: Creates continuous strokes with smooth curves at corners (perpendicular vectors are averaged at path points)
 
 2. **Validation Rules**
    - Minimum 3 vertices (triangle) for polygon tool
@@ -640,11 +661,13 @@ Players can modify their zones:
   - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
 
 - **Shape Geometry Creation**: Zones use `THREE.ShapeGeometry` created from `THREE.Shape` objects:
-  - Shape is created in the XY plane using `worldPos.x` (EarthRing X) and `worldPos.z` (EarthRing Y) as coordinates
+  - Shape is created in the XY plane using `worldPos.x` (EarthRing X) and negated `worldPos.z` (EarthRing Y) as coordinates
   - Shape is then rotated -90° around X-axis to lie flat on the ring floor
-  - **Negative Y Coordinate Handling**: When EarthRing Y coordinates are negative (Y- side of ring), the shape's Y coordinate (`worldPos.z`) is negated before creating the shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis.
+  - **Y Coordinate Handling**: The shape's Y coordinate (`worldPos.z`) is always negated before creating the fill shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis. The outline (stroke) uses `worldPos.z` directly without negation, as it renders correctly regardless of Y sign.
 
 - **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). Fetching is throttled to once per 4 seconds to prevent excessive API calls.
+  - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
+  - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization to ensure zones near X=0 remain visible even when the camera is at a different position.
 
 - **Visibility System**: Two-level visibility control:
   - Global visibility: All zones on/off

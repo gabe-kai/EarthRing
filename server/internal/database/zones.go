@@ -62,6 +62,8 @@ func NewZoneStorage(db *sql.DB) *ZoneStorage {
 }
 
 // CreateZone inserts a new zone and returns the stored record.
+// If the new zone overlaps with existing zones of the same type and floor,
+// it merges them using PostGIS ST_Union and deletes the old zones.
 func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	if input == nil {
 		return nil, fmt.Errorf("input cannot be nil")
@@ -71,6 +73,163 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	}
 
 	geometryString := string(input.Geometry)
+
+	// Check for overlapping zones of the same type and floor
+	// Use ST_Intersects to detect any spatial intersection (overlap, touch, or contain)
+	overlapQuery := `
+		SELECT id
+		FROM zones
+		WHERE floor = $1
+		  AND zone_type = $2
+		  AND owner_id IS NOT DISTINCT FROM $3
+		  AND is_system_zone = $4
+		  AND ST_Intersects(geometry, ST_SetSRID(ST_GeomFromGeoJSON($5), 0))
+	`
+
+	var owner sql.NullInt64
+	if input.OwnerID != nil {
+		owner = sql.NullInt64{Int64: *input.OwnerID, Valid: true}
+	}
+
+	rows, err := s.db.Query(overlapQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone, geometryString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query overlapping zones: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows in CreateZone overlap check: %v", closeErr)
+		}
+	}()
+
+	var overlappingIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan overlapping zone ID: %w", err)
+		}
+		overlappingIDs = append(overlappingIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate overlapping zones: %w", err)
+	}
+
+	// Log overlap detection for debugging
+	log.Printf("[ZoneMerge] Checking overlaps: type=%s, floor=%d, owner=%v, is_system=%v, geometry_length=%d",
+		input.ZoneType, input.Floor, input.OwnerID, input.IsSystemZone, len(geometryString))
+	if len(overlappingIDs) > 0 {
+		log.Printf("[ZoneMerge] Found %d overlapping zones: %v", len(overlappingIDs), overlappingIDs)
+	} else {
+		log.Printf("[ZoneMerge] No overlapping zones found - will create new zone")
+	}
+
+	// If there are overlapping zones, merge them
+	if len(overlappingIDs) > 0 {
+		// Build placeholders for queries
+		// For union query, we need placeholders starting from $2 (since $1 is the new geometry)
+		unionPlaceholders := make([]string, len(overlappingIDs))
+		// For delete query, placeholders start from $1
+		deletePlaceholders := make([]string, len(overlappingIDs))
+		deleteArgs := make([]interface{}, len(overlappingIDs))
+		for i, id := range overlappingIDs {
+			unionPlaceholders[i] = fmt.Sprintf("$%d", i+2) // Start from $2 since $1 is geometry
+			deletePlaceholders[i] = fmt.Sprintf("$%d", i+1) // Start from $1
+			deleteArgs[i] = id
+		}
+
+		// Use a transaction to ensure atomicity
+		tx, err := s.db.Begin()
+		if err != nil {
+			return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer tx.Rollback()
+
+		// Build query to merge new geometry with all overlapping zones using ST_Union aggregate
+		// Use ST_MakeValid to ensure geometries are valid before union
+		// This prevents topology errors when merging zones near X axis wrap boundary
+		// ST_Union as an aggregate function will merge all geometries
+		// Convert MultiPolygon to Polygon if needed (database only accepts Polygon)
+		// If result is MultiPolygon, union all components using ST_UnaryUnion
+		unionQuery := fmt.Sprintf(`
+			WITH unioned AS (
+				SELECT ST_Union(geom) AS merged_geom
+				FROM (
+					SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
+					UNION ALL
+					SELECT ST_MakeValid(geometry) AS geom FROM zones WHERE id IN (%s)
+				) AS geometries
+			),
+			finalized AS (
+				SELECT 
+					CASE 
+						WHEN ST_GeometryType(unioned.merged_geom) = 'ST_MultiPolygon' THEN
+							-- Use buffer with small positive and negative values to dissolve boundaries
+							-- This converts MultiPolygon to a single Polygon by dissolving shared boundaries
+							ST_Buffer(ST_Buffer(unioned.merged_geom, 0.1), -0.1)
+						ELSE
+							unioned.merged_geom
+					END AS final_geom
+				FROM unioned
+			)
+			SELECT ST_AsGeoJSON(final_geom)::TEXT
+			FROM finalized
+		`, strings.Join(unionPlaceholders, ","))
+
+		// Combine geometry string with zone IDs for union query
+		unionArgs := make([]interface{}, 0, len(deleteArgs)+1)
+		unionArgs = append(unionArgs, geometryString)
+		unionArgs = append(unionArgs, deleteArgs...)
+
+		var mergedGeometryJSON sql.NullString
+		if err := tx.QueryRow(unionQuery, unionArgs...).Scan(&mergedGeometryJSON); err != nil {
+			log.Printf("[ZoneMerge] Union query failed: %v", err)
+			return nil, fmt.Errorf("failed to merge geometries: %w", err)
+		}
+		if !mergedGeometryJSON.Valid {
+			return nil, fmt.Errorf("merged geometry is null")
+		}
+		log.Printf("[ZoneMerge] Successfully merged %d zones into new geometry (result length: %d)", len(overlappingIDs)+1, len(mergedGeometryJSON.String))
+
+		// Delete overlapping zones
+		deleteQuery := fmt.Sprintf(`DELETE FROM zones WHERE id IN (%s)`, strings.Join(deletePlaceholders, ","))
+		if _, err := tx.Exec(deleteQuery, deleteArgs...); err != nil {
+			return nil, fmt.Errorf("failed to delete overlapping zones: %w", err)
+		}
+
+		// Insert merged zone using the merged geometry JSON
+		insertQuery := `
+			INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
+			VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
+			RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
+			          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
+			          created_at, updated_at
+		`
+
+		row := tx.QueryRow(
+			insertQuery,
+			input.Name,
+			input.ZoneType,
+			mergedGeometryJSON.String,
+			input.Floor,
+			owner,
+			input.IsSystemZone,
+			nullableJSONString(input.Properties),
+			nullableJSONString(input.Metadata),
+		)
+
+		zone, err := scanZone(row)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert merged zone: %w", err)
+		}
+
+		// Commit transaction
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		return zone, nil
+	}
+
+	// No overlapping zones, create normally
 	query := `
 		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
 		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
@@ -78,11 +237,6 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
 		          created_at, updated_at
 	`
-
-	var owner sql.NullInt64
-	if input.OwnerID != nil {
-		owner = sql.NullInt64{Int64: *input.OwnerID, Valid: true}
-	}
 
 	row := s.db.QueryRow(
 		query,

@@ -49,8 +49,11 @@ export class ZoneEditor {
     this.selectedZoneMesh = null;
     
     // Paintbrush state
-    this.paintbrushRadius = 50; // meters
+    this.paintbrushRadius = 10; // meters (default brush size)
     this.paintbrushPath = []; // Array of points for paintbrush
+    
+    // Track last floor to avoid unnecessary updates
+    this.lastFloor = null;
     
     // Event handlers
     this.onToolChangeCallbacks = [];
@@ -62,6 +65,9 @@ export class ZoneEditor {
     
     // Set up mouse event listeners
     this.setupMouseListeners();
+    
+    // Initialize floor from camera position
+    this.updateFloorFromCamera();
   }
   
   /**
@@ -69,6 +75,7 @@ export class ZoneEditor {
    */
   createRaycastPlane() {
     // Create a large plane at floor 0 for raycasting
+    // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT, so floor 0 is at Y=0
     const planeGeometry = new THREE.PlaneGeometry(1000000, 1000000);
     const planeMaterial = new THREE.MeshBasicMaterial({ 
       visible: false,
@@ -76,7 +83,7 @@ export class ZoneEditor {
     });
     this.raycastPlane = new THREE.Mesh(planeGeometry, planeMaterial);
     this.raycastPlane.rotation.x = -Math.PI / 2; // Horizontal plane
-    this.raycastPlane.position.y = DEFAULT_FLOOR_HEIGHT;
+    this.raycastPlane.position.y = this.currentFloor * DEFAULT_FLOOR_HEIGHT; // Match zone rendering position
     this.scene.add(this.raycastPlane);
   }
   
@@ -251,6 +258,33 @@ export class ZoneEditor {
     this.currentPoint = earthRingPos;
     
     if (this.isDrawing) {
+      // For paintbrush, add points to the path while dragging
+      if (this.currentTool === TOOLS.PAINTBRUSH) {
+        // Add point to path if it's far enough from the last point (prevent too many points)
+        // Use smaller distance threshold to ensure smooth brush strokes
+        const MIN_DISTANCE = 1; // meters - reduced from 2 to capture more points during drag
+        if (this.paintbrushPath.length === 0) {
+          this.paintbrushPath.push(earthRingPos);
+        } else {
+          const lastPoint = this.paintbrushPath[this.paintbrushPath.length - 1];
+          const dx = earthRingPos.x - lastPoint.x;
+          const dy = earthRingPos.y - lastPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance >= MIN_DISTANCE) {
+            this.paintbrushPath.push(earthRingPos);
+          } else if (this.paintbrushPath.length === 1) {
+            // If we only have 1 point so far, always add the second point even if close
+            // This ensures we can create a stroke even for short movements
+            this.paintbrushPath.push(earthRingPos);
+          } else {
+            // If distance is too small, update the last point to the current position
+            // This ensures smooth brush strokes even when moving slowly
+            this.paintbrushPath[this.paintbrushPath.length - 1] = earthRingPos;
+          }
+        }
+      }
+      
       this.updatePreview(earthRingPos);
     } else if (this.currentTool === TOOLS.PAINTBRUSH) {
       // Show paintbrush preview
@@ -265,14 +299,25 @@ export class ZoneEditor {
     if (event.button !== 0) return;
     if (!this.isDrawing) return;
     
-    const earthRingPos = this.getEarthRingPositionFromMouse(event);
-    if (!earthRingPos) return;
+    // Get the actual mouse release position from the event
+    // This ensures the final zone goes exactly where the cursor is when released
+    const endPos = this.getEarthRingPositionFromMouse(event);
+    if (!endPos) return;
+    
+    // Update currentPoint to match
+    this.currentPoint = endPos;
+    
+    // Update preview one final time with the actual release position
+    // This ensures the preview shows exactly what will be created
+    if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
+      this.updatePreview(endPos);
+    }
     
     // DEBUG: Log release position
     if (window.DEBUG_ZONE_COORDS) {
       const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
       console.log('[ZoneEditor] Mouse UP:', {
-        earthRingPos: { ...earthRingPos },
+        earthRingPos: { ...endPos },
         cameraX: cameraPos.x,
         tool: this.currentTool,
         startPoint: this.startPoint,
@@ -281,7 +326,7 @@ export class ZoneEditor {
     
     // Finish drawing for drag-based tools
     if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
-      this.finishDrawing(earthRingPos);
+      this.finishDrawing(endPos);
     }
   }
   
@@ -312,14 +357,6 @@ export class ZoneEditor {
   updatePreview(currentPos) {
     if (!this.startPoint || !currentPos) return;
     
-    // Remove old preview
-    if (this.previewMesh) {
-      this.scene.remove(this.previewMesh);
-      if (this.previewMesh.geometry) this.previewMesh.geometry.dispose();
-      if (this.previewMesh.material) this.previewMesh.material.dispose();
-      this.previewMesh = null;
-    }
-    
     let geometry;
     
     try {
@@ -344,19 +381,38 @@ export class ZoneEditor {
       }
       
       if (geometry) {
-        const material = new THREE.MeshBasicMaterial({
-          color: this.getToolColor(),
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-          depthTest: false,
-        });
-        this.previewMesh = new THREE.Mesh(geometry, material);
-        this.previewMesh.rotation.x = -Math.PI / 2;
-        this.previewMesh.position.y = DEFAULT_FLOOR_HEIGHT + (this.currentFloor * 5) + 0.001;
-        this.previewMesh.renderOrder = 10; // Render above zones
-        this.scene.add(this.previewMesh);
+        // Reuse existing mesh and material if possible for better performance
+        if (this.previewMesh) {
+          // Dispose old geometry
+          if (this.previewMesh.geometry) {
+            this.previewMesh.geometry.dispose();
+          }
+          // Update geometry only (keeps material and mesh)
+          this.previewMesh.geometry = geometry;
+        } else {
+          // Create new mesh on first preview
+          const material = new THREE.MeshBasicMaterial({
+            color: this.getToolColor(),
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            depthTest: false,
+          });
+          this.previewMesh = new THREE.Mesh(geometry, material);
+          this.previewMesh.rotation.x = -Math.PI / 2;
+          // Use the same floor height calculation as zone rendering
+          // Position at origin - geometry coordinates are already in world space
+          const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+          this.previewMesh.position.set(0, floorHeight + 0.001, 0);
+          this.previewMesh.renderOrder = 10; // Render above zones
+          this.scene.add(this.previewMesh);
+        }
+        
+        // Always reset position to origin - geometry coordinates are already in world space
+        // This ensures preview aligns with cursor (geometry is calculated from cursor position)
+        const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+        this.previewMesh.position.set(0, floorHeight + 0.001, 0);
       }
     } catch (error) {
       console.error('Error creating preview geometry:', error);
@@ -381,8 +437,11 @@ export class ZoneEditor {
     this.previewMesh = new THREE.Mesh(geometry, material);
     this.previewMesh.rotation.x = -Math.PI / 2;
     
+    // Convert EarthRing position to Three.js coordinates
+    // CircleGeometry creates a circle centered at origin, so we position the mesh at the cursor position
     const threeJSPos = toThreeJS(pos, this.currentFloor);
-    this.previewMesh.position.set(threeJSPos.x, DEFAULT_FLOOR_HEIGHT + 0.001, threeJSPos.z);
+    const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+    this.previewMesh.position.set(threeJSPos.x, floorHeight + 0.001, threeJSPos.z);
     this.scene.add(this.previewMesh);
   }
   
@@ -391,6 +450,22 @@ export class ZoneEditor {
    */
   async finishDrawing(endPos) {
     if (!this.startPoint) return;
+    
+    // For paintbrush, ensure the end point is in the path
+    if (this.currentTool === TOOLS.PAINTBRUSH && this.paintbrushPath.length > 0) {
+      const lastPoint = this.paintbrushPath[this.paintbrushPath.length - 1];
+      const dx = endPos.x - lastPoint.x;
+      const dy = endPos.y - lastPoint.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      // Add end point if it's different from the last point
+      if (distance > 0.1) {
+        this.paintbrushPath.push(endPos);
+      }
+      // If path only has start point, ensure we have end point for expansion
+      if (this.paintbrushPath.length === 1) {
+        this.paintbrushPath.push(endPos);
+      }
+    }
     
     // DEBUG: Log which tool is being used
     console.log('[ZoneEditor] finishDrawing CALLED', {
@@ -522,11 +597,12 @@ export class ZoneEditor {
       alert(`Failed to create zone: ${error.message}`);
     }
     
-    // Reset drawing state
+    // Reset drawing state IMMEDIATELY to prevent further path accumulation
+    // Reset these before any potential errors
     this.isDrawing = false;
+    this.paintbrushPath = [];
     this.startPoint = null;
     this.currentPoint = null;
-    this.paintbrushPath = [];
   }
   
   /**
@@ -737,9 +813,31 @@ export class ZoneEditor {
    * Set current floor
    */
   setFloor(floor) {
+    if (this.currentFloor === floor) {
+      return; // No change needed
+    }
     this.currentFloor = floor;
-    // Update raycast plane position
-    this.raycastPlane.position.y = DEFAULT_FLOOR_HEIGHT + (floor * 5); // Assuming 5m per floor
+    // Update raycast plane position to match zone rendering
+    // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT
+    if (this.raycastPlane) {
+      this.raycastPlane.position.y = floor * DEFAULT_FLOOR_HEIGHT;
+    }
+  }
+  
+  /**
+   * Update floor based on current camera position
+   * Should be called periodically (e.g., in render loop)
+   */
+  updateFloorFromCamera() {
+    if (!this.cameraController) {
+      return;
+    }
+    
+    const currentFloor = this.cameraController.getCurrentFloor();
+    if (currentFloor !== this.lastFloor) {
+      this.setFloor(currentFloor);
+      this.lastFloor = currentFloor;
+    }
   }
   
   /**
@@ -775,41 +873,102 @@ export class ZoneEditor {
   // Geometry creation methods
   
   createRectanglePreview(start, end) {
-    // Use the same coordinate conversion as final geometry to ensure preview matches
-    const minX = Math.min(start.x, end.x);
-    const maxX = Math.max(start.x, end.x);
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createRectangleGeometry)
+    let minX = Math.min(start.x, end.x);
+    let maxX = Math.max(start.x, end.x);
     const minY = Math.min(start.y, end.y);
     const maxY = Math.max(start.y, end.y);
     
-    // Convert to absolute coordinates (same as final geometry)
-    const absMinX = this.convertRelativeToAbsoluteX(minX);
-    const absMaxX = this.convertRelativeToAbsoluteX(maxX);
+    // DEBUG: Log preview input coordinates
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview input:', {
+        start: { ...start },
+        end: { ...end },
+        minX, maxX, minY, maxY,
+      });
+    }
     
-    // Create preview using the same wrapping logic as final rendering
-    // Wrap each corner point relative to camera (same as wrapZoneX in zone-manager.js)
+    // Convert to absolute coordinates (EXACT same conversion as final geometry)
+    const originalMinX = minX;
+    const originalMaxX = maxX;
+    minX = this.convertRelativeToAbsoluteX(minX);
+    maxX = this.convertRelativeToAbsoluteX(maxX);
+    
+    // DEBUG: Log after conversion
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview after conversion:', {
+        originalMinX,
+        originalMaxX,
+        convertedMinX: minX,
+        convertedMaxX: maxX,
+      });
+    }
+    
+    // Ensure minX < maxX (same as createRectangleGeometry)
+    if (minX >= maxX) {
+      [minX, maxX] = [Math.min(minX, maxX), Math.max(minX, maxX)];
+      if (minX >= maxX) {
+        const RING_CIRCUMFERENCE = 264000000;
+        minX = Math.max(0, minX - 1000);
+        maxX = Math.min(RING_CIRCUMFERENCE, maxX + 1000);
+      }
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = wrapRingPosition(cameraPos.x);
+    const cameraX = cameraPos.x; // Use unwrapped camera position
     
-    // Wrap coordinates relative to camera for preview (same as rendering)
-    const wrappedMinX = normalizeRelativeToCamera(absMinX, cameraX);
-    const wrappedMaxX = normalizeRelativeToCamera(absMaxX, cameraX);
+    // DEBUG: Log camera and wrapping info
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview wrapping:', {
+        cameraPos: { ...cameraPos },
+        cameraX,
+        absMinX: minX,
+        absMaxX: maxX,
+      });
+    }
     
-    // Create shape from rectangle corners (same approach as zone rendering)
-    // Negate Y coordinate (worldPos.z) for negative Y to ensure correct face direction after rotation
-    const hasNegativeY = minY < 0 || maxY < 0;
-    const shape = new THREE.Shape();
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      const wrapped = normalizeRelativeToCamera(x, cameraX);
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] Preview wrapZoneX:', {
+          absoluteX: x,
+          cameraX,
+          wrapped,
+        });
+      }
+      return wrapped;
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
+    // Check if ANY Y coordinate is negative (same logic as zone-manager.js)
     const corners = [
-      [wrappedMinX, minY],
-      [wrappedMaxX, minY],
-      [wrappedMaxX, maxY],
-      [wrappedMinX, maxY],
+      [minX, minY],  // These are the absolute coordinates that will be stored
+      [maxX, minY],
+      [maxX, maxY],
+      [minX, maxY],
     ];
+    const hasNegativeY = corners.some(([_x, y]) => y < 0);
+    const shape = new THREE.Shape();
     
+    // Build shape EXACTLY as zone-manager.js does (identical code)
     let firstPos = null;
     corners.forEach(([x, y], idx) => {
-      const worldPos = toThreeJS({ x, y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      // Negate worldPos.z (EarthRing Y) if Y is negative to fix face direction
-      const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
       if (idx === 0) {
         firstPos = { x: worldPos.x, z: shapeY };
         shape.moveTo(worldPos.x, shapeY);
@@ -817,16 +976,26 @@ export class ZoneEditor {
         shape.lineTo(worldPos.x, shapeY);
       }
     });
-    // Close the shape by returning to first point
+    
+    // Explicitly close the shape
     if (firstPos) {
       shape.lineTo(firstPos.x, firstPos.z);
     }
     
+    // DEBUG: Log final preview shape info
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createRectanglePreview final:', {
+        storedMinX: minX,
+        storedMaxX: maxX,
+        storedMinY: minY,
+        storedMaxY: maxY,
+        firstShapePos: firstPos,
+        hasNegativeY,
+      });
+    }
+    
     // Create geometry from shape (same as zone rendering)
     const geometry = new THREE.ShapeGeometry(shape);
-    
-    // No logging here - this function is called on every mouse move during dragging
-    // Key information is logged in onMouseDown, onMouseUp, and finishDrawing
     
     return geometry;
   }
@@ -950,19 +1119,75 @@ export class ZoneEditor {
   }
   
   createCirclePreview(center, edge) {
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createCircleGeometry)
     const radius = Math.sqrt(
       Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
     );
-    const geometry = new THREE.CircleGeometry(radius, 64);
+    const segments = 64;
     
-    // Convert center to absolute coordinates (same as final geometry)
+    // Convert center to absolute coordinates first (same as final geometry)
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const threeJSPos = toThreeJS({
-      x: absCenterX,
-      y: center.y,
-      z: this.currentFloor,
-    }, this.currentFloor);
-    geometry.translate(threeJSPos.x, 0, threeJSPos.z);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate points around the circle using absolute center
+    // This matches the exact coordinates that will be stored
+    const absoluteCoords = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const x = absCenterX + radius * Math.cos(angle);
+      const y = absCenterY + radius * Math.sin(angle);
+      absoluteCoords.push([x, y]);
+    }
+    // Close the circle
+    if (absoluteCoords.length > 0) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
+    const shape = new THREE.Shape();
+    
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
+    }
+    
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1101,20 +1326,104 @@ export class ZoneEditor {
   }
   
   createTorusPreview(center, edge) {
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createTorusGeometry)
     const outerRadius = Math.sqrt(
       Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
     );
     const innerRadius = outerRadius * 0.6; // Torus inner radius is 60% of outer
-    const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
+    const segments = 64;
     
-    // Convert center to absolute coordinates (same as final geometry)
+    // Convert center to absolute coordinates first (same as final geometry)
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const threeJSPos = toThreeJS({
-      x: absCenterX,
-      y: center.y,
-      z: this.currentFloor,
-    }, this.currentFloor);
-    geometry.translate(threeJSPos.x, 0, threeJSPos.z);
+    const absCenterY = center.y; // Y doesn't need conversion
+    
+    // Generate outer and inner ring points using absolute center
+    // This matches the exact coordinates that will be stored (before wrapping)
+    const outerAbsoluteCoords = [];
+    const innerAbsoluteCoords = [];
+    
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      
+      // Outer ring
+      const outerX = absCenterX + outerRadius * cos;
+      const outerY = absCenterY + outerRadius * sin;
+      outerAbsoluteCoords.push([outerX, outerY]);
+      
+      // Inner ring
+      const innerX = absCenterX + innerRadius * cos;
+      const innerY = absCenterY + innerRadius * sin;
+      innerAbsoluteCoords.push([innerX, innerY]);
+    }
+    
+    // Close rings
+    if (outerAbsoluteCoords.length > 0) {
+      outerAbsoluteCoords.push([outerAbsoluteCoords[0][0], outerAbsoluteCoords[0][1]]);
+    }
+    if (innerAbsoluteCoords.length > 0) {
+      innerAbsoluteCoords.push([innerAbsoluteCoords[0][0], innerAbsoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
+    const shape = new THREE.Shape();
+    
+    // Build outer ring EXACTLY as zone-manager.js does
+    let firstPos = null;
+    outerAbsoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close outer ring
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
+    }
+    
+    // Build inner ring (hole) - reverse for proper winding (donut hole)
+    const holePath = new THREE.Path();
+    innerAbsoluteCoords.reverse(); // Reverse for proper winding
+    innerAbsoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Holes use worldPos.z directly (not negated) - matching zone-manager.js behavior
+      if (idx === 0) {
+        holePath.moveTo(worldPos.x, worldPos.z);
+      } else {
+        holePath.lineTo(worldPos.x, worldPos.z);
+      }
+    });
+    
+    // Add hole to shape
+    shape.holes.push(holePath);
+    
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1192,20 +1501,67 @@ export class ZoneEditor {
   createPolygonPreview(vertices) {
     if (vertices.length < 2) return null;
     
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createPolygonGeometry)
+    // Convert vertices to absolute coordinates (same as final geometry)
+    const absoluteCoords = vertices.map(v => {
+      // Convert relative coordinate to absolute (same as createPolygonGeometry)
+      const absX = this.convertRelativeToAbsoluteX(v.x);
+      // Don't wrap here - we'll wrap during rendering to match zone-manager.js
+      return [absX, v.y];
+    });
+    
+    // Close polygon if not already closed
+    if (absoluteCoords.length > 0 && 
+        (absoluteCoords[0][0] !== absoluteCoords[absoluteCoords.length - 1][0] ||
+         absoluteCoords[0][1] !== absoluteCoords[absoluteCoords.length - 1][1])) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
     const shape = new THREE.Shape();
-    const first = toThreeJS(vertices[0], this.currentFloor);
-    shape.moveTo(first.x, first.z);
     
-    for (let i = 1; i < vertices.length; i++) {
-      const pos = toThreeJS(vertices[i], this.currentFloor);
-      shape.lineTo(pos.x, pos.z);
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
     }
     
-    if (vertices.length >= 3) {
-      shape.lineTo(first.x, first.z); // Close polygon
-    }
-    
+    // Create geometry from shape (same as zone rendering)
     const geometry = new THREE.ShapeGeometry(shape);
+    
     return geometry;
   }
   
@@ -1230,26 +1586,130 @@ export class ZoneEditor {
   }
   
   createPaintbrushPreview(path) {
-    if (path.length < 2) return null;
+    // Handle single point case (same as createPaintbrushGeometry)
+    if (path.length < 2) {
+      // Single point - create a circle (use circle preview logic)
+      return this.createCirclePreview(path[0], {
+        x: path[0].x + this.paintbrushRadius,
+        y: path[0].y,
+        z: path[0].z,
+      });
+    }
     
-    // Create a shape from the paintbrush path
+    // Create the preview by first generating the exact geometry that will be stored
+    // then rendering it exactly as zone-manager.js does
+    // This ensures 100% match between preview and actual zone
+    
+    // Step 1: Generate the exact stored geometry (same as createPaintbrushGeometry via expandPathCoords)
+    // Expand path by paintbrush radius to generate absolute coordinates (before wrapping)
+    const absoluteCoords = [];
+    
+    // Forward path
+    for (let i = 0; i < path.length - 1; i++) {
+      const p1 = path[i];
+      const p2 = path[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      if (length === 0) continue;
+      
+      const perpX = -dy / length;
+      const perpY = dx / length;
+      
+      // Convert relative coordinates to absolute (same as expandPathCoords)
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * this.paintbrushRadius;
+      const y = p1.y + perpY * this.paintbrushRadius;
+      // Don't wrap here - we'll wrap during rendering to match zone-manager.js
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Last point
+    const last = path[path.length - 1];
+    const prev = path[path.length - 2];
+    const dx = last.x - prev.x;
+    const dy = last.y - prev.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    if (length > 0) {
+      const perpX = -dy / length;
+      const perpY = dx / length;
+      // Convert relative coordinate to absolute
+      const absLastX = this.convertRelativeToAbsoluteX(last.x);
+      const x = absLastX + perpX * this.paintbrushRadius;
+      const y = last.y + perpY * this.paintbrushRadius;
+      // Don't wrap here
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Return path (other side)
+    for (let i = path.length - 1; i > 0; i--) {
+      const p1 = path[i];
+      const p2 = path[i - 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      
+      if (length === 0) continue;
+      
+      const perpX = dy / length;
+      const perpY = -dx / length;
+      
+      // Convert relative coordinate to absolute
+      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
+      const x = absP1X + perpX * this.paintbrushRadius;
+      const y = p1.y + perpY * this.paintbrushRadius;
+      // Don't wrap here
+      absoluteCoords.push([x, y]);
+    }
+    
+    // Close polygon
+    if (absoluteCoords.length > 0) {
+      absoluteCoords.push([absoluteCoords[0][0], absoluteCoords[0][1]]);
+    }
+    
+    // Step 2: Now render this exact geometry exactly as zone-manager.js does
+    // Wrap absolute coordinates relative to camera (same as renderZone)
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x; // Use unwrapped camera position
+    
+    // Use the EXACT same wrapping function as zone-manager.js
+    const wrapZoneX = (x) => {
+      return normalizeRelativeToCamera(x, cameraX);
+    };
+    
+    // Step 3: Create shape using the EXACT same coordinates that will be rendered
     const shape = new THREE.Shape();
-    const first = toThreeJS(path[0], this.currentFloor);
-    shape.moveTo(first.x, first.z);
     
-    for (let i = 1; i < path.length; i++) {
-      const pos = toThreeJS(path[i], this.currentFloor);
-      shape.lineTo(pos.x, pos.z);
+    // Build shape EXACTLY as zone-manager.js does (identical code)
+    let firstPos = null;
+    absoluteCoords.forEach(([x, y], idx) => {
+      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
+      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
+      // Use worldPos.x for shape X
+      // For shape Y, use worldPos.z (EarthRing Y)
+      // The outline uses worldPos.z directly and shows correctly on Y+,
+      // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+      // Based on testing: always negate worldPos.z for the fill shape
+      const shapeY = -worldPos.z;
+      if (idx === 0) {
+        firstPos = { x: worldPos.x, z: shapeY };
+        shape.moveTo(worldPos.x, shapeY);
+      } else {
+        shape.lineTo(worldPos.x, shapeY);
+      }
+    });
+    
+    // Explicitly close the shape
+    if (firstPos) {
+      shape.lineTo(firstPos.x, firstPos.z);
     }
     
-    // Expand path by paintbrush radius
-    const expandedShape = this.expandPath(path, this.paintbrushRadius);
-    if (expandedShape) {
-      const geometry = new THREE.ShapeGeometry(expandedShape);
-      return geometry;
-    }
+    // Create geometry from shape (same as zone rendering)
+    const geometry = new THREE.ShapeGeometry(shape);
     
-    return null;
+    return geometry;
   }
   
   createPaintbrushGeometry(path) {
@@ -1374,74 +1834,215 @@ export class ZoneEditor {
       return coords;
     }
     
-    // Expand path similar to expandPath but return EarthRing coordinates
-    const expanded = [];
-    
-    // Forward path
-    for (let i = 0; i < path.length - 1; i++) {
-      const p1 = path[i];
-      const p2 = path[i + 1];
+    // For 2-point paths, check if points are very close (then treat as single point/circle)
+    // If they're far apart, create a stroke
+    if (path.length === 2) {
+      const p1 = path[0];
+      const p2 = path[1];
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
-      const length = Math.sqrt(dx * dx + dy * dy);
+      const distance = Math.sqrt(dx * dx + dy * dy);
       
-      if (length === 0) continue;
-      
-      const perpX = -dy / length;
-      const perpY = dx / length;
-      
-      // Convert relative coordinates to absolute
-      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
-      const x = absP1X + perpX * radius;
-      const y = p1.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+      // Only treat as circle if points are very close together (< 0.5 * radius)
+      // Otherwise, create a stroke (continue to main expansion logic)
+      if (distance < radius * 0.3) {
+        // Points are very close - treat as single point (circle)
+        const centerX = (this.convertRelativeToAbsoluteX(p1.x) + this.convertRelativeToAbsoluteX(p2.x)) / 2;
+        const centerY = (p1.y + p2.y) / 2;
+        const segments = 32;
+        const coords = [];
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const x = centerX + radius * Math.cos(angle);
+          const y = centerY + radius * Math.sin(angle);
+          const wrappedX = wrapRingPosition(x);
+          coords.push([wrappedX, y]);
+        }
+        return coords;
+      }
+      // Points are far apart - continue to create a stroke
     }
     
-    // Last point
+    // Check if path forms a closed loop (first and last points are close)
+    const first = path[0];
     const last = path[path.length - 1];
-    const prev = path[path.length - 2];
-    const dx = last.x - prev.x;
-    const dy = last.y - prev.y;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    if (length > 0) {
-      const perpX = -dy / length;
-      const perpY = dx / length;
-      // Convert relative coordinate to absolute
-      const absLastX = this.convertRelativeToAbsoluteX(last.x);
-      const x = absLastX + perpX * radius;
-      const y = last.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const distToClose = Math.sqrt(dx * dx + dy * dy);
+    // For closed loops, be more lenient - consider closed if within 3x brush radius
+    // This helps catch circles where start and end might not be exactly at the same spot
+    const isClosed = path.length > 2 && distToClose < radius * 3;
+    
+    // Expand path to create a thick stroke polygon
+    // We'll create points on both sides of the path and connect them
+    let leftSide = [];  // One side of the stroke
+    let rightSide = []; // Other side of the stroke
+    
+    // For closed loops, calculate first point's perpendicular direction first
+    // and reuse it for the last point to ensure smooth connection
+    let firstPerpX = null;
+    let firstPerpY = null;
+    
+    // Build both sides of the stroke
+    for (let i = 0; i < path.length; i++) {
+      let perpX, perpY;
+      
+      if (i === 0) {
+        // First point: use direction to next point, or to last point if closed
+        const p1 = path[i];
+        if (isClosed && path.length > 2) {
+          // For closed loops, calculate direction that considers wrapping around
+          // Use direction from last point through first point to second point
+          const prev = path[path.length - 1]; // Last point (wraps around)
+          const next = path[i + 1]; // Second point
+          const dx1 = next.x - p1.x;
+          const dy1 = next.y - p1.y;
+          const dx2 = p1.x - prev.x; // From last to first
+          const dy2 = p1.y - prev.y;
+          const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+          const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+          if (len1 > 0 && len2 > 0) {
+            // Average the perpendiculars from both directions
+            const perpX1 = -dy1 / len1;
+            const perpY1 = dx1 / len1;
+            const perpX2 = -dy2 / len2;
+            const perpY2 = dx2 / len2;
+            const avgLen = Math.sqrt((perpX1 + perpX2) ** 2 + (perpY1 + perpY2) ** 2);
+            if (avgLen > 0) {
+              perpX = (perpX1 + perpX2) / avgLen;
+              perpY = (perpY1 + perpY2) / avgLen;
+            } else {
+              perpX = perpX1;
+              perpY = perpY1;
+            }
+          } else if (len1 > 0) {
+            perpX = -dy1 / len1;
+            perpY = dx1 / len1;
+          } else {
+            continue;
+          }
+          // Store for reuse at last point
+          firstPerpX = perpX;
+          firstPerpY = perpY;
+        } else {
+          const p2 = path[i + 1];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length === 0) continue;
+          perpX = -dy / length;
+          perpY = dx / length;
+        }
+      } else if (i === path.length - 1) {
+        // Last point: use direction from previous point, or to first point if closed
+        if (isClosed && path.length > 2 && firstPerpX !== null && firstPerpY !== null) {
+          // For closed loops, reuse the first point's perpendicular direction
+          // This ensures smooth connection between first and last points
+          perpX = firstPerpX;
+          perpY = firstPerpY;
+        } else {
+          // For non-closed paths, use direction from previous point
+          const p1 = path[i - 1];
+          const p2 = path[i];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0) {
+            perpX = -dy / length;
+            perpY = dx / length;
+          } else {
+            continue;
+          }
+        }
+      } else {
+        // Middle point: average direction from previous and next
+        const prev = path[i - 1];
+        const curr = path[i];
+        const next = path[i + 1];
+        const dx1 = curr.x - prev.x;
+        const dy1 = curr.y - prev.y;
+        const dx2 = next.x - curr.x;
+        const dy2 = next.y - curr.y;
+        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (len1 === 0 || len2 === 0) continue;
+        // Average the perpendicular vectors
+        const perpX1 = -dy1 / len1;
+        const perpY1 = dx1 / len1;
+        const perpX2 = -dy2 / len2;
+        const perpY2 = dx2 / len2;
+        const avgLen = Math.sqrt((perpX1 + perpX2) ** 2 + (perpY1 + perpY2) ** 2);
+        if (avgLen === 0) continue;
+        perpX = (perpX1 + perpX2) / avgLen;
+        perpY = (perpY1 + perpY2) / avgLen;
+      }
+      
+      // Convert point to absolute coordinates
+      const absX = this.convertRelativeToAbsoluteX(path[i].x);
+      const absY = path[i].y;
+      
+      // Create points on both sides
+      const leftX = absX + perpX * radius;
+      const leftY = absY + perpY * radius;
+      const rightX = absX - perpX * radius;
+      const rightY = absY - perpY * radius;
+      
+      leftSide.push([wrapRingPosition(leftX), leftY]);
+      rightSide.push([wrapRingPosition(rightX), rightY]);
     }
     
-    // Return path
-    for (let i = path.length - 1; i > 0; i--) {
-      const p1 = path[i];
-      const p2 = path[i - 1];
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const length = Math.sqrt(dx * dx + dy * dy);
+    // For closed loops, ensure smooth connection by making first and last points identical
+    // This prevents gaps or overlaps where the loop closes
+    if (isClosed && path.length > 2 && leftSide.length > 0 && rightSide.length > 0) {
+      // Use the first point's position for both first and last on leftSide
+      const firstLeft = leftSide[0];
+      leftSide[leftSide.length - 1] = [firstLeft[0], firstLeft[1]];
       
-      if (length === 0) continue;
-      
-      const perpX = dy / length;
-      const perpY = -dx / length;
-      
-      // Convert relative coordinate to absolute
-      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
-      const x = absP1X + perpX * radius;
-      const y = p1.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+      // Use the first point's position for both first and last on rightSide
+      const firstRight = rightSide[0];
+      rightSide[rightSide.length - 1] = [firstRight[0], firstRight[1]];
     }
     
-    // Close polygon
+    // Combine: left side forward, then right side backward
+    const expanded = [...leftSide, ...rightSide.reverse()];
+    
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] expandPathCoords:', {
+        pathLength: path.length,
+        radius,
+        isClosed,
+        distToClose,
+        leftSidePoints: leftSide.length,
+        rightSidePoints: rightSide.length,
+        totalPoints: expanded.length,
+        firstPoint: expanded[0],
+        lastPoint: expanded[expanded.length - 1],
+      });
+    }
+    
+    // Ensure we have at least 4 distinct points (PostGIS requires at least 4 points total including closing duplicate)
+    if (expanded.length < 4) {
+      // Not enough points - fall back to creating a circle around the path points
+      const centerX = path.reduce((sum, p) => sum + this.convertRelativeToAbsoluteX(p.x), 0) / path.length;
+      const centerY = path.reduce((sum, p) => sum + p.y, 0) / path.length;
+      const segments = 32;
+      expanded.length = 0; // Clear and recreate
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        const wrappedX = wrapRingPosition(x);
+        expanded.push([wrappedX, y]);
+      }
+    }
+    
+    // Close polygon (ensure first and last points match)
     if (expanded.length > 0) {
-      expanded.push([expanded[0][0], expanded[0][1]]);
+      const first = expanded[0];
+      const last = expanded[expanded.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        expanded.push([first[0], first[1]]);
+      }
     }
     
     return expanded;

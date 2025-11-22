@@ -122,7 +122,50 @@ export class ZoneManager {
         maxX,
         maxY,
       });
-      this.gameState.setZones(zones || []);
+      
+      // Merge fetched zones with existing zones instead of replacing
+      // This preserves zones that were manually added (e.g., newly created zones)
+      // but are outside the current fetch bounds
+      const existingZones = this.gameState.getAllZones();
+      const fetchedZoneIDs = new Set((zones || []).map(z => z.id));
+      
+      // Add/update fetched zones
+      (zones || []).forEach(zone => {
+        this.gameState.upsertZone(zone);
+      });
+      
+      // Only remove zones that are far from camera (outside fetch range)
+      // Keep zones that are manually added (e.g., newly created) even if outside fetch
+      const cameraXWrapped = wrapRingPosition(cameraPos.x);
+      
+      existingZones.forEach(existingZone => {
+        if (fetchedZoneIDs.has(existingZone.id)) {
+          return; // Zone is in fetch results, keep it
+        }
+        
+        // Check if zone is far from camera (should be removed)
+        // Only remove if zone is clearly outside the fetch range
+        const zoneGeometry = existingZone.geometry ? 
+          (typeof existingZone.geometry === 'string' ? JSON.parse(existingZone.geometry) : existingZone.geometry) : null;
+        
+        if (zoneGeometry && zoneGeometry.coordinates && zoneGeometry.coordinates[0]) {
+          const firstCoord = zoneGeometry.coordinates[0][0];
+          const zoneX = firstCoord[0];
+          const zoneXWrapped = wrapRingPosition(zoneX);
+          
+          // Calculate distance accounting for wrap-around
+          const directDistance = Math.abs(zoneXWrapped - cameraXWrapped);
+          const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+          const distance = Math.min(directDistance, wrappedDistance);
+          
+          // Only remove if zone is clearly outside fetch range (with buffer)
+          if (distance > range * 2) {
+            // Zone is far from camera, safe to remove
+            this.gameState.removeZone(existingZone.id);
+          }
+          // Otherwise, keep it (might be near camera but outside fetch bounds due to wrapping)
+        }
+      });
       this.lastFetchTime = performance.now();
       // Clear error state on success
       this.lastError = null;
@@ -159,10 +202,10 @@ export class ZoneManager {
     }
 
     // Get camera position for wrapping
-    // Wrap camera X to valid range [0, RING_CIRCUMFERENCE) to handle negative/wrapped positions
-    // This is used by wrapZoneX to ensure zones render near the camera
+    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
+    // The function expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE))
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = wrapRingPosition(cameraPos.x);
+    const cameraX = cameraPos.x; // Use unwrapped camera position
 
     // DEBUG: Log rendering
     if (window.DEBUG_ZONE_COORDS) {
@@ -237,9 +280,11 @@ export class ZoneManager {
         const wrappedX = wrapZoneX(x);
         const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
         // Use worldPos.x for shape X
-        // For shape Y, use worldPos.z (EarthRing Y), but negate it if Y is negative
-        // This ensures the shape faces the correct direction after rotation
-        const shapeY = hasNegativeY ? -worldPos.z : worldPos.z;
+        // For shape Y, use worldPos.z (EarthRing Y)
+        // The outline uses worldPos.z directly and shows correctly on Y+,
+        // but the fill (ShapeGeometry) needs to be negated to face the correct direction after rotation
+        // Based on testing: always negate worldPos.z for the fill shape
+        const shapeY = -worldPos.z;
         if (idx === 0) {
           shape.moveTo(worldPos.x, shapeY);
         } else {
