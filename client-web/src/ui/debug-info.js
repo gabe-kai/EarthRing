@@ -171,8 +171,15 @@ export class DebugInfoPanel {
     // Set up event listeners
     this.setupEventListeners();
     
-    // Initialize as minimized
-    this.togglePanel();
+    // Initialize as minimized (isVisible is already false, just hide the sections)
+    const sections = this.panel.querySelector('.debug-sections');
+    const toggleBtn = this.panel.querySelector('#debug-toggle');
+    if (sections) {
+      sections.style.display = 'none';
+    }
+    if (toggleBtn) {
+      toggleBtn.textContent = '+';
+    }
   }
 
   createSection(title, id, lines) {

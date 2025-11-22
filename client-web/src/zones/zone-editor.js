@@ -940,21 +940,121 @@ export class ZoneEditor {
     const absCenterX = this.convertRelativeToAbsoluteX(center.x);
     const absCenterY = center.y; // Y doesn't need conversion
     
+    const RING_CIRCUMFERENCE = 264000000;
+    
     // Generate points around the circle using absolute center
+    const rawCoords = [];
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const x = absCenterX + radius * Math.cos(angle);
       const y = absCenterY + radius * Math.sin(angle);
+      rawCoords.push({ x, y });
+    }
+    
+    // Check if circle crosses the ring boundary (would cause wrapping)
+    // A circle crosses the boundary if any point would wrap to a very different X value
+    const wrappedCoords = rawCoords.map(p => wrapRingPosition(p.x));
+    const minWrappedX = Math.min(...wrappedCoords);
+    const maxWrappedX = Math.max(...wrappedCoords);
+    const wrappedSpan = maxWrappedX - minWrappedX;
+    
+    // DEBUG: Log circle geometry creation
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createCircleGeometry:', {
+        center: { x: absCenterX, y: absCenterY },
+        radius,
+        minWrappedX,
+        maxWrappedX,
+        wrappedSpan,
+        crossesBoundary: wrappedSpan > RING_CIRCUMFERENCE / 2,
+      });
+    }
+    
+    // If wrapped span is > half the ring, the circle crosses the boundary
+    // In this case, we need to keep coordinates in one contiguous range
+    if (wrappedSpan > RING_CIRCUMFERENCE / 2) {
+      // Circle crosses boundary - shift coordinates to keep them contiguous
+      // Find where the center wraps to - this is where we want the center to be
+      const centerWrapped = wrapRingPosition(absCenterX);
       
-      // Wrap X coordinate to valid range
-      const wrappedX = wrapRingPosition(x);
+      // Find the minimum raw X value
+      const minRawX = Math.min(...rawCoords.map(p => p.x));
+      const maxRawX = Math.max(...rawCoords.map(p => p.x));
       
-      coordinates.push([wrappedX, y]);
+      // Calculate shift to keep center at centerWrapped while making coordinates contiguous
+      // If center is at X=0 (wraps to 0) and minRawX=-45, we want:
+      // - Shift coordinates so they're contiguous (shift by -minRawX = +45)
+      // - But this moves center from 0 to 45
+      // - So we need to shift back by (centerWrapped - newCenterAfterShift)
+      const baseShift = -minRawX; // Makes minimum become 0, center moves to radius
+      const newCenterAfterBaseShift = absCenterX + baseShift;
+      const newCenterAfterBaseShiftWrapped = wrapRingPosition(newCenterAfterBaseShift);
+      
+      // Calculate additional shift to move center back to centerWrapped
+      let additionalShift = 0;
+      if (newCenterAfterBaseShiftWrapped !== centerWrapped) {
+        // Calculate the difference, accounting for wrapping
+        const diff = centerWrapped - newCenterAfterBaseShiftWrapped;
+        // If difference is > half ring, go the other way
+        additionalShift = Math.abs(diff) > RING_CIRCUMFERENCE / 2 
+          ? (diff > 0 ? diff - RING_CIRCUMFERENCE : diff + RING_CIRCUMFERENCE)
+          : diff;
+      }
+      
+      const totalShift = baseShift + additionalShift;
+      
+      rawCoords.forEach(p => {
+        const shiftedX = p.x + totalShift;
+        const wrappedX = wrapRingPosition(shiftedX);
+        coordinates.push([wrappedX, p.y]);
+      });
+      
+      if (window.DEBUG_ZONE_COORDS) {
+        const finalMinX = Math.min(...coordinates.map(c => c[0]));
+        const finalMaxX = Math.max(...coordinates.map(c => c[0]));
+        const finalSpan = finalMaxX - finalMinX;
+        const finalCenterX = (finalMinX + finalMaxX) / 2;
+        console.log('[ZoneEditor] Circle crosses boundary - shifted coordinates:', {
+          centerX: absCenterX,
+          centerWrapped,
+          minRawX,
+          maxRawX,
+          baseShift,
+          newCenterAfterBaseShiftWrapped,
+          additionalShift,
+          totalShift,
+          finalMinX,
+          finalMaxX,
+          finalCenterX,
+          finalSpan,
+          expectedSpan: radius * 2,
+        });
+      }
+    } else {
+      // Circle doesn't cross boundary - wrap normally
+      rawCoords.forEach(p => {
+        const wrappedX = wrapRingPosition(p.x);
+        coordinates.push([wrappedX, p.y]);
+      });
     }
     
     // Explicitly close the ring by adding the first point again
     if (coordinates.length > 0) {
       coordinates.push([coordinates[0][0], coordinates[0][1]]);
+    }
+    
+    // DEBUG: Log final geometry
+    if (window.DEBUG_ZONE_COORDS) {
+      const finalMinX = Math.min(...coordinates.map(c => c[0]));
+      const finalMaxX = Math.max(...coordinates.map(c => c[0]));
+      const finalSpan = finalMaxX - finalMinX;
+      console.log('[ZoneEditor] Final circle geometry:', {
+        pointCount: coordinates.length,
+        minX: finalMinX,
+        maxX: finalMaxX,
+        span: finalSpan,
+        expectedSpan: radius * 2,
+      });
     }
     
     return {

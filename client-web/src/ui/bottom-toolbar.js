@@ -8,8 +8,18 @@ let toolbarState = null;
 let activeTab = null;
 
 export function createBottomToolbar() {
-  if (toolbarState) {
+  // Check if toolbar DOM actually exists (survives refresh check)
+  const existingToolbar = document.getElementById('bottom-toolbar');
+  if (existingToolbar && toolbarState) {
+    // Toolbar exists and state is valid
     return toolbarState;
+  }
+  
+  // Reset state if DOM doesn't exist (page was refreshed)
+  if (!existingToolbar) {
+    toolbarState = null;
+    bottomToolbar = null;
+    activeTab = null;
   }
 
   bottomToolbar = document.createElement('div');
@@ -225,8 +235,28 @@ export function switchTab(tabId) {
 
   activeTab = tabId;
   
+  // Persist active tab to localStorage
+  try {
+    localStorage.setItem('earthring_active_tab', tabId);
+  } catch (e) {
+    // Ignore localStorage errors (e.g., private browsing)
+  }
+  
   // Dispatch event for tab change
   window.dispatchEvent(new CustomEvent('toolbar:tab-changed', { detail: { tabId } }));
+}
+
+export function getActiveTab() {
+  // Try to restore from localStorage
+  try {
+    const savedTab = localStorage.getItem('earthring_active_tab');
+    if (savedTab) {
+      return savedTab;
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+  return activeTab;
 }
 
 export function addTab(name, id) {
@@ -234,9 +264,14 @@ export function addTab(name, id) {
   const tab = createTab(name, id);
   toolbar.tabsContainer.appendChild(tab);
   
-  // Set first tab as active
+  // Set first tab as active, or restore from localStorage
   if (!activeTab) {
-    switchTab(id);
+    const savedTab = getActiveTab();
+    if (savedTab && document.querySelector(`[data-tab-id="${savedTab}"]`)) {
+      switchTab(savedTab);
+    } else {
+      switchTab(id);
+    }
   }
   
   return tab;

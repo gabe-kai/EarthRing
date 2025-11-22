@@ -7,6 +7,7 @@ import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
+import { showAdminModal } from './ui/admin-modal.js';
 import { initializeZonesTab } from './ui/zone-ui.js';
 import { createBottomToolbar } from './ui/bottom-toolbar.js';
 import * as THREE from 'three';
@@ -59,6 +60,42 @@ const debugPanel = new DebugInfoPanel(
   chunkManager,
   zoneManager
 );
+
+// Export managers and utilities for debugging/development
+// Set this up early so it's available for UI initialization
+window.earthring = {
+  sceneManager,
+  cameraController,
+  gameStateManager,
+  chunkManager,
+  zoneManager,
+  zoneEditor,
+  gridOverlay,
+  debugPanel,
+  wsClient,
+  debug: false, // Set to true to enable debug logging
+  DEBUG_ZONE_COORDS: false, // Set to true to enable zone coordinate debugging
+  stations: {
+    findNearestStation,
+    getStationPosition,
+    getAllStationPositions,
+    // Helper function to navigate to a station
+    navigateToStation: (index) => {
+      const stationPos = getStationPosition(index);
+      if (stationPos !== null) {
+        // Position camera above station center for good view
+        cameraController.moveToPosition({
+          x: stationPos,
+          y: 0,
+          z: 0,
+        }, 3); // 3 second smooth movement
+        console.log(`Navigating to Station Hub ${index} at position ${stationPos}m`);
+      } else {
+        console.error(`Invalid station index: ${index}`);
+      }
+    },
+  },
+};
 
 // Add a test cube at EarthRing position (0, 0, 0) for demonstration
 const scene = sceneManager.getScene();
@@ -288,6 +325,10 @@ window.addEventListener('show:chunk-panel', () => {
   showChunkPanel();
 });
 
+window.addEventListener('show:admin-modal', () => {
+  showAdminModal();
+});
+
 
 // WebSocket connection event handlers
 wsClient.onOpen(async () => {
@@ -334,40 +375,8 @@ wsClient.onError((error) => {
   });
 });
 
-// Export managers and utilities for debugging/development
-window.earthring = {
-  sceneManager,
-  cameraController,
-  gameStateManager,
-  chunkManager,
-  zoneManager,
-  zoneEditor,
-  gridOverlay,
-  debugPanel,
-  wsClient,
-  debug: false, // Set to true to enable debug logging
-  DEBUG_ZONE_COORDS: false, // Set to true to enable zone coordinate debugging
-  stations: {
-    findNearestStation,
-    getStationPosition,
-    getAllStationPositions,
-    // Helper function to navigate to a station
-    navigateToStation: (index) => {
-      const stationPos = getStationPosition(index);
-      if (stationPos !== null) {
-        // Position camera above station center for good view
-        cameraController.moveToPosition({
-          x: stationPos,
-          y: 0,
-          z: 0,
-        }, 3); // 3 second smooth movement
-        console.log(`Navigating to Station Hub ${index} at position ${stationPos}m`);
-      } else {
-        console.error(`Invalid station index: ${index}`);
-      }
-    },
-  },
-};
+// window.earthring is already set up earlier (after zoneEditor initialization)
+// This ensures it's available when initializeZonesTab() is called
 
 // Global debug flag for zone coordinates (accessible via window.DEBUG_ZONE_COORDS)
 // Enable by running: window.DEBUG_ZONE_COORDS = true in the browser console

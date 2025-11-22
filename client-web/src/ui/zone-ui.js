@@ -12,8 +12,16 @@ let zoneEditor = null;
 let zonesTabInitialized = false;
 
 export function initializeZonesTab() {
-  if (zonesTabInitialized) {
+  // Check if tab actually exists in DOM (survives refresh check)
+  const existingTab = document.querySelector('[data-tab-id="zones"]');
+  if (existingTab && zonesTabInitialized) {
+    // Tab exists and is initialized
     return;
+  }
+  
+  // Reset flag if tab doesn't exist (page was refreshed)
+  if (!existingTab) {
+    zonesTabInitialized = false;
   }
 
   if (!isAuthenticated()) {

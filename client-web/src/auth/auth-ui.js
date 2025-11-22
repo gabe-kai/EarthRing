@@ -437,39 +437,139 @@ export function showUserInfo() {
   // Create user info bar
   const userBar = document.createElement('div');
   userBar.id = 'user-info-bar';
+  
+  const style = document.createElement('style');
+  style.textContent = `
+    #user-info-bar {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    .user-info-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      border: 1px solid #333;
+    }
+    
+    .user-name {
+      color: #00ff00;
+      font-weight: 500;
+      cursor: pointer;
+      position: relative;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      transition: background 0.2s ease;
+    }
+    
+    .user-name:hover {
+      background: rgba(0, 255, 0, 0.1);
+    }
+    
+    .user-dropdown {
+      position: absolute;
+      top: calc(100% + 0.5rem);
+      right: 0;
+      background: rgba(0, 0, 0, 0.95);
+      border: 1px solid #333;
+      border-radius: 6px;
+      min-width: 150px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      display: none;
+      overflow: hidden;
+    }
+    
+    .user-dropdown.show {
+      display: block;
+    }
+    
+    .user-dropdown-item {
+      padding: 0.75rem 1rem;
+      color: #ccc;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .user-dropdown-item:last-child {
+      border-bottom: none;
+    }
+    
+    .user-dropdown-item:hover {
+      background: rgba(255, 0, 0, 0.2);
+      color: #ff4444;
+    }
+    
+    .admin-button {
+      background: #00ff00;
+      color: #000;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: background 0.2s ease;
+    }
+    
+    .admin-button:hover {
+      background: #00cc00;
+    }
+  `;
+  document.head.appendChild(style);
+  
   userBar.innerHTML = `
-    <div style="position: fixed; top: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid #333; z-index: 9999; display: flex; align-items: center; gap: 1rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; flex-wrap: wrap;">
-      <span style="color: #00ff00; font-weight: 500;">Logged in as: ${user.username}</span>
-      <button id="player-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Player</button>
-      <button id="chunk-panel-btn" style="background: #00ff00; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">Chunks</button>
-      <button id="logout-button" style="background: #ff4444; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Logout</button>
+    <div class="user-info-container">
+      <div class="user-name-container" style="position: relative;">
+        <span class="user-name" id="user-name">${user.username}</span>
+        <div class="user-dropdown" id="user-dropdown">
+          <div class="user-dropdown-item" id="logout-menu-item">Logout</div>
+        </div>
+      </div>
+      <button class="admin-button" id="admin-button">Admin</button>
     </div>
   `;
   
   document.body.appendChild(userBar);
   
+  // Set up username dropdown
+  const userName = userBar.querySelector('#user-name');
+  const dropdown = userBar.querySelector('#user-dropdown');
+  let dropdownOpen = false;
+  
+  userName.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdownOpen = !dropdownOpen;
+    dropdown.classList.toggle('show', dropdownOpen);
+  });
+  
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!userBar.contains(e.target)) {
+      dropdownOpen = false;
+      dropdown.classList.remove('show');
+    }
+  });
+  
   // Set up logout handler
-  document.getElementById('logout-button').addEventListener('click', async () => {
+  const logoutItem = userBar.querySelector('#logout-menu-item');
+  logoutItem.addEventListener('click', async () => {
     await logout();
     userBar.remove();
     showAuthUI();
     window.dispatchEvent(new CustomEvent('auth:logout'));
   });
   
-  // Set up panel buttons (will be imported in main.js)
-  const playerBtn = document.getElementById('player-panel-btn');
-  const chunkBtn = document.getElementById('chunk-panel-btn');
-  
-  if (playerBtn) {
-    playerBtn.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('show:player-panel'));
-    });
-  }
-  
-  if (chunkBtn) {
-    chunkBtn.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('show:chunk-panel'));
-    });
-  }
+  // Set up admin button
+  const adminBtn = userBar.querySelector('#admin-button');
+  adminBtn.addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('show:admin-modal'));
+  });
 }
 

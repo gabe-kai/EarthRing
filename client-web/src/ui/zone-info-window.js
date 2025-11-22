@@ -11,6 +11,17 @@ export function showZoneInfoWindow(zone, onDelete) {
   // Remove existing window if present
   hideZoneInfoWindow();
   
+  // Debug: Log zone data to verify area field
+  console.log('[ZoneInfoWindow] Zone data:', {
+    id: zone.id,
+    zone_type: zone.zone_type,
+    floor: zone.floor,
+    area: zone.area,
+    owner_id: zone.owner_id,
+    created_at: zone.created_at,
+    hasGeometry: !!zone.geometry,
+  });
+  
   infoWindow = document.createElement('div');
   infoWindow.id = 'zone-info-window';
   infoWindow.className = 'zone-info-window';
@@ -22,21 +33,12 @@ export function showZoneInfoWindow(zone, onDelete) {
       ).join(' ')
     : 'Unknown';
   
-  // Calculate area if geometry is available
+  // Use area from database (calculated by PostGIS ST_Area)
+  // Fallback to 'N/A' if area is not available
   let areaDisplay = 'N/A';
-  if (zone.geometry && zone.geometry.coordinates && zone.geometry.coordinates[0]) {
-    try {
-      const coords = zone.geometry.coordinates[0];
-      let area = 0;
-      for (let i = 0; i < coords.length - 1; i++) {
-        area += coords[i][0] * coords[i + 1][1];
-        area -= coords[i + 1][0] * coords[i][1];
-      }
-      area = Math.abs(area / 2);
-      areaDisplay = `${area.toFixed(0)} m²`;
-    } catch (e) {
-      // Ignore calculation errors
-    }
+  if (zone.area !== undefined && zone.area !== null) {
+    // Area is in square meters from PostGIS
+    areaDisplay = `${zone.area.toFixed(2)} m²`;
   }
   
   infoWindow.innerHTML = `
@@ -87,7 +89,7 @@ export function showZoneInfoWindow(zone, onDelete) {
   style.textContent = `
     .zone-info-window {
       position: fixed;
-      top: 20px;
+      bottom: 120px;
       right: 20px;
       background: rgba(17, 17, 17, 0.95);
       border: 2px solid #4caf50;
