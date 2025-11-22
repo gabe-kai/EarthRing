@@ -406,7 +406,7 @@ Manages chunk loading and unloading based on viewport.
 - "Zones" tab contains zone type selection, drawing tools, and settings
 - Zone type buttons: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted
 - Drawing tools: Select, Rectangle, Circle, Torus, Polygon, Paintbrush
-- Settings: Floor selector, Paintbrush radius (conditional)
+- Settings: Paintbrush radius (always visible), Brush size keyboard shortcuts (`[` and `]`)
 - Single-row horizontal layout with horizontal scrolling for overflow
 
 **Zones Toolbar** (`client-web/src/ui/zones-toolbar.js`):
@@ -420,9 +420,10 @@ Manages chunk loading and unloading based on viewport.
 - Provides interface for:
   - Zone type selection (6 types: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
   - Drawing tool selection (Select, Rectangle, Circle, Torus, Polygon, Paintbrush)
-  - Floor selection for new zones
-  - Paintbrush radius setting (when paintbrush tool is active)
+  - Paintbrush radius setting (always visible, default 10m)
+  - Brush size keyboard shortcuts (`[` and `]` to decrease/increase)
   - Current tool and zone type display
+- **Floor Handling**: Zones are automatically created on the current camera floor (no manual floor selection)
 - Zone selection: Click zones to select and view info window with details and "Dezone" button
 - Integrated with ZoneEditor, ZoneManager, and GameStateManager for real-time updates
 - Delete functionality removes zones from scene and game state immediately
@@ -479,7 +480,8 @@ gridOverlay.setVisible(false); // Hide grid
    - All drawing tools (Rectangle, Circle, Torus, Polygon, Paintbrush) use identical coordinate conversion logic
    - Previews generate the exact absolute coordinates that will be stored in the database
    - Coordinates are then wrapped using the same logic as zone-manager.js (unwrapped camera position, always negate worldPos.z for fill shapes)
-   - This ensures 100% match between preview and final rendered zone
+   - Preview mesh position is set to `(0, floorHeight + 0.001, 0)` since geometry coordinates are already in world space
+   - This ensures perfect cursor alignment and 100% match between preview and final rendered zone
    - The `wrapZoneX()` function calculates the shortest path around the ring:
      ```javascript
      const wrapZoneX = (x) => {

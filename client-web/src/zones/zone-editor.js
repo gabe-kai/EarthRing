@@ -49,8 +49,11 @@ export class ZoneEditor {
     this.selectedZoneMesh = null;
     
     // Paintbrush state
-    this.paintbrushRadius = 50; // meters
+    this.paintbrushRadius = 10; // meters (default brush size)
     this.paintbrushPath = []; // Array of points for paintbrush
+    
+    // Track last floor to avoid unnecessary updates
+    this.lastFloor = null;
     
     // Event handlers
     this.onToolChangeCallbacks = [];
@@ -62,6 +65,9 @@ export class ZoneEditor {
     
     // Set up mouse event listeners
     this.setupMouseListeners();
+    
+    // Initialize floor from camera position
+    this.updateFloorFromCamera();
   }
   
   /**
@@ -252,6 +258,33 @@ export class ZoneEditor {
     this.currentPoint = earthRingPos;
     
     if (this.isDrawing) {
+      // For paintbrush, add points to the path while dragging
+      if (this.currentTool === TOOLS.PAINTBRUSH) {
+        // Add point to path if it's far enough from the last point (prevent too many points)
+        // Use smaller distance threshold to ensure smooth brush strokes
+        const MIN_DISTANCE = 1; // meters - reduced from 2 to capture more points during drag
+        if (this.paintbrushPath.length === 0) {
+          this.paintbrushPath.push(earthRingPos);
+        } else {
+          const lastPoint = this.paintbrushPath[this.paintbrushPath.length - 1];
+          const dx = earthRingPos.x - lastPoint.x;
+          const dy = earthRingPos.y - lastPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance >= MIN_DISTANCE) {
+            this.paintbrushPath.push(earthRingPos);
+          } else if (this.paintbrushPath.length === 1) {
+            // If we only have 1 point so far, always add the second point even if close
+            // This ensures we can create a stroke even for short movements
+            this.paintbrushPath.push(earthRingPos);
+          } else {
+            // If distance is too small, update the last point to the current position
+            // This ensures smooth brush strokes even when moving slowly
+            this.paintbrushPath[this.paintbrushPath.length - 1] = earthRingPos;
+          }
+        }
+      }
+      
       this.updatePreview(earthRingPos);
     } else if (this.currentTool === TOOLS.PAINTBRUSH) {
       // Show paintbrush preview
@@ -369,11 +402,17 @@ export class ZoneEditor {
           this.previewMesh = new THREE.Mesh(geometry, material);
           this.previewMesh.rotation.x = -Math.PI / 2;
           // Use the same floor height calculation as zone rendering
+          // Position at origin - geometry coordinates are already in world space
           const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
-          this.previewMesh.position.y = floorHeight + 0.001;
+          this.previewMesh.position.set(0, floorHeight + 0.001, 0);
           this.previewMesh.renderOrder = 10; // Render above zones
           this.scene.add(this.previewMesh);
         }
+        
+        // Always reset position to origin - geometry coordinates are already in world space
+        // This ensures preview aligns with cursor (geometry is calculated from cursor position)
+        const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+        this.previewMesh.position.set(0, floorHeight + 0.001, 0);
       }
     } catch (error) {
       console.error('Error creating preview geometry:', error);
@@ -398,8 +437,11 @@ export class ZoneEditor {
     this.previewMesh = new THREE.Mesh(geometry, material);
     this.previewMesh.rotation.x = -Math.PI / 2;
     
+    // Convert EarthRing position to Three.js coordinates
+    // CircleGeometry creates a circle centered at origin, so we position the mesh at the cursor position
     const threeJSPos = toThreeJS(pos, this.currentFloor);
-    this.previewMesh.position.set(threeJSPos.x, DEFAULT_FLOOR_HEIGHT + 0.001, threeJSPos.z);
+    const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+    this.previewMesh.position.set(threeJSPos.x, floorHeight + 0.001, threeJSPos.z);
     this.scene.add(this.previewMesh);
   }
   
@@ -408,6 +450,22 @@ export class ZoneEditor {
    */
   async finishDrawing(endPos) {
     if (!this.startPoint) return;
+    
+    // For paintbrush, ensure the end point is in the path
+    if (this.currentTool === TOOLS.PAINTBRUSH && this.paintbrushPath.length > 0) {
+      const lastPoint = this.paintbrushPath[this.paintbrushPath.length - 1];
+      const dx = endPos.x - lastPoint.x;
+      const dy = endPos.y - lastPoint.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      // Add end point if it's different from the last point
+      if (distance > 0.1) {
+        this.paintbrushPath.push(endPos);
+      }
+      // If path only has start point, ensure we have end point for expansion
+      if (this.paintbrushPath.length === 1) {
+        this.paintbrushPath.push(endPos);
+      }
+    }
     
     // DEBUG: Log which tool is being used
     console.log('[ZoneEditor] finishDrawing CALLED', {
@@ -539,11 +597,12 @@ export class ZoneEditor {
       alert(`Failed to create zone: ${error.message}`);
     }
     
-    // Reset drawing state
+    // Reset drawing state IMMEDIATELY to prevent further path accumulation
+    // Reset these before any potential errors
     this.isDrawing = false;
+    this.paintbrushPath = [];
     this.startPoint = null;
     this.currentPoint = null;
-    this.paintbrushPath = [];
   }
   
   /**
@@ -754,11 +813,30 @@ export class ZoneEditor {
    * Set current floor
    */
   setFloor(floor) {
+    if (this.currentFloor === floor) {
+      return; // No change needed
+    }
     this.currentFloor = floor;
     // Update raycast plane position to match zone rendering
     // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT
     if (this.raycastPlane) {
       this.raycastPlane.position.y = floor * DEFAULT_FLOOR_HEIGHT;
+    }
+  }
+  
+  /**
+   * Update floor based on current camera position
+   * Should be called periodically (e.g., in render loop)
+   */
+  updateFloorFromCamera() {
+    if (!this.cameraController) {
+      return;
+    }
+    
+    const currentFloor = this.cameraController.getCurrentFloor();
+    if (currentFloor !== this.lastFloor) {
+      this.setFloor(currentFloor);
+      this.lastFloor = currentFloor;
     }
   }
   
@@ -1756,74 +1834,215 @@ export class ZoneEditor {
       return coords;
     }
     
-    // Expand path similar to expandPath but return EarthRing coordinates
-    const expanded = [];
-    
-    // Forward path
-    for (let i = 0; i < path.length - 1; i++) {
-      const p1 = path[i];
-      const p2 = path[i + 1];
+    // For 2-point paths, check if points are very close (then treat as single point/circle)
+    // If they're far apart, create a stroke
+    if (path.length === 2) {
+      const p1 = path[0];
+      const p2 = path[1];
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
-      const length = Math.sqrt(dx * dx + dy * dy);
+      const distance = Math.sqrt(dx * dx + dy * dy);
       
-      if (length === 0) continue;
-      
-      const perpX = -dy / length;
-      const perpY = dx / length;
-      
-      // Convert relative coordinates to absolute
-      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
-      const x = absP1X + perpX * radius;
-      const y = p1.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+      // Only treat as circle if points are very close together (< 0.5 * radius)
+      // Otherwise, create a stroke (continue to main expansion logic)
+      if (distance < radius * 0.3) {
+        // Points are very close - treat as single point (circle)
+        const centerX = (this.convertRelativeToAbsoluteX(p1.x) + this.convertRelativeToAbsoluteX(p2.x)) / 2;
+        const centerY = (p1.y + p2.y) / 2;
+        const segments = 32;
+        const coords = [];
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const x = centerX + radius * Math.cos(angle);
+          const y = centerY + radius * Math.sin(angle);
+          const wrappedX = wrapRingPosition(x);
+          coords.push([wrappedX, y]);
+        }
+        return coords;
+      }
+      // Points are far apart - continue to create a stroke
     }
     
-    // Last point
+    // Check if path forms a closed loop (first and last points are close)
+    const first = path[0];
     const last = path[path.length - 1];
-    const prev = path[path.length - 2];
-    const dx = last.x - prev.x;
-    const dy = last.y - prev.y;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    if (length > 0) {
-      const perpX = -dy / length;
-      const perpY = dx / length;
-      // Convert relative coordinate to absolute
-      const absLastX = this.convertRelativeToAbsoluteX(last.x);
-      const x = absLastX + perpX * radius;
-      const y = last.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const distToClose = Math.sqrt(dx * dx + dy * dy);
+    // For closed loops, be more lenient - consider closed if within 3x brush radius
+    // This helps catch circles where start and end might not be exactly at the same spot
+    const isClosed = path.length > 2 && distToClose < radius * 3;
+    
+    // Expand path to create a thick stroke polygon
+    // We'll create points on both sides of the path and connect them
+    let leftSide = [];  // One side of the stroke
+    let rightSide = []; // Other side of the stroke
+    
+    // For closed loops, calculate first point's perpendicular direction first
+    // and reuse it for the last point to ensure smooth connection
+    let firstPerpX = null;
+    let firstPerpY = null;
+    
+    // Build both sides of the stroke
+    for (let i = 0; i < path.length; i++) {
+      let perpX, perpY;
+      
+      if (i === 0) {
+        // First point: use direction to next point, or to last point if closed
+        const p1 = path[i];
+        if (isClosed && path.length > 2) {
+          // For closed loops, calculate direction that considers wrapping around
+          // Use direction from last point through first point to second point
+          const prev = path[path.length - 1]; // Last point (wraps around)
+          const next = path[i + 1]; // Second point
+          const dx1 = next.x - p1.x;
+          const dy1 = next.y - p1.y;
+          const dx2 = p1.x - prev.x; // From last to first
+          const dy2 = p1.y - prev.y;
+          const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+          const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+          if (len1 > 0 && len2 > 0) {
+            // Average the perpendiculars from both directions
+            const perpX1 = -dy1 / len1;
+            const perpY1 = dx1 / len1;
+            const perpX2 = -dy2 / len2;
+            const perpY2 = dx2 / len2;
+            const avgLen = Math.sqrt((perpX1 + perpX2) ** 2 + (perpY1 + perpY2) ** 2);
+            if (avgLen > 0) {
+              perpX = (perpX1 + perpX2) / avgLen;
+              perpY = (perpY1 + perpY2) / avgLen;
+            } else {
+              perpX = perpX1;
+              perpY = perpY1;
+            }
+          } else if (len1 > 0) {
+            perpX = -dy1 / len1;
+            perpY = dx1 / len1;
+          } else {
+            continue;
+          }
+          // Store for reuse at last point
+          firstPerpX = perpX;
+          firstPerpY = perpY;
+        } else {
+          const p2 = path[i + 1];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length === 0) continue;
+          perpX = -dy / length;
+          perpY = dx / length;
+        }
+      } else if (i === path.length - 1) {
+        // Last point: use direction from previous point, or to first point if closed
+        if (isClosed && path.length > 2 && firstPerpX !== null && firstPerpY !== null) {
+          // For closed loops, reuse the first point's perpendicular direction
+          // This ensures smooth connection between first and last points
+          perpX = firstPerpX;
+          perpY = firstPerpY;
+        } else {
+          // For non-closed paths, use direction from previous point
+          const p1 = path[i - 1];
+          const p2 = path[i];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0) {
+            perpX = -dy / length;
+            perpY = dx / length;
+          } else {
+            continue;
+          }
+        }
+      } else {
+        // Middle point: average direction from previous and next
+        const prev = path[i - 1];
+        const curr = path[i];
+        const next = path[i + 1];
+        const dx1 = curr.x - prev.x;
+        const dy1 = curr.y - prev.y;
+        const dx2 = next.x - curr.x;
+        const dy2 = next.y - curr.y;
+        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (len1 === 0 || len2 === 0) continue;
+        // Average the perpendicular vectors
+        const perpX1 = -dy1 / len1;
+        const perpY1 = dx1 / len1;
+        const perpX2 = -dy2 / len2;
+        const perpY2 = dx2 / len2;
+        const avgLen = Math.sqrt((perpX1 + perpX2) ** 2 + (perpY1 + perpY2) ** 2);
+        if (avgLen === 0) continue;
+        perpX = (perpX1 + perpX2) / avgLen;
+        perpY = (perpY1 + perpY2) / avgLen;
+      }
+      
+      // Convert point to absolute coordinates
+      const absX = this.convertRelativeToAbsoluteX(path[i].x);
+      const absY = path[i].y;
+      
+      // Create points on both sides
+      const leftX = absX + perpX * radius;
+      const leftY = absY + perpY * radius;
+      const rightX = absX - perpX * radius;
+      const rightY = absY - perpY * radius;
+      
+      leftSide.push([wrapRingPosition(leftX), leftY]);
+      rightSide.push([wrapRingPosition(rightX), rightY]);
     }
     
-    // Return path
-    for (let i = path.length - 1; i > 0; i--) {
-      const p1 = path[i];
-      const p2 = path[i - 1];
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const length = Math.sqrt(dx * dx + dy * dy);
+    // For closed loops, ensure smooth connection by making first and last points identical
+    // This prevents gaps or overlaps where the loop closes
+    if (isClosed && path.length > 2 && leftSide.length > 0 && rightSide.length > 0) {
+      // Use the first point's position for both first and last on leftSide
+      const firstLeft = leftSide[0];
+      leftSide[leftSide.length - 1] = [firstLeft[0], firstLeft[1]];
       
-      if (length === 0) continue;
-      
-      const perpX = dy / length;
-      const perpY = -dx / length;
-      
-      // Convert relative coordinate to absolute
-      const absP1X = this.convertRelativeToAbsoluteX(p1.x);
-      const x = absP1X + perpX * radius;
-      const y = p1.y + perpY * radius;
-      // Wrap X coordinate to valid range [0, 264000000)
-      const wrappedX = wrapRingPosition(x);
-      expanded.push([wrappedX, y]);
+      // Use the first point's position for both first and last on rightSide
+      const firstRight = rightSide[0];
+      rightSide[rightSide.length - 1] = [firstRight[0], firstRight[1]];
     }
     
-    // Close polygon
+    // Combine: left side forward, then right side backward
+    const expanded = [...leftSide, ...rightSide.reverse()];
+    
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] expandPathCoords:', {
+        pathLength: path.length,
+        radius,
+        isClosed,
+        distToClose,
+        leftSidePoints: leftSide.length,
+        rightSidePoints: rightSide.length,
+        totalPoints: expanded.length,
+        firstPoint: expanded[0],
+        lastPoint: expanded[expanded.length - 1],
+      });
+    }
+    
+    // Ensure we have at least 4 distinct points (PostGIS requires at least 4 points total including closing duplicate)
+    if (expanded.length < 4) {
+      // Not enough points - fall back to creating a circle around the path points
+      const centerX = path.reduce((sum, p) => sum + this.convertRelativeToAbsoluteX(p.x), 0) / path.length;
+      const centerY = path.reduce((sum, p) => sum + p.y, 0) / path.length;
+      const segments = 32;
+      expanded.length = 0; // Clear and recreate
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        const wrappedX = wrapRingPosition(x);
+        expanded.push([wrappedX, y]);
+      }
+    }
+    
+    // Close polygon (ensure first and last points match)
     if (expanded.length > 0) {
-      expanded.push([expanded[0][0], expanded[0][1]]);
+      const first = expanded[0];
+      const last = expanded[expanded.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        expanded.push([first[0], first[1]]);
+      }
     }
     
     return expanded;

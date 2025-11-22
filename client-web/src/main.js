@@ -206,6 +206,9 @@ sceneManager.onRender((deltaTime) => {
     zoneManager.reRenderAllZones();
   }
   
+  // Update zone editor floor based on camera position
+  zoneEditor.updateFloorFromCamera();
+  
   // Update grid overlay position to follow camera
   gridOverlay.update();
   

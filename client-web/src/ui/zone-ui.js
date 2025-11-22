@@ -105,26 +105,18 @@ function createZonesToolbarContent() {
     toolSection.appendChild(button);
   });
   
-  // Settings section (floor, paintbrush radius)
+  // Settings section (paintbrush controls)
   const settingsSection = document.createElement('div');
   settingsSection.className = 'toolbar-section';
   
-  // Floor selector
-  const floorLabel = document.createElement('label');
-  floorLabel.style.cssText = 'display: flex; align-items: center; gap: 0.5rem; color: #888; font-size: 0.85rem;';
-  floorLabel.innerHTML = `
-    Floor: <input type="number" id="zone-floor-input" value="0" min="0" max="15" step="1" 
-           style="width: 60px; padding: 0.25rem; background: #121212; border: 1px solid #333; border-radius: 4px; color: #eee;" />
-  `;
-  settingsSection.appendChild(floorLabel);
-  
-  // Paintbrush radius (hidden by default)
+  // Paintbrush radius (always visible)
   const paintbrushRadiusLabel = document.createElement('label');
   paintbrushRadiusLabel.id = 'paintbrush-radius-label';
-  paintbrushRadiusLabel.style.cssText = 'display: none; align-items: center; gap: 0.5rem; color: #888; font-size: 0.85rem; margin-left: 1rem;';
+  paintbrushRadiusLabel.style.cssText = 'display: flex; align-items: center; gap: 0.5rem; color: #888; font-size: 0.85rem;';
   paintbrushRadiusLabel.innerHTML = `
-    Radius: <input type="number" id="paintbrush-radius-input" value="50" min="10" max="500" step="10" 
+    Brush Size: <input type="number" id="paintbrush-radius-input" value="10" min="10" max="500" step="5" 
            style="width: 80px; padding: 0.25rem; background: #121212; border: 1px solid #333; border-radius: 4px; color: #eee;" />
+    <span style="color: #666; font-size: 0.75rem;">[ <span style="color: #888;">[</span> / <span style="color: #888;">]</span> ]</span>
   `;
   settingsSection.appendChild(paintbrushRadiusLabel);
   
@@ -202,11 +194,7 @@ function selectTool(tool) {
     }
   });
   
-  // Show/hide paintbrush radius control
-  const paintbrushRadiusLabel = document.getElementById('paintbrush-radius-label');
-  if (paintbrushRadiusLabel) {
-    paintbrushRadiusLabel.style.display = tool === TOOLS.PAINTBRUSH ? 'flex' : 'none';
-  }
+  // Paintbrush radius control is always visible now
   
   // Set tool in editor
   if (zoneEditor) {
@@ -230,24 +218,63 @@ function selectTool(tool) {
 }
 
 function setupZonesToolbarListeners() {
-  // Floor input
-  const floorInput = document.getElementById('zone-floor-input');
-  if (floorInput) {
-    floorInput.addEventListener('change', (e) => {
-      const floor = parseInt(e.target.value, 10);
-      if (zoneEditor) {
-        zoneEditor.setFloor(floor);
-      }
-    });
-  }
-  
   // Paintbrush radius input
   const paintbrushRadiusInput = document.getElementById('paintbrush-radius-input');
   if (paintbrushRadiusInput) {
+    // Initialize input with current radius
+    if (zoneEditor) {
+      paintbrushRadiusInput.value = zoneEditor.paintbrushRadius;
+    }
+    
     paintbrushRadiusInput.addEventListener('change', (e) => {
       const radius = parseFloat(e.target.value);
       if (zoneEditor) {
         zoneEditor.setPaintbrushRadius(radius);
+        // Update UI to reflect actual clamped value
+        const actualRadius = zoneEditor.paintbrushRadius;
+        if (actualRadius !== radius) {
+          e.target.value = actualRadius;
+        }
+      }
+    });
+  }
+  
+  // Keyboard shortcuts for brush size: [ and ]
+  // Use a single event listener that's only added once
+  if (!window._brushSizeShortcutsAdded) {
+    window._brushSizeShortcutsAdded = true;
+    document.addEventListener('keydown', (e) => {
+      // Only handle if not typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
+      if (e.key === '[' || e.key === ']') {
+        const editor = window.earthring?.zoneEditor;
+        if (!editor) return;
+        
+        e.preventDefault();
+        const input = document.getElementById('paintbrush-radius-input');
+        const currentRadius = editor.paintbrushRadius;
+        let newRadius;
+        
+        if (e.key === '[') {
+          newRadius = Math.max(10, currentRadius - 5); // Decrease by 5m, minimum 10m
+        } else {
+          newRadius = Math.min(500, currentRadius + 5); // Increase by 5m, maximum 500m
+        }
+        
+        editor.setPaintbrushRadius(newRadius);
+        // Update input field and trigger change event to sync UI
+        if (input) {
+          input.value = editor.paintbrushRadius; // Use actual clamped value
+          // Trigger change event to ensure any listeners are notified
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // Update brush preview immediately if paintbrush tool is active and we have a current position
+        if (editor.currentTool === 'paintbrush' && editor.currentPoint) {
+          editor.updatePaintbrushPreview(editor.currentPoint);
+        }
       }
     });
   }
@@ -264,11 +291,7 @@ function setupZonesToolbarListeners() {
         }
       });
       
-      // Update paintbrush radius visibility
-      const paintbrushRadiusLabel = document.getElementById('paintbrush-radius-label');
-      if (paintbrushRadiusLabel) {
-        paintbrushRadiusLabel.style.display = tool === TOOLS.PAINTBRUSH ? 'flex' : 'none';
-      }
+      // Paintbrush radius control is always visible now
       
       // Update tool display
       const toolDisplay = document.getElementById('current-tool-display');
