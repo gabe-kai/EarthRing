@@ -61,6 +61,13 @@ const debugPanel = new DebugInfoPanel(
   zoneManager
 );
 
+// Global mouse position tracker for debug panel
+const globalMousePosition = { x: 0, y: 0 };
+document.addEventListener('mousemove', (event) => {
+  globalMousePosition.x = event.clientX;
+  globalMousePosition.y = event.clientY;
+});
+
 // Export managers and utilities for debugging/development
 // Set this up early so it's available for UI initialization
 window.earthring = {
@@ -73,6 +80,7 @@ window.earthring = {
   gridOverlay,
   debugPanel,
   wsClient,
+  mousePosition: globalMousePosition, // Global mouse position for debug panel
   debug: false, // Set to true to enable debug logging
   DEBUG_ZONE_COORDS: false, // Set to true to enable zone coordinate debugging
   stations: {
