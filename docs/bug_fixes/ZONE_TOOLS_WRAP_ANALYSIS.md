@@ -9,10 +9,10 @@ Analysis of wrap-point handling in all zone creation tools, with focus on identi
 | Tool | Wrap Handling | Status | Priority |
 |------|---------------|--------|----------|
 | Circle | ✅ **Sophisticated** - Detects boundary crossing, shifts coordinates | Working | - |
-| Torus | ✅ **FIXED** - Now detects boundary crossing, shifts both rings consistently | Working | - |
 | Rectangle | ⚠️ **Basic** - Wraps coordinates, no shift logic | Acceptable | Low |
 | Polygon | ⚠️ **Simple wrap only** - No boundary detection | May need fix | Medium |
 | Paintbrush | ⚠️ **Mixed** - Uses circle for single point, path has no detection | May need fix | Medium |
+| Dezone | ✅ **Inherits from tool shape** - Uses same wrap handling as the selected tool | Working | - |
 
 ## Detailed Analysis
 
@@ -49,96 +49,7 @@ if (wrappedSpan > RING_CIRCUMFERENCE / 2) {
 
 ---
 
-### 2. Torus Tool ✅ (Lines 1430-1568)
-
-**Status**: **FIXED** - Now includes boundary-crossing detection.
-
-**Implementation** (FIXED):
-```javascript
-createTorusGeometry(center, edge) {
-  const outerRadius = Math.sqrt(...);
-  const innerRadius = outerRadius * 0.6;
-  const RING_CIRCUMFERENCE = 264000000;
-  
-  // Convert center to absolute coordinates
-  const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-  const absCenterY = center.y;
-  
-  // Generate RAW coordinates (before wrapping) for both rings
-  const rawOuterCoords = [];
-  const rawInnerCoords = [];
-  
-  for (let i = 0; i < segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    
-    rawOuterCoords.push({
-      x: absCenterX + outerRadius * cos,
-      y: absCenterY + outerRadius * sin
-    });
-    
-    rawInnerCoords.push({
-      x: absCenterX + innerRadius * cos,
-      y: absCenterY + innerRadius * sin
-    });
-  }
-  
-  // ✅ CHECK FOR BOUNDARY CROSSING (use outer ring as reference)
-  const wrappedOuterX = rawOuterCoords.map(p => wrapRingPosition(p.x));
-  const wrappedSpan = Math.max(...wrappedOuterX) - Math.min(...wrappedOuterX);
-  
-  // ✅ If torus crosses boundary, apply coordinate shifting
-  if (wrappedSpan > RING_CIRCUMFERENCE / 2) {
-    // Apply same shifting logic as circle tool
-    // CRITICAL: Apply SAME shift to BOTH outer and inner rings
-    const centerWrapped = wrapRingPosition(absCenterX);
-    const minRawX = Math.min(...rawOuterCoords.map(p => p.x));
-    const baseShift = -minRawX;
-    const newCenterAfterBaseShift = absCenterX + baseShift;
-    const newCenterAfterBaseShiftWrapped = wrapRingPosition(newCenterAfterBaseShift);
-    
-    let additionalShift = 0;
-    if (newCenterAfterBaseShiftWrapped !== centerWrapped) {
-      const diff = centerWrapped - newCenterAfterBaseShiftWrapped;
-      additionalShift = Math.abs(diff) > RING_CIRCUMFERENCE / 2 
-        ? (diff > 0 ? diff - RING_CIRCUMFERENCE : diff + RING_CIRCUMFERENCE)
-        : diff;
-    }
-    
-    const totalShift = baseShift + additionalShift;
-    
-    // ✅ Apply SAME shift to BOTH rings
-    outerCoords = rawOuterCoords.map(p => [
-      wrapRingPosition(p.x + totalShift), p.y
-    ]);
-    innerCoords = rawInnerCoords.map(p => [
-      wrapRingPosition(p.x + totalShift), p.y
-    ]);
-  } else {
-    // Normal case - just wrap coordinates
-    outerCoords = rawOuterCoords.map(p => [wrapRingPosition(p.x), p.y]);
-    innerCoords = rawInnerCoords.map(p => [wrapRingPosition(p.x), p.y]);
-  }
-  
-  // Close rings and return polygon with hole (proper GeoJSON format)
-  return {
-    type: 'Polygon',
-    coordinates: [outerCoords, innerCoords]  // First ring = outer, second = hole
-  };
-}
-```
-
-**Why This Works**:
-- ✅ Detects boundary crossing using outer ring span
-- ✅ Applies SAME shift to both outer and inner rings
-- ✅ Maintains proper hole geometry (concentric rings relationship)
-- ✅ Prevents distorted torus shapes near wrap boundary
-- ✅ Preview function updated with same logic for accurate visualization
-
----
-
-### 3. Rectangle Tool ⚠️ (Lines 1025-1119)
+### 2. Rectangle Tool ⚠️ (Lines 1025-1119)
 
 **Status**: **Acceptable** - Basic wrap handling sufficient for rectangles.
 
@@ -242,19 +153,17 @@ createPaintbrushGeometry(path) {
 
 ### Completed ✅
 
-1. **~~Fix Torus Tool~~** (**COMPLETED**)
-   - ✅ Added boundary-crossing detection using outer ring span check
-   - ✅ Applied circle tool's shifting logic to both outer and inner rings
-   - ✅ Ensured SAME shift is applied to both rings to maintain hole geometry
-   - ✅ Updated both createTorusGeometry and createTorusPreview functions
-   - ✅ Ready for testing with torus centered at X=0, X=132M, and X=264M
+1. **~~Fix Circle Tool~~** (**COMPLETED**)
+   - ✅ Added boundary-crossing detection using span check
+   - ✅ Applied coordinate shifting logic to keep circle contiguous
+   - ✅ Maintains proper center position after shifting
 
 ### Future Improvements
 
 2. **Monitor Polygon Tool** (Medium Priority)
    - Collect user feedback on polygon distortion near boundary
    - If issues reported, add boundary-crossing detection
-   - Implementation would be similar to torus: detect span, apply consistent shift to all vertices
+   - Implementation would be similar to circle: detect span, apply consistent shift to all vertices
 
 3. **Monitor Paintbrush Tool** (Medium Priority)
    - Collect user feedback on paintbrush strokes crossing boundary
@@ -309,19 +218,9 @@ For any tool that gets boundary-crossing detection added:
 
 ## Conclusion
 
-**✅ Torus Tool Fixed**: Now includes boundary-crossing detection matching circle tool implementation
-
-**✅ Working Correctly**: Circle and Torus tools handle wrap boundary properly, Rectangle tool acceptable
+**✅ Working Correctly**: Circle tool handles wrap boundary properly, Rectangle tool acceptable
 
 **⏳ Monitor**: Polygon and Paintbrush tools may need fixes based on user feedback (MEDIUM priority)
 
-## Testing Recommendations
-
-To verify the torus fix works correctly:
-
-1. **Test at wrap boundary**: Create torus centered at X=0 (or X=264M)
-2. **Test opposite side**: Create torus centered at X=132M
-3. **Test overlap**: Create overlapping torus zones and verify server merge works
-4. **Verify preview**: Confirm preview matches final rendered zone
-5. **Check hole geometry**: Ensure inner ring (hole) maintains proper shape and position
+**✅ Dezone Tool**: Inherits wrap handling from the selected tool shape (Rectangle, Circle, Polygon, or Paintbrush)
 

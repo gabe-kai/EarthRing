@@ -84,7 +84,7 @@ Use this checklist before deploying to any environment (staging, production, etc
 ### 3. Database Schema Verification ✅
 
 - [ ] **All required functions exist**
-  - `normalize_for_intersection` (critical for torus overlap)
+  - `normalize_for_intersection` (critical for wrapped zone overlap detection)
   - `normalize_zone_geometry_for_area`
   - `update_chunk_versions`
   - `update_zone_timestamp`
@@ -151,7 +151,7 @@ Use this checklist before deploying to any environment (staging, production, etc
 - [ ] **Zone creation works**
   - Test rectangle tool
   - Test circle tool
-  - Test torus tool (verify hole is preserved!)
+  - Test dezone tool (verify subtraction works correctly!)
   - Test polygon tool
   - Test paintbrush tool
 
@@ -160,10 +160,10 @@ Use this checklist before deploying to any environment (staging, production, etc
   - Test non-overlapping zones stay separate
   - Test wrapped zones (near X=0)
 
-- [ ] **Torus overlap detection works**
-  - Create torus at X=0
-  - Create torus at X=5000
-  - Verify they DON'T merge (critical test!)
+- [ ] **Dezone subtraction works**
+  - Create a zone
+  - Create overlapping dezone
+  - Verify zone is correctly subtracted
 
 - [ ] **Chunk loading works**
   - Move camera around map
@@ -234,7 +234,7 @@ Use this checklist before deploying to any environment (staging, production, etc
 
 - [ ] **Tag release** (for production)
   ```bash
-  git tag -a v1.2.3 -m "Release v1.2.3: Torus overlap detection fix"
+  git tag -a v1.2.3 -m "Release v1.2.3: Dezone zone subtraction feature"
   git push origin v1.2.3
   ```
 
@@ -253,7 +253,7 @@ After deployment, verify:
 - [ ] **Critical features work in production**
   - Test user login
   - Test zone creation
-  - Test torus tool specifically
+  - Test dezone tool specifically
 
 - [ ] **Monitor logs for 15 minutes**
   - Watch for unexpected errors
@@ -306,11 +306,11 @@ psql -d earthring_prod < database/migrations/000016_normalize_for_intersection.u
 .\database\run_migrations.ps1 -Action up
 ```
 
-### Issue: Toruses appear as circles
+### Issue: Dezone not subtracting correctly
 **Solution**: 
 1. Check `normalize_for_intersection` function exists
-2. Verify client sends 2 rings in GeoJSON
-3. Check server logs for geometry structure
+2. Verify dezone geometry overlaps target zone
+3. Check server logs for geometry structure and subtraction results
 
 ### Issue: Non-overlapping zones merge incorrectly
 **Solution**:

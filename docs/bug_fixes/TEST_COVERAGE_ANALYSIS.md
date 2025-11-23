@@ -26,14 +26,9 @@
 - ✅ `TestZoneStorage_MergeMultipleZones` - 3+ zones
 - ✅ `TestZoneStorage_MergeNonOverlappingZones` - No merge
 
-#### Torus Tests (7 tests)
-- ✅ `TestZoneStorage_TorusHasHole` - Basic torus structure
-- ✅ `TestZoneStorage_TorusNonOverlapping` - Non-overlapping toruses
-- ✅ `TestZoneStorage_TorusOverlapping` - Overlapping toruses
-- ✅ `TestZoneStorage_TorusWrappedNonOverlapping` - Wrapped non-overlapping
-- ✅ `TestZoneStorage_TorusWrappedHasHole` - Wrapped torus structure
-- ✅ `TestZoneStorage_TorusMergePreservesHoles` - Torus merge preserves holes
-- ✅ `TestZoneStorage_TorusPolygonMerge` - Torus + regular polygon merge
+#### Dezone Tests (2 tests)
+- ✅ `TestZoneStorage_DezoneSubtractsFromSingleZone` - Dezone subtracting from a single zone
+- ✅ `TestZoneStorage_DezoneBisectsZone` - Dezone bisecting a zone into multiple zones
 
 #### Schema Verification (2 tests)
 - ✅ `TestDatabaseSchemaVerification` - All objects exist
@@ -43,41 +38,36 @@
 
 #### Critical Missing Tests
 
-1. ~~**Torus + Regular Polygon Merge**~~ ✅ **IMPLEMENTED**
-   - ✅ `TestZoneStorage_TorusPolygonMerge` - Tests torus + rectangle merge
-   - ✅ Verifies hole is preserved in merged result
+1. **Dezone Subtracting from Multiple Zones**
+   - Test dezone overlapping multiple zones
+   - Verify all overlapping zones are updated
+   - Test with different zone types
 
-2. **Multiple Toruses Merging (3+)**
-   - Test 3+ overlapping toruses
-   - Verify all holes are preserved
-   - Test with different hole sizes
+2. **Dezone with Different Tool Shapes**
+   - Test dezone using rectangle shape
+   - Test dezone using circle shape
+   - Test dezone using polygon shape
+   - Test dezone using paintbrush shape
 
-3. **Wrapped Torus + Wrapped Regular Polygon**
-   - Both zones wrap around X=0
+3. **Wrapped Dezone Operations**
+   - Dezone that wraps around X=0
    - Test overlap detection works correctly
-   - Test merge preserves torus hole
+   - Test subtraction preserves zone geometry
 
-4. **Torus at Exact Wrap Boundary (X=0)**
-   - Torus centered exactly at X=0
-   - Test hole preservation
-   - Test overlap detection
-   - Test merging with nearby zones
+4. **Dezone Edge Cases**
+   - Very small dezone (should subtract small area)
+   - Very large dezone (approaching ring circumference)
+   - Dezone that completely removes a zone
+   - Dezone that doesn't overlap any zones
 
-5. **Edge Cases**
-   - Very small torus (inner radius close to outer radius)
-   - Very large torus (approaching ring circumference)
-   - Torus with inner radius = 0 (should be circle, not torus)
-   - Torus with outer radius > ring circumference
-
-6. **Client-Side Geometry Generation**
-   - No tests for `createTorusGeometry()`
+5. **Client-Side Geometry Generation**
    - No tests for `createCircleGeometry()`
    - No tests for wrap-point handling in client
    - No tests for coordinate conversion
 
 7. **Integration Tests**
-   - End-to-end: Create torus → Verify hole → Merge → Verify hole preserved
-   - End-to-end: Create wrapped torus → Verify structure → Merge → Verify structure
+   - End-to-end: Create dezone → Verify subtraction → Verify zone updated
+   - End-to-end: Create wrapped dezone → Verify structure → Verify subtraction works
 
 #### ~~Skipped Tests That Should Be Implemented~~ ✅ **ALL IMPLEMENTED**
 
@@ -86,10 +76,10 @@
    - ✅ `TestZoneStorage_AreaCalculation_SimpleWrapCase` - Tests simple wrap case
    - ✅ `TestZoneStorage_AreaCalculation_CircleAtOrigin` - Tests circle at origin
 
-2. ~~**Torus Merge Preserves Holes** (1 skipped test)~~ ✅ **IMPLEMENTED**
-   - ✅ `TestZoneStorage_TorusMergePreservesHoles` - Tests actual PostGIS behavior
-   - ✅ Documents that PostGIS preserves holes when toruses merge
-   - ✅ Accepts Polygon with holes (PostGIS produces this correctly)
+2. ~~**Dezone Subtraction**~~ ✅ **IMPLEMENTED**
+   - ✅ `TestZoneStorage_DezoneSubtractsFromSingleZone` - Tests dezone subtracting from a zone
+   - ✅ `TestZoneStorage_DezoneBisectsZone` - Tests dezone bisecting a zone into multiple zones
+   - ✅ Documents that PostGIS `ST_Difference` correctly handles zone subtraction
 
 ## Test Coverage Matrix
 
@@ -99,11 +89,10 @@
 | Area calculation | ✅ | ❌ | Partial |
 | Normal merge | ✅ | ❌ | Partial |
 | Wrapped merge | ✅ | ❌ | Partial |
-| Torus creation | ✅ | ❌ | Partial |
-| Torus merge | ✅ | ❌ | Partial |
-| Wrapped torus | ✅ | ❌ | Partial |
-| Torus + polygon merge | ❌ | ❌ | **Missing** |
-| Multiple toruses | ❌ | ❌ | **Missing** |
+| Dezone subtraction | ✅ | ❌ | Partial |
+| Dezone bisection | ✅ | ❌ | Partial |
+| Wrapped dezone | ⏭️ | ❌ | **Skipped** |
+| Dezone multiple zones | ⏭️ | ❌ | **Skipped** |
 | Client geometry gen | ❌ | ❌ | **Missing** |
 | Wrap boundary edge cases | ⏭️ | ❌ | **Skipped** |
 
@@ -116,27 +105,27 @@
    - Create geometries with coordinates spanning wrap boundary
    - Verify area is reasonable (not billions)
 
-2. **Add Torus + Regular Polygon merge test**
+2. **Add Dezone with multiple overlapping zones test**
    - Critical for real-world usage
    - Verify hole preservation
 
 3. **Add client-side geometry generation tests**
-   - Test `createTorusGeometry()` with various inputs
+   - Test dezone geometry generation with various tool shapes
    - Test wrap-point handling
    - Test coordinate conversion
 
 ### Medium Priority
 
-4. **Implement TorusMergePreservesHoles test**
-   - Document actual PostGIS behavior
-   - Accept MultiPolygon if that's what happens
+4. **Add dezone with multiple overlapping zones test**
+   - Test dezone overlapping multiple zones
+   - Verify all overlapping zones are updated
 
-5. **Add multiple toruses merge test**
-   - Test 3+ overlapping toruses
-   - Verify all holes preserved
+5. **Add dezone with different tool shapes test**
+   - Test dezone using rectangle, circle, polygon, paintbrush
+   - Verify subtraction works correctly for all shapes
 
 6. **Add edge case tests**
-   - Very small/large toruses
+   - Very small/large dezones
    - Boundary conditions
 
 ### Low Priority
@@ -159,20 +148,20 @@ server/internal/database/
 server/internal/database/
 ├── zones_test.go (basic operations)
 ├── zones_merge_test.go (merge scenarios)
-├── zones_torus_test.go (torus-specific)
+├── zones_dezone_test.go (dezone-specific)
 ├── zones_wrap_test.go (wrap-point scenarios)
 └── schema_verification_test.go
 
 client-web/src/zones/__tests__/
 ├── zone-editor.test.js (geometry generation)
-├── torus-geometry.test.js (torus-specific)
+├── dezone-geometry.test.js (dezone-specific)
 └── wrap-point.test.js (wrap handling)
 ```
 
 ## Next Steps
 
 1. ~~**Immediate**: Implement skipped wrap-around area tests~~ ✅ **DONE**
-2. ~~**Short-term**: Add torus + polygon merge test~~ ✅ **DONE**
+2. ~~**Short-term**: Add dezone tests~~ ✅ **DONE**
 3. **Short-term**: Add client-side geometry tests
 4. ~~**Medium-term**: Implement remaining skipped tests~~ ✅ **DONE**
 5. **Long-term**: Add E2E integration tests
@@ -193,6 +182,6 @@ client-web/src/zones/__tests__/
 
 - Skipped tests should be implemented, not skipped
 - Client-side tests are critical for catching geometry generation bugs
-- Integration tests would catch issues like the torus overlap detection bug earlier
+- Integration tests would catch issues like the dezone subtraction bug earlier
 - Consider using test fixtures for complex geometries
 

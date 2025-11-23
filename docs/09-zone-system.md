@@ -143,8 +143,7 @@ The zone editor provides multiple tools for creating zones:
 
 1. **Rectangle Tool**: Click and drag to create rectangular zones
 2. **Circle Tool**: Click and drag to create circular zones (from center point)
-3. **Torus Tool**: Click and drag to create torus-shaped zones
-4. **Polygon Tool**: Click multiple points to create custom polygon shapes
+3. **Polygon Tool**: Click multiple points to create custom polygon shapes
    - Click to place vertices
    - Right-click or double-click to finish polygon (minimum 3 vertices)
 5. **Paintbrush Tool**: Click and drag to create freeform zones by painting
@@ -166,12 +165,12 @@ The zone editor provides multiple tools for creating zones:
 
 1. **Drawing Workflow**
    - Select a drawing tool from the toolbar
-   - Click and drag (for Rectangle, Circle, Torus, Paintbrush) or click multiple points (for Polygon)
+   - Click and drag (for Rectangle, Circle, Paintbrush) or click multiple points (for Polygon)
    - Preview appears while drawing and matches the final zone exactly (preview coordinates are aligned with the zone rendering coordinate system)
    - Preview is positioned precisely at the cursor location from the start of drawing
    - Release mouse or finish polygon to create zone
    - The preview and final zone both use the exact mouse release position for accurate placement
-   - **Preview Accuracy**: All tools (Rectangle, Circle, Torus, Polygon, Paintbrush) generate previews using the exact same coordinate system as the final zone rendering:
+   - **Preview Accuracy**: All tools (Rectangle, Circle, Polygon, Paintbrush) generate previews using the exact same coordinate system as the final zone rendering:
      - Previews generate the exact absolute coordinates that will be stored in the database
      - Coordinates are wrapped relative to the camera using unwrapped camera position (matching zone-manager.js behavior)
      - Shape Y coordinates are always negated for fill shapes to ensure correct face orientation after rotation

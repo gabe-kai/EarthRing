@@ -329,7 +329,7 @@ go test -v ./internal/database/... -run TestDatabaseSchemaVerification
 #### Tier 1: Unit Tests (Business Logic)
 ```bash
 # Run specific test
-go test -v ./internal/database/... -run TestZoneStorage_TorusHasHole
+go test -v ./internal/database/... -run TestZoneStorage_Dezone
 
 # Run all zone tests
 go test -v ./internal/database/... -run TestZoneStorage
@@ -622,7 +622,6 @@ Brief description of changes
 - [Database Migrations](database/migrations/README.md)
 - [Deployment Checklist](DEPLOYMENT_CHECKLIST.md)
 - [Testing Gap Analysis](TESTING_GAP_ANALYSIS.md)
-- [Torus Fix Summary](TORUS_FIX_SUMMARY.md)
 - [Wrap-Point Fix Summary](WRAP_POINT_FIX_SUMMARY.md)
 
 ---

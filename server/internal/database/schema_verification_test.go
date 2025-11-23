@@ -201,7 +201,7 @@ func TestNormalizeForIntersectionFunction(t *testing.T) {
 	}
 	
 	if !exists {
-		t.Fatal("❌ normalize_for_intersection function does not exist. This function is CRITICAL for torus overlap detection.")
+		t.Fatal("❌ normalize_for_intersection function does not exist. This function is CRITICAL for wrapped zone overlap detection.")
 	}
 
 	// Test the function works correctly
@@ -241,8 +241,8 @@ func TestNormalizeForIntersectionFunction(t *testing.T) {
 		t.Logf("✓ Wrapped geometry normalized: %s", result)
 	})
 
-	t.Run("TorusWithHole", func(t *testing.T) {
-		// Create a torus (polygon with hole) that wraps
+	t.Run("PolygonWithHole", func(t *testing.T) {
+		// Create a polygon with hole that wraps
 		var ringCount int
 		query := `
 			SELECT ST_NumInteriorRings(normalize_for_intersection(
@@ -251,12 +251,12 @@ func TestNormalizeForIntersectionFunction(t *testing.T) {
 		`
 		err := db.QueryRow(query).Scan(&ringCount)
 		if err != nil {
-			t.Fatalf("normalize_for_intersection failed on torus: %v", err)
+			t.Fatalf("normalize_for_intersection failed on polygon with hole: %v", err)
 		}
 		if ringCount != 1 {
-			t.Errorf("Expected torus to have 1 interior ring (hole), got %d", ringCount)
+			t.Errorf("Expected polygon to have 1 interior ring (hole), got %d", ringCount)
 		}
-		t.Logf("✓ Torus hole preserved: %d interior rings", ringCount)
+		t.Logf("✓ Polygon hole preserved: %d interior rings", ringCount)
 	})
 }
 

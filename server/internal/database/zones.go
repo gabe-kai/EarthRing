@@ -562,26 +562,14 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		// WRAPPING APPROACH - Per-geometry normalization with hole detection
 		// 
 		// CRITICAL: normalize_zone_geometry_for_area does NOT handle polygons with holes!
-		// It only works correctly for simple polygons. Therefore:
-		// - Wrapped simple polygons (no holes): normalize them
-		// - Polygons with holes (toruses): NEVER normalize, even if wrapped
-		//
-		// LIMITATION: Wrapped toruses (e.g., torus centered at X=0) cannot be properly
-		// merged with other zones because we can't normalize them without corrupting holes.
-		// This is acceptable since:
-		// 1. Toruses centered exactly at wrap boundary are rare
-		// 2. Most toruses will be away from boundary and merge fine
-		// 3. Alternative would require writing custom hole-aware normalization (complex)
-		//
-		// For each geometry:
-		// 1. Check if it wraps (span > half_ring) AND has no holes (num_interior_rings = 0)
-		// 2. If both true: normalize → ST_MakeValid → ST_Buffer(0)
-		// 3. Otherwise: leave untouched (preserves holes, but may not merge wrapped correctly)
+		// The unionQuery uses normalize_for_intersection which properly handles
+		// polygons with holes by processing each ring (outer and inner) separately.
+		// This allows wrapped geometries with holes to be correctly normalized and merged.
 		//
 		// Steps:
-		// 1. For EACH geometry: check span and hole count
-		// 2. If wrapped AND no holes: normalize
-		// 3. Otherwise: leave alone
+		// 1. Load and validate all geometries
+		// 2. Detect if each geometry wraps (span > half_ring OR max_x > half_ring)
+		// 3. Normalize wrapped geometries using normalize_for_intersection (preserves holes)
 		// 4. Align all geometries to positive coordinate space
 		// 5. Perform union in aligned space
 		// 6. Shift back and wrap to [0, 264000000) range
@@ -596,9 +584,8 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				UNION ALL
 				SELECT ST_MakeValid(geometry) AS geom FROM zones WHERE id IN (%s)
 			),
-			-- Step 2: Detect if EACH geometry wraps and check for holes
-			-- CRITICAL: normalize_zone_geometry_for_area does NOT handle holes properly!
-			-- Skip normalization for polygons with holes (toruses)
+			-- Step 2: Detect if EACH geometry wraps
+			-- normalize_for_intersection properly handles polygons with holes
 			all_with_spans AS (
 				SELECT 
 					geom,
@@ -606,8 +593,8 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					ST_NumInteriorRings(geom) AS num_holes
 				FROM all_raw_geoms
 			),
-						-- Step 3: For EACH wrapped geometry, normalize it using PostGIS-native operations
-						-- This approach properly handles polygons with holes (toruses) by processing each ring
+			-- Step 3: For EACH wrapped geometry, normalize it using normalize_for_intersection
+			-- This approach properly handles polygons with holes by processing each ring separately
 						all_normalized AS (
 							SELECT 
 								CASE 
