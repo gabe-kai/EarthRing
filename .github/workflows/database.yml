@@ -165,6 +165,53 @@ jobs:
           fi
           echo "✅ All tables created successfully"
 
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache-dependency-path: server/go.sum
+
+      - name: Run Schema Verification Tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: earthring_test
+        working-directory: server
+        run: |
+          echo "=========================================="
+          echo "Running Schema Verification Tests"
+          echo "=========================================="
+          go test -v ./internal/database/... -run TestDatabaseSchemaVerification
+          if [ $? -ne 0 ]; then
+            echo "❌ Schema verification tests failed!"
+            echo "This means required database objects (functions, tables, indexes, triggers) are missing."
+            echo "Check the migration files to ensure all objects are created correctly."
+            exit 1
+          fi
+          echo "✅ All schema verification tests passed"
+
+      - name: Run normalize_for_intersection Function Tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: earthring_test
+        working-directory: server
+        run: |
+          echo "=========================================="
+          echo "Testing normalize_for_intersection Function"
+          echo "=========================================="
+          go test -v ./internal/database/... -run TestNormalizeForIntersectionFunction
+          if [ $? -ne 0 ]; then
+            echo "❌ normalize_for_intersection function tests failed!"
+            echo "This is a CRITICAL function for torus overlap detection."
+            exit 1
+          fi
+          echo "✅ normalize_for_intersection function tests passed"
+
       - name: Test migrations down (optional)
         if: failure()
         env:

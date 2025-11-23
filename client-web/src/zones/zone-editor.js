@@ -589,6 +589,24 @@ export class ZoneEditor {
       this.gameStateManager.upsertZone(zone);
       this.zoneManager.renderZone(zone);
       
+      // If zones were merged, the server returns the merged zone (which may have an existing ID)
+      // We need to remove any other zones from local state that were merged into this zone
+      // The server only merges zones with the same type, floor, and owner
+      const allZones = this.gameStateManager.getAllZones();
+      const zonesToRemove = allZones.filter(existingZone => 
+        existingZone.id !== zone.id && // Not the returned merged zone
+        existingZone.zone_type === zone.zone_type && // Same type
+        existingZone.floor === zone.floor && // Same floor
+        existingZone.owner_id === zone.owner_id // Same owner (handles null/undefined)
+      );
+      
+      // Remove merged zones from local state
+      zonesToRemove.forEach(mergedZone => {
+        console.log(`[ZoneEditor] Removing merged zone ${mergedZone.id} (merged into zone ${zone.id})`);
+        this.gameStateManager.removeZone(mergedZone.id);
+        this.zoneManager.removeZone(mergedZone.id);
+      });
+      
       // Notify callbacks
       this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
       
@@ -1454,11 +1472,13 @@ export class ZoneEditor {
     innerAbsoluteCoords.forEach(([x, y], idx) => {
       const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
       const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      // Holes use worldPos.z directly (not negated) - matching zone-manager.js behavior
+      // CRITICAL: Holes must use the SAME coordinate transformation as outer ring
+      // Outer ring uses -worldPos.z, so holes must also use -worldPos.z
+      const shapeY = -worldPos.z;
       if (idx === 0) {
-        holePath.moveTo(worldPos.x, worldPos.z);
+        holePath.moveTo(worldPos.x, shapeY);
       } else {
-        holePath.lineTo(worldPos.x, worldPos.z);
+        holePath.lineTo(worldPos.x, shapeY);
       }
     });
     
@@ -1619,10 +1639,26 @@ export class ZoneEditor {
     
     // Return polygon with hole (outer ring + inner ring)
     // GeoJSON format: first ring is outer, subsequent rings are holes
-    return {
+    const geometry = {
       type: 'Polygon',
       coordinates: [outerCoords, innerCoords],
     };
+    
+    // DEBUG: Log torus geometry structure
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] createTorusGeometry result:', {
+        type: geometry.type,
+        ringCount: geometry.coordinates.length,
+        outerRingPoints: geometry.coordinates[0]?.length,
+        innerRingPoints: geometry.coordinates[1]?.length,
+        outerRingFirstPoint: geometry.coordinates[0]?.[0],
+        outerRingLastPoint: geometry.coordinates[0]?.[geometry.coordinates[0].length - 1],
+        innerRingFirstPoint: geometry.coordinates[1]?.[0],
+        innerRingLastPoint: geometry.coordinates[1]?.[geometry.coordinates[1].length - 1],
+      });
+    }
+    
+    return geometry;
   }
   
   createPolygonPreview(vertices) {

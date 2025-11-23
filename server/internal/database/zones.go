@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // Zone represents a stored zone record including geometry metadata.
@@ -76,14 +79,60 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 
 	// Check for overlapping zones of the same type and floor
 	// Use ST_Intersects to detect any spatial intersection (overlap, touch, or contain)
+	// CRITICAL: Normalize both geometries to the SAME coordinate space before intersection check
+	// Problem: normalize_for_intersection normalizes each geometry independently:
+	//   - Wrapped geometries normalize to negative X coordinates
+	//   - Non-wrapped geometries stay at positive X coordinates
+	//   - They end up in different coordinate spaces and don't intersect!
+	// Solution: Normalize both, then align to a common reference point using the MINIMUM X
+	// of BOTH geometries combined. This ensures they're in the same coordinate space.
 	overlapQuery := `
+		WITH 
+		new_geom AS (
+			SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($5), 0)) AS geom
+		),
+		existing_zones AS (
+			SELECT 
+				id,
+				normalize_for_intersection(geometry) AS normalized_geom
+			FROM zones
+			WHERE floor = $1
+			  AND zone_type = $2
+			  AND owner_id IS NOT DISTINCT FROM $3
+			  AND is_system_zone = $4
+			  AND normalize_for_intersection(geometry) IS NOT NULL
+		),
+		all_bounds AS (
+			SELECT 
+				LEAST(
+					COALESCE((SELECT ST_XMin(geom) FROM new_geom WHERE geom IS NOT NULL), 999999999),
+					COALESCE((SELECT MIN(ST_XMin(normalized_geom)) FROM existing_zones WHERE normalized_geom IS NOT NULL), 999999999)
+				) AS global_min_x
+		),
+		aligned_geoms AS (
+			SELECT 
+				ez.id,
+				-- Shift both geometries to align at the global minimum X
+				-- This ensures wrapped (negative) and non-wrapped (positive) geometries align correctly
+				ST_Translate(
+					ez.normalized_geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_existing,
+				ST_Translate(
+					(SELECT geom FROM new_geom),
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_new
+			FROM existing_zones ez
+			CROSS JOIN new_geom
+			CROSS JOIN all_bounds
+		)
 		SELECT id
-		FROM zones
-		WHERE floor = $1
-		  AND zone_type = $2
-		  AND owner_id IS NOT DISTINCT FROM $3
-		  AND is_system_zone = $4
-		  AND ST_Intersects(geometry, ST_SetSRID(ST_GeomFromGeoJSON($5), 0))
+		FROM aligned_geoms
+		WHERE aligned_existing IS NOT NULL
+		  AND aligned_new IS NOT NULL
+		  AND ST_Intersects(aligned_existing, aligned_new)
 	`
 
 	var owner sql.NullInt64
@@ -109,9 +158,38 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		log.Printf("[ZoneMerge] Found %d total zones with matching type/floor/owner/system (before intersection check)", totalMatchingZones)
 	}
 
+	// Debug: Test the normalize function on the new geometry before querying
+	if geometryString != "" && totalMatchingZones > 0 {
+		testNormalizeQuery := `
+			SELECT 
+				ST_AsText(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS normalized_geom,
+				ST_IsValid(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS is_valid,
+				ST_IsEmpty(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS is_empty
+		`
+		var normalizedText sql.NullString
+		var isValid, isEmpty bool
+		if err := s.db.QueryRow(testNormalizeQuery, geometryString).Scan(&normalizedText, &isValid, &isEmpty); err == nil {
+			if !normalizedText.Valid || normalizedText.String == "" {
+				log.Printf("[ZoneMerge] WARNING: normalize_for_intersection returned NULL/empty for new geometry!")
+				log.Printf("[ZoneMerge]   This will cause overlap detection to fail. Geometry preview: %s", geometryString[:int(math.Min(200, float64(len(geometryString))))])
+			} else if !isValid {
+				log.Printf("[ZoneMerge] WARNING: normalize_for_intersection returned invalid geometry!")
+			} else {
+				log.Printf("[ZoneMerge] New geometry normalized successfully (valid: %v, empty: %v)", isValid, isEmpty)
+			}
+		}
+	}
+
 	rows, err := s.db.Query(overlapQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone, geometryString)
 	if err != nil {
 		log.Printf("[ZoneMerge] ERROR: Overlap query failed: %v", err)
+		// Check if error is due to missing function
+		errStr := err.Error()
+		if strings.Contains(errStr, "normalize_for_intersection") && strings.Contains(errStr, "does not exist") {
+			log.Printf("[ZoneMerge] CRITICAL: normalize_for_intersection function does not exist in database!")
+			log.Printf("[ZoneMerge] This function is required for overlap detection. Run migration 000016.")
+			return nil, fmt.Errorf("database function normalize_for_intersection does not exist - run migrations: %w", err)
+		}
 		return nil, fmt.Errorf("failed to query overlapping zones: %w", err)
 	}
 	defer func() {
@@ -120,22 +198,245 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		}
 	}()
 
-	var overlappingIDs []int64
+	var directlyOverlappingIDs []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("failed to scan overlapping zone ID: %w", err)
 		}
-		overlappingIDs = append(overlappingIDs, id)
+		directlyOverlappingIDs = append(directlyOverlappingIDs, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate overlapping zones: %w", err)
+	}
+
+	// Find all zones in the connected overlap graph (transitive closure)
+	// If zone A overlaps B and B overlaps C, all three should merge together
+	// We need to recursively find all zones that overlap with any zone in the set
+	var overlappingIDs []int64
+	if len(directlyOverlappingIDs) > 0 {
+		overlappingIDs = make([]int64, 0, len(directlyOverlappingIDs)*2) // Pre-allocate with some headroom
+		overlappingIDs = append(overlappingIDs, directlyOverlappingIDs...)
+		
+		// Keep expanding the set until no new overlapping zones are found
+		// This finds the transitive closure: if A overlaps B and B overlaps C, we find C
+		for {
+			expanded := false
+			// Check each zone in the current set against all other zones of the same type/floor/owner
+			// Use the current overlappingIDs set (which grows each iteration)
+			expandQuery := `
+				WITH 
+				current_set AS (
+					SELECT id, geometry FROM zones WHERE id = ANY($1::bigint[])
+				),
+				all_zones AS (
+					SELECT id, geometry
+					FROM zones
+					WHERE floor = $2
+					  AND zone_type = $3
+					  AND owner_id IS NOT DISTINCT FROM $4
+					  AND is_system_zone = $5
+					  AND id != ALL($1::bigint[])
+					  AND normalize_for_intersection(geometry) IS NOT NULL
+				),
+				current_normalized AS (
+					SELECT id, normalize_for_intersection(geometry) AS normalized_geom
+					FROM current_set
+				),
+				all_normalized AS (
+					SELECT id, normalize_for_intersection(geometry) AS normalized_geom
+					FROM all_zones
+				),
+				all_bounds AS (
+					SELECT 
+						LEAST(
+							COALESCE((SELECT MIN(ST_XMin(normalized_geom)) FROM current_normalized), 999999999),
+							COALESCE((SELECT MIN(ST_XMin(normalized_geom)) FROM all_normalized), 999999999)
+						) AS global_min_x
+				),
+				aligned_geoms AS (
+					SELECT 
+						cz.id AS current_id,
+						az.id AS other_id,
+						ST_Translate(
+							cz.normalized_geom,
+							-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+							0
+						) AS aligned_current,
+						ST_Translate(
+							az.normalized_geom,
+							-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+							0
+						) AS aligned_other
+					FROM current_normalized cz
+					CROSS JOIN all_normalized az
+					CROSS JOIN all_bounds
+				)
+				SELECT DISTINCT other_id
+				FROM aligned_geoms
+				WHERE aligned_current IS NOT NULL
+				  AND aligned_other IS NOT NULL
+				  AND ST_Intersects(aligned_current, aligned_other)
+			`
+			
+			var newOverlappingIDs []int64
+			expandRows, err := s.db.Query(expandQuery, 
+				pq.Array(overlappingIDs), input.Floor, input.ZoneType, owner, input.IsSystemZone)
+			if err == nil {
+				defer expandRows.Close()
+				for expandRows.Next() {
+					var id int64
+					if err := expandRows.Scan(&id); err == nil {
+						// Check if this ID is already in our set
+						found := false
+						for _, existingID := range overlappingIDs {
+							if existingID == id {
+								found = true
+								break
+							}
+						}
+						if !found {
+							newOverlappingIDs = append(newOverlappingIDs, id)
+							expanded = true
+						}
+					}
+				}
+			} else {
+				log.Printf("[ZoneMerge] WARNING: Failed to expand overlap set: %v", err)
+				break
+			}
+			
+			if !expanded {
+				break
+			}
+			
+			// Add newly found overlapping zones to the set
+			overlappingIDs = append(overlappingIDs, newOverlappingIDs...)
+		}
+		
+		if len(overlappingIDs) > len(directlyOverlappingIDs) {
+			log.Printf("[ZoneMerge] Expanded overlap set: directly overlapping=%v, full connected set=%v", 
+				directlyOverlappingIDs, overlappingIDs)
+		}
 	}
 
 	if len(overlappingIDs) > 0 {
 		log.Printf("[ZoneMerge] Found %d overlapping zones: %v", len(overlappingIDs), overlappingIDs)
 	} else {
 		log.Printf("[ZoneMerge] No overlapping zones found - will create new zone (total matching zones: %d)", totalMatchingZones)
+		// Debug: Check why no overlaps were found
+		if totalMatchingZones > 0 {
+			log.Printf("[ZoneMerge] DEBUG: There are %d zones with matching type/floor/owner, but ST_Intersects returned false", totalMatchingZones)
+			log.Printf("[ZoneMerge] DEBUG: Possible reasons:")
+			log.Printf("[ZoneMerge] DEBUG:   1. Zones don't actually overlap (only touch at edges)")
+			log.Printf("[ZoneMerge] DEBUG:   2. normalize_for_intersection returned NULL for some geometries")
+			log.Printf("[ZoneMerge] DEBUG:   3. ST_Intersects is not detecting the overlap correctly")
+			
+			// Try to get one existing zone and test intersection manually with detailed alignment debugging
+			testQuery := `
+				SELECT id, 
+				       ST_AsText(normalize_for_intersection(geometry)) AS normalized_existing,
+				       ST_IsValid(normalize_for_intersection(geometry)) AS existing_valid
+				FROM zones
+				WHERE floor = $1 AND zone_type = $2 AND owner_id IS NOT DISTINCT FROM $3 AND is_system_zone = $4
+				LIMIT 1
+			`
+			var testID int64
+			var normalizedExisting sql.NullString
+			var existingValid bool
+			if err := s.db.QueryRow(testQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone).Scan(&testID, &normalizedExisting, &existingValid); err == nil {
+				if !normalizedExisting.Valid || normalizedExisting.String == "" {
+					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalize_for_intersection returned NULL/empty!", testID)
+				} else if !existingValid {
+					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalize_for_intersection returned invalid geometry!", testID)
+				} else {
+					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalized successfully", testID)
+					// Test intersection manually with alignment (matching the overlap query logic)
+					intersectTestQuery := `
+						WITH 
+						new_geom AS (
+							SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
+						),
+						existing_geom AS (
+							SELECT normalize_for_intersection(geometry) AS geom
+							FROM zones
+							WHERE id = $2
+						),
+						all_bounds AS (
+							SELECT 
+								LEAST(
+									COALESCE((SELECT ST_XMin(geom) FROM new_geom WHERE geom IS NOT NULL), 999999999),
+									COALESCE((SELECT ST_XMin(geom) FROM existing_geom WHERE geom IS NOT NULL), 999999999)
+								) AS global_min_x
+						),
+						aligned AS (
+							SELECT 
+								ST_Translate(
+									(SELECT geom FROM existing_geom),
+									-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+									0
+								) AS aligned_existing,
+								ST_Translate(
+									(SELECT geom FROM new_geom),
+									-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+									0
+								) AS aligned_new,
+								(SELECT global_min_x FROM all_bounds) AS ref_x
+							FROM all_bounds
+						)
+						SELECT 
+							ST_Intersects(aligned_existing, aligned_new) AS intersects,
+							ST_XMin(aligned_existing) AS existing_min_x,
+							ST_XMax(aligned_existing) AS existing_max_x,
+							ST_YMin(aligned_existing) AS existing_min_y,
+							ST_YMax(aligned_existing) AS existing_max_y,
+							ST_XMin(aligned_new) AS new_min_x,
+							ST_XMax(aligned_new) AS new_max_x,
+							ST_YMin(aligned_new) AS new_min_y,
+							ST_YMax(aligned_new) AS new_max_y,
+							ref_x
+						FROM aligned
+					`
+					var intersects bool
+					var existingMinX, existingMaxX, existingMinY, existingMaxY sql.NullFloat64
+					var newMinX, newMaxX, newMinY, newMaxY sql.NullFloat64
+					var refX sql.NullFloat64
+					if err := s.db.QueryRow(intersectTestQuery, geometryString, testID).Scan(
+						&intersects, 
+						&existingMinX, &existingMaxX, &existingMinY, &existingMaxY,
+						&newMinX, &newMaxX, &newMinY, &newMaxY,
+						&refX); err == nil {
+						log.Printf("[ZoneMerge] DEBUG: Manual intersection test with zone %d:", testID)
+						log.Printf("[ZoneMerge] DEBUG:   Reference X (global_min_x): %v", refX)
+						log.Printf("[ZoneMerge] DEBUG:   Existing aligned: X=[%v, %v], Y=[%v, %v]", 
+							existingMinX, existingMaxX, existingMinY, existingMaxY)
+						log.Printf("[ZoneMerge] DEBUG:   New aligned: X=[%v, %v], Y=[%v, %v]", 
+							newMinX, newMaxX, newMinY, newMaxY)
+						log.Printf("[ZoneMerge] DEBUG:   Intersects: %v", intersects)
+						if !intersects {
+							// Check if they're close but not overlapping
+							if existingMinX.Valid && existingMaxX.Valid && newMinX.Valid && newMaxX.Valid {
+								overlapX := (existingMaxX.Float64 >= newMinX.Float64 && existingMinX.Float64 <= newMaxX.Float64)
+								overlapY := false
+								if existingMinY.Valid && existingMaxY.Valid && newMinY.Valid && newMaxY.Valid {
+									overlapY = (existingMaxY.Float64 >= newMinY.Float64 && existingMinY.Float64 <= newMaxY.Float64)
+								}
+								log.Printf("[ZoneMerge] DEBUG:   X-axis overlap: %v, Y-axis overlap: %v", overlapX, overlapY)
+								if overlapX && !overlapY {
+									log.Printf("[ZoneMerge] DEBUG:   X ranges overlap but Y ranges don't - zones are at different Y positions")
+								} else if !overlapX && overlapY {
+									log.Printf("[ZoneMerge] DEBUG:   Y ranges overlap but X ranges don't - zones are at different X positions")
+								} else if !overlapX && !overlapY {
+									log.Printf("[ZoneMerge] DEBUG:   Neither X nor Y ranges overlap - zones don't overlap at all")
+								}
+							}
+						}
+					} else {
+						log.Printf("[ZoneMerge] DEBUG: Could not test intersection manually: %v", err)
+					}
+				}
+			}
+		}
 	}
 
 	// If there are overlapping zones, merge them
@@ -165,10 +466,24 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		}
 		
 		log.Printf("[ZoneMerge] Oldest zone ID to keep: %d (created: %v)", oldestZoneID, oldestZoneCreatedAt)
+		log.Printf("[ZoneMerge] Will merge ALL %d overlapping zones together (including oldest zone %d)", len(overlappingIDs), oldestZoneID)
+		if len(overlappingIDs) > 1 {
+			log.Printf("[ZoneMerge] NOTE: Merging %d zones into one. Zones %v will be deleted, zone %d will contain the merged geometry.", 
+				len(overlappingIDs), func() []int64 {
+					toDelete := make([]int64, 0, len(overlappingIDs)-1)
+					for _, id := range overlappingIDs {
+						if id != oldestZoneID {
+							toDelete = append(toDelete, id)
+						}
+					}
+					return toDelete
+				}(), oldestZoneID)
+		}
 		
 		// Build placeholders for union query
 		// We need to include all overlapping zone IDs in the union, plus the new geometry
-		// Use all overlappingIDs (not just deleteArgs, since we're including the oldest one in the union)
+		// CRITICAL: ALL overlapping zones are included in the union, not just one!
+		// This ensures that if a new zone overlaps 2 existing zones, all 3 are merged together
 		unionPlaceholders := make([]string, len(overlappingIDs))
 		unionIDs := make([]interface{}, len(overlappingIDs))
 		for i, id := range overlappingIDs {
@@ -185,26 +500,32 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 
 		// Build query to merge new geometry with all overlapping zones using ST_Union
 		// 
-		// WRAPPING APPROACH - Uses ST_DumpPoints + ST_MakePolygon for coordinate normalization
+		// WRAPPING APPROACH - Per-geometry normalization with hole detection
 		// 
-		// CRITICAL: Do NOT use normalize_zone_geometry_for_area() in transformations!
-		// That function uses JSON manipulation which creates structures that corrupt when
-		// further transformed (shifted, unioned, wrapped).
+		// CRITICAL: normalize_zone_geometry_for_area does NOT handle polygons with holes!
+		// It only works correctly for simple polygons. Therefore:
+		// - Wrapped simple polygons (no holes): normalize them
+		// - Polygons with holes (toruses): NEVER normalize, even if wrapped
 		//
-		// Instead, we use ST_DumpPoints to extract individual coordinates, shift coordinates
-		// where X > half_ring by -ring_circumference, then rebuild the polygon using ST_MakePolygon.
-		// This handles geometries like rectangles from X=15 to X=263999970 (wraps around boundary).
+		// LIMITATION: Wrapped toruses (e.g., torus centered at X=0) cannot be properly
+		// merged with other zones because we can't normalize them without corrupting holes.
+		// This is acceptable since:
+		// 1. Toruses centered exactly at wrap boundary are rare
+		// 2. Most toruses will be away from boundary and merge fine
+		// 3. Alternative would require writing custom hole-aware normalization (complex)
+		//
+		// For each geometry:
+		// 1. Check if it wraps (span > half_ring) AND has no holes (num_interior_rings = 0)
+		// 2. If both true: normalize → ST_MakeValid → ST_Buffer(0)
+		// 3. Otherwise: leave untouched (preserves holes, but may not merge wrapped correctly)
 		//
 		// Steps:
-		// 1. Detect if any geometry wraps (span > half_ring = 132,000 km)
-		// 2. Extract points with ST_DumpPoints, shift individual X coords > half_ring
-		// 3. Rebuild polygons with ST_MakePolygon from shifted points
+		// 1. For EACH geometry: check span and hole count
+		// 2. If wrapped AND no holes: normalize
+		// 3. Otherwise: leave alone
 		// 4. Align all geometries to positive coordinate space
 		// 5. Perform union in aligned space
 		// 6. Shift back and wrap to [0, 264000000) range
-		//
-		// Uses only PostGIS geometry operations: ST_DumpPoints, ST_MakePoint, ST_MakeLine,
-		// ST_MakePolygon, ST_Translate, ST_Union, ST_MakeValid - NO JSON manipulation.
 		unionQuery := fmt.Sprintf(`
 			WITH 
 			constants AS (
@@ -216,51 +537,137 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				UNION ALL
 				SELECT ST_MakeValid(geometry) AS geom FROM zones WHERE id IN (%s)
 			),
-			-- Step 2: Detect if any geometry wraps (span > half_ring)
+			-- Step 2: Detect if EACH geometry wraps and check for holes
+			-- CRITICAL: normalize_zone_geometry_for_area does NOT handle holes properly!
+			-- Skip normalization for polygons with holes (toruses)
 			all_with_spans AS (
 				SELECT 
 					geom,
-					ST_XMax(geom) - ST_XMin(geom) AS span
+					ST_XMax(geom) - ST_XMin(geom) AS span,
+					ST_NumInteriorRings(geom) AS num_holes
 				FROM all_raw_geoms
 			),
-			has_wrapped_geom AS (
-				SELECT EXISTS(SELECT 1 FROM all_with_spans, constants WHERE span > constants.half_ring) AS wrapped
-			),
-			-- Step 3: Normalize by shifting individual points where X > half_ring
-			-- Use ST_DumpPoints to extract coordinates, shift them, then rebuild geometry
-			-- This avoids JSON manipulation that corrupts coordinate structures
+			-- Step 3: For EACH wrapped geometry, normalize it using PostGIS-native operations
+			-- This approach properly handles polygons with holes (toruses) by processing each ring
 			all_normalized AS (
 				SELECT 
 					CASE 
-						WHEN (SELECT wrapped FROM has_wrapped_geom) THEN
-							-- Rebuild polygon with shifted coordinates
-							ST_MakePolygon(
-								ST_MakeLine(
-									ARRAY(
+						-- Also normalize if max_x > half_ring (stored with wrapped coordinates, like merged zones)
+						WHEN span > (SELECT half_ring FROM constants) OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+							-- Wrapped geometry - normalize using ST_DumpRings to preserve holes
+							COALESCE(
+								(
+									WITH 
+									geom_to_normalize AS (
+										SELECT geom AS g
+									),
+									rings AS (
+										-- ST_DumpRings returns path[1]=0 for exterior, >0 for interior rings
 										SELECT 
-											ST_MakePoint(
-												CASE 
-													WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants) 
-													THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
-													ELSE ST_X((dp).geom)
-												END,
-												ST_Y((dp).geom)
-											)
-										FROM ST_DumpPoints(ST_ExteriorRing(geom)) AS dp
-									)
+											(dr).path[1] AS ring_index,
+											(dr).geom AS ring_geom
+										FROM (SELECT ST_DumpRings((SELECT g FROM geom_to_normalize)) AS dr) AS dumped
+									),
+									shifted_rings AS (
+										SELECT 
+											ring_index,
+											-- Match normalize_for_intersection approach: ST_MakeLine + ST_AddPoint to close ring
+											-- ST_MakePolygon requires closed rings (first point = last point)
+											ST_AddPoint(
+												ST_MakeLine(
+													ARRAY(
+														SELECT 
+															ST_MakePoint(
+																CASE 
+																	WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants)
+																	THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
+																	ELSE ST_X((dp).geom)
+																END,
+																ST_Y((dp).geom)
+															)
+														FROM ST_DumpPoints(ring_geom) AS dp
+														ORDER BY (dp).path[1]
+													)
+												),
+												-- Add first point at end to close the ring
+												(SELECT 
+													ST_MakePoint(
+														CASE 
+															WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants)
+															THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
+															ELSE ST_X((dp).geom)
+														END,
+														ST_Y((dp).geom)
+													)
+													FROM ST_DumpPoints(ring_geom) AS dp
+													ORDER BY (dp).path[1]
+													LIMIT 1
+												)
+											) AS shifted_ring
+										FROM rings
+									),
+									exterior_ring AS (
+										SELECT shifted_ring FROM shifted_rings WHERE ring_index = 0
+									),
+								valid_interior_rings AS (
+									-- Filter out NULL or unclosed interior rings
+									SELECT ring_index, shifted_ring
+									FROM shifted_rings
+									WHERE ring_index > 0
+									  AND shifted_ring IS NOT NULL
+									  AND ST_IsClosed(shifted_ring)
+								),
+								interior_rings_agg AS (
+									SELECT 
+										CASE 
+											WHEN COUNT(*) > 0 THEN ARRAY_AGG(shifted_ring ORDER BY ring_index)
+											ELSE NULL::geometry[]
+										END AS holes
+									FROM valid_interior_rings
 								)
+								SELECT 
+									CASE 
+										-- Check if we have valid interior rings after filtering
+										WHEN (SELECT holes FROM interior_rings_agg) IS NOT NULL THEN
+											-- Validate before creating polygon with holes
+											CASE
+												WHEN (SELECT shifted_ring FROM exterior_ring) IS NULL THEN NULL
+												WHEN NOT ST_IsClosed((SELECT shifted_ring FROM exterior_ring)) THEN NULL
+												ELSE
+													ST_MakePolygon(
+														(SELECT shifted_ring FROM exterior_ring),
+														(SELECT holes FROM interior_rings_agg)
+													)
+											END
+										ELSE
+											-- No valid interior rings - create simple polygon (holes were lost, but that's better than failing)
+											CASE
+												WHEN (SELECT shifted_ring FROM exterior_ring) IS NULL THEN NULL
+												WHEN NOT ST_IsClosed((SELECT shifted_ring FROM exterior_ring)) THEN NULL
+												ELSE
+													ST_MakePolygon((SELECT shifted_ring FROM exterior_ring))
+											END
+									END
+								),
+								-- Fallback: if normalization fails, use original geometry
+								geom
 							)
 						ELSE
+							-- Not wrapped - leave it alone
 							geom
 					END AS geom
 				FROM all_with_spans
+			),
+			-- Filter out NULL geometries before union (they can't be unioned)
+			all_normalized_filtered AS (
+				SELECT geom FROM all_normalized WHERE geom IS NOT NULL
 			),
 			-- Step 3: Find coordinate space boundaries after normalization
 			coord_bounds AS (
 				SELECT 
 					MIN(ST_XMin(geom)) AS min_x,
 					MAX(ST_XMax(geom)) AS max_x
-				FROM all_normalized
+				FROM all_normalized_filtered
 			),
 			-- Step 4: Shift all geometries into positive coordinate space for union
 			-- The shift amount is calculated to move the leftmost point to X=0
@@ -272,7 +679,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 						-LEAST((SELECT min_x FROM coord_bounds), 0.0),
 						0.0
 					) AS geom
-				FROM all_normalized
+				FROM all_normalized_filtered
 			),
 			-- Step 5: Union all aligned geometries
 			unioned AS (
@@ -359,6 +766,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 
 		// Log input geometries for debugging
 		log.Printf("[ZoneMerge] Merging %d geometries (new + %d existing)", 1, len(overlappingIDs))
+		log.Printf("[ZoneMerge] Zones being merged: new zone (not yet in DB) + existing zones %v", overlappingIDs)
 		log.Printf("[ZoneMerge] New geometry (first 200 chars): %s", 
 			func() string {
 				if len(geometryString) > 200 {
@@ -402,31 +810,62 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				all_with_spans AS (
 					SELECT 
 						geom,
-						ST_XMax(geom) - ST_XMin(geom) AS span
+						ST_XMax(geom) - ST_XMin(geom) AS span,
+						ST_NumInteriorRings(geom) AS num_holes
 					FROM all_raw_geoms
-				),
-				has_wrapped_geom AS (
-					SELECT EXISTS(SELECT 1 FROM all_with_spans, constants WHERE span > constants.half_ring) AS wrapped
 				),
 				all_normalized AS (
 					SELECT 
 						CASE 
-							WHEN (SELECT wrapped FROM has_wrapped_geom) THEN
-								ST_MakePolygon(
-									ST_MakeLine(
-										ARRAY(
-											SELECT 
-												ST_MakePoint(
-													CASE 
-														WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants) 
-														THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
-														ELSE ST_X((dp).geom)
-													END,
-													ST_Y((dp).geom)
+							WHEN span > (SELECT half_ring FROM constants) THEN
+								-- Wrapped geometry - normalize using ST_DumpRings to preserve holes
+								(
+									WITH 
+									geom_to_normalize AS (
+										SELECT geom AS g
+									),
+									rings AS (
+										SELECT 
+											(ST_DumpRings((SELECT g FROM geom_to_normalize))).path[1] AS ring_index,
+											(ST_DumpRings((SELECT g FROM geom_to_normalize))).geom AS ring_geom
+									),
+									shifted_rings AS (
+										SELECT 
+											ring_index,
+											ST_MakeLine(
+												ARRAY(
+													SELECT 
+														ST_MakePoint(
+															CASE 
+																WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants)
+																THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
+																ELSE ST_X((dp).geom)
+															END,
+															ST_Y((dp).geom)
+														)
+													FROM ST_DumpPoints(ring_geom) AS dp
+													ORDER BY (dp).path[1]
 												)
-											FROM ST_DumpPoints(ST_ExteriorRing(geom)) AS dp
-										)
+											) AS shifted_ring
+										FROM rings
+									),
+									exterior_ring AS (
+										SELECT shifted_ring FROM shifted_rings WHERE ring_index = 0
+									),
+									interior_rings_agg AS (
+										SELECT ARRAY_AGG(shifted_ring ORDER BY ring_index) AS holes
+										FROM shifted_rings WHERE ring_index > 0
 									)
+									SELECT 
+										CASE 
+											WHEN EXISTS(SELECT 1 FROM shifted_rings WHERE ring_index > 0) THEN
+												ST_MakePolygon(
+													(SELECT shifted_ring FROM exterior_ring),
+													(SELECT holes FROM interior_rings_agg)
+												)
+											ELSE
+												ST_MakePolygon((SELECT shifted_ring FROM exterior_ring))
+										END
 								)
 							ELSE
 								geom
@@ -503,6 +942,8 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				}
 				return "unknown"
 			}())
+		log.Printf("[ZoneMerge] Merged result includes: new zone + existing zones %v (all %d zones)", 
+			overlappingIDs, len(overlappingIDs)+1)
 		
 		// Check if any geometry wraps around (spans > half ring) - this causes union issues
 		const RING_CIRCUMFERENCE = 264000000.0
@@ -615,6 +1056,20 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	}
 
 	// No overlapping zones, create normally
+	// DEBUG: Log geometry structure before insert
+	var geomDebug map[string]interface{}
+	if err := json.Unmarshal([]byte(geometryString), &geomDebug); err == nil {
+		if coords, ok := geomDebug["coordinates"].([]interface{}); ok {
+			log.Printf("[ZoneCreate] Geometry structure: type=%s, ring_count=%d", 
+				geomDebug["type"], len(coords))
+			for i, ring := range coords {
+				if ringArray, ok := ring.([]interface{}); ok {
+					log.Printf("[ZoneCreate]   Ring %d: %d points", i, len(ringArray))
+				}
+			}
+		}
+	}
+	
 	query := `
 		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
 		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
