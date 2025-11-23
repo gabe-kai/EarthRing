@@ -137,8 +137,9 @@ export async function getZoneCount() {
  * WARNING: This is a destructive operation that cannot be undone
  * @returns {Promise<Object>} Success response with deleted count
  */
-export async function deleteAllZones() {
-  return authorizedRequest('/api/admin/zones/reset', {
+export async function deleteAllZones(cascade = false) {
+  const url = `/api/admin/zones/reset${cascade ? '?cascade=true' : ''}`;
+  return authorizedRequest(url, {
     method: 'DELETE',
   });
 }

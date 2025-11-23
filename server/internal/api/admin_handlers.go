@@ -54,28 +54,38 @@ func (h *AdminHandlers) GetZoneCount(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ResetAllZones handles DELETE /api/admin/zones/reset
+// ResetAllZones handles DELETE /api/admin/zones/reset?cascade=true|false
+// cascade=true: TRUNCATE CASCADE (clean reset, deletes all zones, resets sequence, cascades to related tables)
+// cascade=false: DELETE with manual cleanup (preserves related records but clears zone references)
 func (h *AdminHandlers) ResetAllZones(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	log.Printf("Admin: Resetting all zones database...")
+	// Parse cascade query parameter (default to false for backward compatibility)
+	cascade := r.URL.Query().Get("cascade") == "true"
 
-	deletedCount, err := h.zones.DeleteAllZones()
+	mode := "preserve related records"
+	if cascade {
+		mode = "clean reset (CASCADE)"
+	}
+	log.Printf("Admin: Resetting all zones database (mode: %s)...", mode)
+
+	deletedCount, err := h.zones.DeleteAllZones(cascade)
 	if err != nil {
 		log.Printf("Error resetting zones: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to reset zones database")
 		return
 	}
 
-	log.Printf("✓ Successfully deleted %d zones from database", deletedCount)
+	log.Printf("✓ Successfully deleted %d zones from database (mode: %s)", deletedCount, mode)
 
 	response := map[string]interface{}{
 		"success":       true,
 		"message":       "All zones deleted successfully",
 		"deleted_count": deletedCount,
+		"mode":          mode,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

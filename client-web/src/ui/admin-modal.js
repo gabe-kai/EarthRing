@@ -583,7 +583,20 @@ function loadZonesTabContent(container) {
     <div class="chunk-section">
       <h3>Database Reset</h3>
       <p class="help-text">WARNING: This will delete ALL zones from the database. This action cannot be undone.</p>
-      <button id="admin-reset-all-zones-btn" class="delete-button" style="width: 100%;">Reset All Zones Database</button>
+      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <button id="admin-reset-all-zones-cascade-btn" class="delete-button" style="width: 100%;">
+          Clean Reset (TRUNCATE CASCADE)
+        </button>
+        <p class="help-text" style="margin: 0; font-size: 0.85rem; color: #aaa;">
+          Deletes all zones, resets sequence numbering, and cascades to related tables (structures, roads, npcs).
+        </p>
+        <button id="admin-reset-all-zones-preserve-btn" class="delete-button" style="width: 100%;">
+          Preserve Related Records (DELETE)
+        </button>
+        <p class="help-text" style="margin: 0; font-size: 0.85rem; color: #aaa;">
+          Deletes all zones but preserves related records. Clears zone references in structures, roads, and npcs.
+        </p>
+      </div>
       <div id="admin-reset-zones-result" class="result-display"></div>
     </div>
   `;
@@ -744,11 +757,19 @@ function setupAdminZonesListeners(container) {
     });
   }
 
-  // Reset all zones button
-  const resetAllZonesBtn = container.querySelector('#admin-reset-all-zones-btn');
-  if (resetAllZonesBtn) {
-    resetAllZonesBtn.addEventListener('click', async () => {
-      await handleAdminResetAllZones(container);
+  // Clean Reset (TRUNCATE CASCADE) button
+  const cascadeBtn = container.querySelector('#admin-reset-all-zones-cascade-btn');
+  if (cascadeBtn) {
+    cascadeBtn.addEventListener('click', async () => {
+      await handleAdminResetAllZones(container, true);
+    });
+  }
+
+  // Preserve Related Records (DELETE) button
+  const preserveBtn = container.querySelector('#admin-reset-all-zones-preserve-btn');
+  if (preserveBtn) {
+    preserveBtn.addEventListener('click', async () => {
+      await handleAdminResetAllZones(container, false);
     });
   }
 }
@@ -795,13 +816,21 @@ async function loadZoneCount(container) {
 
 /**
  * Handle reset all zones in admin modal
+ * @param {boolean} cascade - If true, uses TRUNCATE CASCADE (clean reset). If false, uses DELETE (preserve related records).
  */
-async function handleAdminResetAllZones(container) {
+async function handleAdminResetAllZones(container, cascade = false) {
   const resultDisplay = container.querySelector('#admin-reset-zones-result');
-  const resetButton = container.querySelector('#admin-reset-all-zones-btn');
+  const cascadeButton = container.querySelector('#admin-reset-all-zones-cascade-btn');
+  const preserveButton = container.querySelector('#admin-reset-all-zones-preserve-btn');
+  
+  const mode = cascade ? 'Clean Reset (TRUNCATE CASCADE)' : 'Preserve Related Records (DELETE)';
+  const description = cascade 
+    ? 'This will delete ALL zones, reset sequence numbering, and cascade to related tables (structures, roads, npcs).'
+    : 'This will delete ALL zones but preserve related records. Zone references in structures, roads, and npcs will be cleared.';
   
   const confirmed = confirm(
-    'WARNING: This will delete ALL zones from the database!\n\n' +
+    `WARNING: ${mode}\n\n` +
+    `${description}\n\n` +
     'This action cannot be undone. Are you absolutely sure?'
   );
   
@@ -811,7 +840,7 @@ async function handleAdminResetAllZones(container) {
   
   // Double confirmation
   const doubleConfirmed = confirm(
-    'Final confirmation: Delete ALL zones?\n\n' +
+    `Final confirmation: ${mode}?\n\n` +
     'This will permanently remove all zone data from the database.'
   );
   
@@ -819,12 +848,13 @@ async function handleAdminResetAllZones(container) {
     return;
   }
   
-  resultDisplay.textContent = 'Deleting all zones...';
+  resultDisplay.textContent = `Deleting all zones (${mode})...`;
   resultDisplay.className = 'result-display show';
-  resetButton.disabled = true;
+  if (cascadeButton) cascadeButton.disabled = true;
+  if (preserveButton) preserveButton.disabled = true;
   
   try {
-    const result = await deleteAllZones();
+    const result = await deleteAllZones(cascade);
     resultDisplay.textContent = JSON.stringify(result, null, 2);
     resultDisplay.className = 'result-display show success';
     
@@ -839,7 +869,8 @@ async function handleAdminResetAllZones(container) {
     resultDisplay.textContent = `Error: ${error.message}`;
     resultDisplay.className = 'result-display show error';
   } finally {
-    resetButton.disabled = false;
+    if (cascadeButton) cascadeButton.disabled = false;
+    if (preserveButton) preserveButton.disabled = false;
   }
 }
 

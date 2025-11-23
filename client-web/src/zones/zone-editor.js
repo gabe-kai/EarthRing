@@ -387,10 +387,12 @@ export class ZoneEditor {
           this.previewMesh.geometry = geometry;
         } else {
           // Create new mesh on first preview
+          // Use brighter colors and higher opacity for better visibility
+          const previewColor = this.getToolColor();
           const material = new THREE.MeshBasicMaterial({
-            color: this.getToolColor(),
+            color: previewColor,
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.7, // Increased from 0.5 for better visibility
             side: THREE.DoubleSide,
             depthWrite: false,
             depthTest: false,
@@ -427,7 +429,7 @@ export class ZoneEditor {
     const material = new THREE.MeshBasicMaterial({
       color: this.getToolColor(),
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.7, // Increased from 0.3 for better visibility
       side: THREE.DoubleSide,
     });
     this.previewMesh = new THREE.Mesh(geometry, material);
@@ -652,7 +654,7 @@ export class ZoneEditor {
       const material = new THREE.MeshBasicMaterial({
         color: this.getToolColor(),
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.7, // Increased from 0.5 for better visibility
         side: THREE.DoubleSide,
       });
       this.previewMesh = new THREE.Mesh(geometry, material);
@@ -889,14 +891,16 @@ export class ZoneEditor {
    * Get color for current tool/zone type
    */
   getToolColor() {
+    // Brighter, more saturated colors for better preview visibility
     const colors = {
-      residential: 0x6fcf97,
-      commercial: 0x56ccf2,
-      industrial: 0xf2c94c,
-      'mixed-use': 0xffd666,
-      mixed_use: 0xffd666,
-      park: 0x27ae60,
-      restricted: 0xe74c3c,
+      residential: 0x7fefb1, // Brighter green
+      commercial: 0x66e4ff, // Brighter blue
+      industrial: 0xffe966, // Brighter yellow
+      'mixed-use': 0xffe666, // Brighter yellow-orange
+      mixed_use: 0xffe666, // Brighter yellow-orange
+      park: 0x37ce70, // Brighter green
+      restricted: 0xff6b5c, // Brighter red
+      dezone: 0x8b4513, // Brown for dezone
     };
     return colors[this.currentZoneType] || 0xffffff;
   }

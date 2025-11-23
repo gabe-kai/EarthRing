@@ -3,6 +3,8 @@
  * Displays performance, camera, grid, and rendering information
  */
 
+import * as THREE from 'three';
+
 export class DebugInfoPanel {
   constructor(sceneManager, cameraController, gridOverlay, gameStateManager, chunkManager, zoneManager) {
     this.sceneManager = sceneManager;
@@ -51,11 +53,10 @@ export class DebugInfoPanel {
             'Floor: <span id="debug-cam-floor">-</span>',
             'Target: <span id="debug-cam-target">-</span>',
           ])}
-          ${this.createSection('Grid', 'grid', [
-            'Position: <span id="debug-grid-pos">-</span>',
-            'Radius: <span id="debug-grid-radius">-</span>',
-            'Major Spacing: <span id="debug-grid-major">-</span>',
-            'Minor Spacing: <span id="debug-grid-minor">-</span>',
+          ${this.createSection('Cursor', 'cursor', [
+            'Raw (m): <span id="debug-cursor-raw">-</span>',
+            'Converted (km): <span id="debug-cursor-km">-</span>',
+            'Screen: <span id="debug-cursor-screen">-</span>',
           ])}
           ${this.createSection('Rendering', 'rendering', [
             'Scene Objects: <span id="debug-scene-objects">0</span>',
@@ -263,8 +264,8 @@ export class DebugInfoPanel {
     // Update camera info every frame
     this.updateCamera();
     
-    // Update grid info every frame
-    this.updateGrid();
+    // Update cursor info every frame
+    this.updateCursor();
     
     // Update rendering info every frame
     this.updateRendering();
@@ -324,36 +325,77 @@ export class DebugInfoPanel {
     }
   }
 
-  updateGrid() {
-    if (!this.gridOverlay) return;
+  updateCursor() {
+    if (!this.cameraController || !this.sceneManager) return;
     
-    const posEl = this.panel.querySelector('#debug-grid-pos');
-    const radiusEl = this.panel.querySelector('#debug-grid-radius');
-    const majorEl = this.panel.querySelector('#debug-grid-major');
-    const minorEl = this.panel.querySelector('#debug-grid-minor');
+    const camera = this.sceneManager.getCamera();
+    const renderer = this.sceneManager.getRenderer();
     
-    if (posEl) {
-      if (this.gridOverlay.getPosition) {
-        const pos = this.gridOverlay.getPosition();
-        posEl.textContent = `X:${pos.x.toFixed(1)} Y:${pos.y.toFixed(3)} Z:${pos.z.toFixed(1)}`;
-      } else if (this.gridOverlay.group) {
-        const pos = this.gridOverlay.group.position;
-        posEl.textContent = `X:${pos.x.toFixed(1)} Y:${pos.y.toFixed(3)} Z:${pos.z.toFixed(1)}`;
+    if (!camera || !renderer) return;
+    
+    // Get mouse position from global tracker
+    const mousePos = window.earthring?.mousePosition;
+    
+    const rawEl = this.panel.querySelector('#debug-cursor-raw');
+    const kmEl = this.panel.querySelector('#debug-cursor-km');
+    const screenEl = this.panel.querySelector('#debug-cursor-screen');
+    
+    // Always show screen coordinates if available
+    if (screenEl && mousePos && mousePos.x !== undefined && mousePos.y !== undefined) {
+      screenEl.textContent = `X:${mousePos.x} Y:${mousePos.y}`;
+    } else if (screenEl) {
+      screenEl.textContent = '-';
+    }
+    
+    if (mousePos && mousePos.x !== undefined && mousePos.y !== undefined) {
+      // Create raycaster from mouse position
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      
+      // Get renderer canvas bounds
+      const rect = renderer.domElement.getBoundingClientRect();
+      
+      // Convert screen coordinates to normalized device coordinates
+      mouse.x = ((mousePos.x - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((mousePos.y - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Get current floor from camera
+      const erPos = this.cameraController.getEarthRingPosition();
+      const floor = Math.round(erPos.z);
+      const floorHeight = floor * 20.0; // DEFAULT_FLOOR_HEIGHT
+      
+      // Create a plane at the current floor (Y-up in Three.js)
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorHeight);
+      const intersectionPoint = new THREE.Vector3();
+      const hasIntersection = raycaster.ray.intersectPlane(plane, intersectionPoint);
+      
+      if (hasIntersection) {
+        // Convert Three.js position to EarthRing coordinates
+        // X in Three.js maps to X in EarthRing
+        // Z in Three.js maps to Y in EarthRing (width)
+        const erX = intersectionPoint.x; // meters
+        const erY = intersectionPoint.z; // meters
+        
+        // Display raw coordinates in meters
+        if (rawEl) {
+          rawEl.textContent = `X:${erX.toFixed(1)}m Y:${erY.toFixed(1)}m`;
+        }
+        
+        // Display converted coordinates in km
+        if (kmEl) {
+          const erXKm = erX / 1000;
+          const erYKm = erY / 1000;
+          kmEl.textContent = `X:${erXKm.toFixed(3)}km Y:${erYKm.toFixed(3)}km`;
+        }
       } else {
-        posEl.textContent = '-';
+        if (rawEl) rawEl.textContent = '-';
+        if (kmEl) kmEl.textContent = '-';
       }
-    }
-    
-    if (radiusEl) {
-      radiusEl.textContent = `${this.gridOverlay.settings.radius || 250}m`;
-    }
-    
-    if (majorEl) {
-      majorEl.textContent = `${this.gridOverlay.settings.majorSpacing}m`;
-    }
-    
-    if (minorEl) {
-      minorEl.textContent = `${this.gridOverlay.settings.minorSpacing}m`;
+    } else {
+      if (rawEl) rawEl.textContent = '-';
+      if (kmEl) kmEl.textContent = '-';
     }
   }
 

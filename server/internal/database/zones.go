@@ -1584,17 +1584,53 @@ func (s *ZoneStorage) CountZones() (int64, error) {
 }
 
 // DeleteAllZones removes all zones from the database.
+// If cascade is true, uses TRUNCATE CASCADE (deletes all zones, resets sequence, cascades to related tables).
+// If cascade is false, uses DELETE (preserves related records but clears zone references).
 // Returns the number of zones deleted.
-func (s *ZoneStorage) DeleteAllZones() (int64, error) {
-	result, err := s.db.Exec(`DELETE FROM zones`)
-	if err != nil {
-		return 0, fmt.Errorf("failed to delete all zones: %w", err)
+func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
+	if cascade {
+		// Clean Reset: TRUNCATE CASCADE - deletes all zones, resets sequence, cascades to related tables
+		// Count before truncating since TRUNCATE doesn't return rows affected
+		var count int64
+		err := s.db.QueryRow(`SELECT COUNT(*) FROM zones`).Scan(&count)
+		if err != nil {
+			// If query fails, just proceed with truncate
+			count = 0
+		}
+		
+		_, err = s.db.Exec(`TRUNCATE zones RESTART IDENTITY CASCADE`)
+		if err != nil {
+			return 0, fmt.Errorf("failed to truncate all zones: %w", err)
+		}
+		
+		return count, nil
+	} else {
+		// Preserve Related Records: DELETE with manual cleanup
+		// First, clear zone references in npcs table
+		_, err := s.db.Exec(`UPDATE npcs SET home_zone_id = NULL, work_zone_id = NULL`)
+		if err != nil {
+			return 0, fmt.Errorf("failed to clear npc zone references: %w", err)
+		}
+		
+		// Then delete all zones (structures and roads will have zone_id set to NULL automatically due to ON DELETE SET NULL)
+		result, err := s.db.Exec(`DELETE FROM zones`)
+		if err != nil {
+			return 0, fmt.Errorf("failed to delete all zones: %w", err)
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		
+		// Reset sequence numbering
+		_, err = s.db.Exec(`ALTER SEQUENCE zones_id_seq RESTART WITH 1`)
+		if err != nil {
+			// Log but don't fail - sequence reset is nice to have but not critical
+			log.Printf("Warning: Failed to reset zones sequence: %v", err)
+		}
+		
+		return rowsAffected, nil
 	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-	return rowsAffected, nil
 }
 
 // ListZonesByArea returns all zones whose geometry intersects the provided bounding box on a floor.

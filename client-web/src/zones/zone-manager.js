@@ -15,7 +15,7 @@ const ZONE_STYLES = {
   mixed_use: { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
   park: { fill: 'rgba(39,174,96,0.3)', stroke: 'rgba(46,204,113,0.95)' },
   restricted: { fill: 'rgba(231,76,60,0.4)', stroke: 'rgba(192,57,43,0.95)' },
-  dezone: { fill: 'rgba(255,0,0,0.3)', stroke: 'rgba(255,0,0,0.8)' }, // Red for dezone (subtraction zones)
+  dezone: { fill: 'rgba(139,69,19,0.3)', stroke: 'rgba(139,69,19,0.8)' }, // Brown for dezone (subtraction zones)
   default: { fill: 'rgba(255,255,255,0.2)', stroke: 'rgba(255,255,255,0.9)' },
 };
 
@@ -335,26 +335,72 @@ export class ZoneManager {
       const fillOpacityMatch = style.fill.match(/[\d.]+\)$/);
       const fillOpacity = fillOpacityMatch ? parseFloat(fillOpacityMatch[0].slice(0, -1)) : 0.35;
       
-      // Extract RGB from rgba string
-      const fillRgbMatch = style.fill.match(/rgba?\(([\d.]+),([\d.]+),([\d.]+)/);
-      const fillColor = fillRgbMatch
-        ? new THREE.Color(
-            parseFloat(fillRgbMatch[1]) / 255,
-            parseFloat(fillRgbMatch[2]) / 255,
-            parseFloat(fillRgbMatch[3]) / 255
-          )
-        : new THREE.Color(style.fill);
-
       // Create fill mesh
       const fillGeometry = new THREE.ShapeGeometry(shape);
-      const fillMaterial = new THREE.MeshBasicMaterial({
-        color: fillColor,
-        transparent: true,
-        opacity: fillOpacity,
-        depthWrite: false,
-        depthTest: false,
-        side: THREE.DoubleSide,
-      });
+      let fillMaterial;
+      
+      // Special handling for mixed-use: rainbow gradient using shader
+      if (zoneType === 'mixed-use' || zoneType === 'mixed_use') {
+        // Rainbow gradient shader material
+        const vertexShader = `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `;
+        
+        const fragmentShader = `
+          uniform float opacity;
+          varying vec2 vUv;
+          
+          vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+          }
+          
+          void main() {
+            // Create rainbow gradient based on UV coordinates
+            float hue = (vUv.x + vUv.y) * 0.5; // Mix X and Y for diagonal gradient
+            vec3 color = hsv2rgb(vec3(hue, 0.8, 0.9));
+            gl_FragColor = vec4(color, opacity);
+          }
+        `;
+        
+        fillMaterial = new THREE.ShaderMaterial({
+          vertexShader,
+          fragmentShader,
+          transparent: true,
+          opacity: fillOpacity,
+          depthWrite: false,
+          depthTest: false,
+          side: THREE.DoubleSide,
+          uniforms: {
+            opacity: { value: fillOpacity }
+          }
+        });
+      } else {
+        // Standard solid color material for other zone types
+        const fillRgbMatch = style.fill.match(/rgba?\(([\d.]+),([\d.]+),([\d.]+)/);
+        const fillColor = fillRgbMatch
+          ? new THREE.Color(
+              parseFloat(fillRgbMatch[1]) / 255,
+              parseFloat(fillRgbMatch[2]) / 255,
+              parseFloat(fillRgbMatch[3]) / 255
+            )
+          : new THREE.Color(style.fill);
+        
+        fillMaterial = new THREE.MeshBasicMaterial({
+          color: fillColor,
+          transparent: true,
+          opacity: fillOpacity,
+          depthWrite: false,
+          depthTest: false,
+          side: THREE.DoubleSide,
+        });
+      }
+      
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
       fillMesh.rotation.x = -Math.PI / 2;
       fillMesh.position.y = floorHeight + 0.001; // Slightly above floor
