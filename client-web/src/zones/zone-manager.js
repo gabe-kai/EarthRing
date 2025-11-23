@@ -15,6 +15,7 @@ const ZONE_STYLES = {
   mixed_use: { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
   park: { fill: 'rgba(39,174,96,0.3)', stroke: 'rgba(46,204,113,0.95)' },
   restricted: { fill: 'rgba(231,76,60,0.4)', stroke: 'rgba(192,57,43,0.95)' },
+  dezone: { fill: 'rgba(255,0,0,0.3)', stroke: 'rgba(255,0,0,0.8)' }, // Red for dezone (subtraction zones)
   default: { fill: 'rgba(255,255,255,0.2)', stroke: 'rgba(255,255,255,0.9)' },
 };
 
@@ -47,6 +48,7 @@ export class ZoneManager {
       ['mixed_use', true],
       ['park', true],
       ['restricted', true],
+      ['dezone', true],
     ]);
 
     this.setupListeners();

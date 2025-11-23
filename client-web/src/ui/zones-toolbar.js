@@ -224,6 +224,7 @@ export function createZonesToolbar(zoneManager, gridOverlay) {
     { label: 'Mixed-Use', key: 'mixed-use' },
     { label: 'Park', key: 'park' },
     { label: 'Restricted', key: 'restricted' },
+    { label: 'Dezone', key: 'dezone' },
   ];
 
   zoneTypes.forEach(({ label, key }) => {

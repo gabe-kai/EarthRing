@@ -1,7 +1,7 @@
 /**
  * Zone Editor
  * Handles interactive zone creation and editing tools
- * Supports: rectangle, circle, torus, polygon, and paintbrush tools
+ * Supports: rectangle, circle, dezone, polygon, and paintbrush tools
  */
 
 import * as THREE from 'three';
@@ -13,7 +13,6 @@ const TOOLS = {
   NONE: 'none',
   RECTANGLE: 'rectangle',
   CIRCLE: 'circle',
-  TORUS: 'torus',
   POLYGON: 'polygon',
   PAINTBRUSH: 'paintbrush',
   SELECT: 'select',
@@ -367,9 +366,6 @@ export class ZoneEditor {
         case TOOLS.CIRCLE:
           geometry = this.createCirclePreview(this.startPoint, currentPos);
           break;
-        case TOOLS.TORUS:
-          geometry = this.createTorusPreview(this.startPoint, currentPos);
-          break;
         case TOOLS.PAINTBRUSH:
           // Don't modify paintbrushPath here - it's managed in onMouseMove
           if (this.paintbrushPath.length > 0) {
@@ -492,10 +488,6 @@ export class ZoneEditor {
         console.log('[ZoneEditor] Using CIRCLE tool');
         geometry = this.createCircleGeometry(this.startPoint, endPos);
         break;
-      case TOOLS.TORUS:
-        console.log('[ZoneEditor] Using TORUS tool');
-        geometry = this.createTorusGeometry(this.startPoint, endPos);
-        break;
       case TOOLS.PAINTBRUSH:
         console.log('[ZoneEditor] Using PAINTBRUSH tool', {
           pathLength: this.paintbrushPath?.length,
@@ -562,6 +554,7 @@ export class ZoneEditor {
     // Create zone via API
     try {
       const currentUser = getCurrentUser();
+      
       const zone = await createZone({
         name: `${this.currentZoneType} Zone`,
         zone_type: this.currentZoneType,
@@ -585,27 +578,47 @@ export class ZoneEditor {
         });
       }
       
-      // Add to game state and render
-      this.gameStateManager.upsertZone(zone);
-      this.zoneManager.renderZone(zone);
-      
-      // If zones were merged, the server returns the merged zone (which may have an existing ID)
-      // We need to remove any other zones from local state that were merged into this zone
-      // The server only merges zones with the same type, floor, and owner
-      const allZones = this.gameStateManager.getAllZones();
-      const zonesToRemove = allZones.filter(existingZone => 
-        existingZone.id !== zone.id && // Not the returned merged zone
-        existingZone.zone_type === zone.zone_type && // Same type
-        existingZone.floor === zone.floor && // Same floor
-        existingZone.owner_id === zone.owner_id // Same owner (handles null/undefined)
-      );
-      
-      // Remove merged zones from local state
-      zonesToRemove.forEach(mergedZone => {
-        console.log(`[ZoneEditor] Removing merged zone ${mergedZone.id} (merged into zone ${zone.id})`);
-        this.gameStateManager.removeZone(mergedZone.id);
-        this.zoneManager.removeZone(mergedZone.id);
-      });
+      // For dezone zone type, the server subtracts from all overlapping zones
+      if (this.currentZoneType === 'dezone') {
+        // Server returns a list of updated zones (with holes cut out)
+        // Dezone itself is not created - it's just used for subtraction
+        if (zone && zone.updated_zones) {
+          zone.updated_zones.forEach(updatedZone => {
+            this.gameStateManager.upsertZone(updatedZone);
+            this.zoneManager.renderZone(updatedZone);
+          });
+        } else if (zone && Array.isArray(zone)) {
+          // Handle case where server returns array directly
+          zone.forEach(updatedZone => {
+            this.gameStateManager.upsertZone(updatedZone);
+            this.zoneManager.renderZone(updatedZone);
+          });
+        }
+        // Deselect any selected zone after dezone operation
+        this.deselectZone();
+      } else {
+        // Normal zone creation
+        this.gameStateManager.upsertZone(zone);
+        this.zoneManager.renderZone(zone);
+        
+        // If zones were merged, the server returns the merged zone (which may have an existing ID)
+        // We need to remove any other zones from local state that were merged into this zone
+        // The server only merges zones with the same type, floor, and owner
+        const allZones = this.gameStateManager.getAllZones();
+        const zonesToRemove = allZones.filter(existingZone => 
+          existingZone.id !== zone.id && // Not the returned merged zone
+          existingZone.zone_type === zone.zone_type && // Same type
+          existingZone.floor === zone.floor && // Same floor
+          existingZone.owner_id === zone.owner_id // Same owner (handles null/undefined)
+        );
+        
+        // Remove merged zones from local state
+        zonesToRemove.forEach(mergedZone => {
+          console.log(`[ZoneEditor] Removing merged zone ${mergedZone.id} (merged into zone ${zone.id})`);
+          this.gameStateManager.removeZone(mergedZone.id);
+          this.zoneManager.removeZone(mergedZone.id);
+        });
+      }
       
       // Notify callbacks
       this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
@@ -1343,6 +1356,9 @@ export class ZoneEditor {
     };
   }
   
+  // Removed: createTorusPreview - torus tool replaced with dezone tool
+  // Dezone uses createCirclePreview instead
+  /*
   createTorusPreview(center, edge) {
     // Create the preview by first generating the exact geometry that will be stored
     // then rendering it exactly as zone-manager.js does

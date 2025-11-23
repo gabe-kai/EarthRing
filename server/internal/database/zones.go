@@ -12,6 +12,65 @@ import (
 	"github.com/lib/pq"
 )
 
+const (
+	// RingCircumference is the circumference of the EarthRing in meters (264,000 km)
+	RingCircumference = 264000000.0
+)
+
+// wrapCoordinate wraps a single X coordinate to [0, RingCircumference)
+func wrapCoordinate(x float64) float64 {
+	// Use modulo arithmetic to wrap coordinate
+	// Add RingCircumference before modulo to handle negative values correctly
+	wrapped := math.Mod(math.Mod(x, RingCircumference)+RingCircumference, RingCircumference)
+	return wrapped
+}
+
+// wrapGeoJSONCoordinates wraps all X coordinates in a GeoJSON geometry to [0, RingCircumference)
+func wrapGeoJSONCoordinates(geom json.RawMessage) (json.RawMessage, error) {
+	var geomData map[string]interface{}
+	if err := json.Unmarshal(geom, &geomData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal geometry: %w", err)
+	}
+	
+	// Recursively wrap coordinates
+	var wrapCoords func(interface{}) interface{}
+	wrapCoords = func(v interface{}) interface{} {
+		switch val := v.(type) {
+		case []interface{}:
+			// Check if this is a coordinate pair [x, y] or nested array
+			if len(val) == 2 {
+				if x, ok := val[0].(float64); ok {
+					if _, ok := val[1].(float64); ok {
+						// This is a coordinate pair [x, y]
+						return []interface{}{wrapCoordinate(x), val[1]}
+					}
+				}
+			}
+			// Nested array - recurse
+			result := make([]interface{}, len(val))
+			for i, item := range val {
+				result[i] = wrapCoords(item)
+			}
+			return result
+		default:
+			return val
+		}
+	}
+	
+	// Wrap coordinates in the geometry
+	if coords, ok := geomData["coordinates"].(interface{}); ok {
+		geomData["coordinates"] = wrapCoords(coords)
+	}
+	
+	// Marshal back to JSON
+	wrappedJSON, err := json.Marshal(geomData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal wrapped geometry: %w", err)
+	}
+	
+	return json.RawMessage(wrappedJSON), nil
+}
+
 // Zone represents a stored zone record including geometry metadata.
 type Zone struct {
 	ID           int64           `json:"id"`
@@ -547,145 +606,79 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					ST_NumInteriorRings(geom) AS num_holes
 				FROM all_raw_geoms
 			),
-			-- Step 3: For EACH wrapped geometry, normalize it using PostGIS-native operations
-			-- This approach properly handles polygons with holes (toruses) by processing each ring
-			all_normalized AS (
-				SELECT 
-					CASE 
-						-- Also normalize if max_x > half_ring (stored with wrapped coordinates, like merged zones)
-						WHEN span > (SELECT half_ring FROM constants) OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
-							-- Wrapped geometry - normalize using ST_DumpRings to preserve holes
-							COALESCE(
-								(
-									WITH 
-									geom_to_normalize AS (
-										SELECT geom AS g
-									),
-									rings AS (
-										-- ST_DumpRings returns path[1]=0 for exterior, >0 for interior rings
-										SELECT 
-											(dr).path[1] AS ring_index,
-											(dr).geom AS ring_geom
-										FROM (SELECT ST_DumpRings((SELECT g FROM geom_to_normalize)) AS dr) AS dumped
-									),
-									shifted_rings AS (
-										SELECT 
-											ring_index,
-											-- Match normalize_for_intersection approach: ST_MakeLine + ST_AddPoint to close ring
-											-- ST_MakePolygon requires closed rings (first point = last point)
-											ST_AddPoint(
-												ST_MakeLine(
-													ARRAY(
-														SELECT 
-															ST_MakePoint(
-																CASE 
-																	WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants)
-																	THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
-																	ELSE ST_X((dp).geom)
-																END,
-																ST_Y((dp).geom)
-															)
-														FROM ST_DumpPoints(ring_geom) AS dp
-														ORDER BY (dp).path[1]
-													)
-												),
-												-- Add first point at end to close the ring
-												(SELECT 
-													ST_MakePoint(
-														CASE 
-															WHEN ST_X((dp).geom) > (SELECT half_ring FROM constants)
-															THEN ST_X((dp).geom) - (SELECT ring_circ FROM constants)
-															ELSE ST_X((dp).geom)
-														END,
-														ST_Y((dp).geom)
-													)
-													FROM ST_DumpPoints(ring_geom) AS dp
-													ORDER BY (dp).path[1]
-													LIMIT 1
-												)
-											) AS shifted_ring
-										FROM rings
-									),
-									exterior_ring AS (
-										SELECT shifted_ring FROM shifted_rings WHERE ring_index = 0
-									),
-								valid_interior_rings AS (
-									-- Filter out NULL or unclosed interior rings
-									SELECT ring_index, shifted_ring
-									FROM shifted_rings
-									WHERE ring_index > 0
-									  AND shifted_ring IS NOT NULL
-									  AND ST_IsClosed(shifted_ring)
-								),
-								interior_rings_agg AS (
-									SELECT 
-										CASE 
-											WHEN COUNT(*) > 0 THEN ARRAY_AGG(shifted_ring ORDER BY ring_index)
-											ELSE NULL::geometry[]
-										END AS holes
-									FROM valid_interior_rings
-								)
-								SELECT 
-									CASE 
-										-- Check if we have valid interior rings after filtering
-										WHEN (SELECT holes FROM interior_rings_agg) IS NOT NULL THEN
-											-- Validate before creating polygon with holes
-											CASE
-												WHEN (SELECT shifted_ring FROM exterior_ring) IS NULL THEN NULL
-												WHEN NOT ST_IsClosed((SELECT shifted_ring FROM exterior_ring)) THEN NULL
-												ELSE
-													ST_MakePolygon(
-														(SELECT shifted_ring FROM exterior_ring),
-														(SELECT holes FROM interior_rings_agg)
-													)
-											END
-										ELSE
-											-- No valid interior rings - create simple polygon (holes were lost, but that's better than failing)
-											CASE
-												WHEN (SELECT shifted_ring FROM exterior_ring) IS NULL THEN NULL
-												WHEN NOT ST_IsClosed((SELECT shifted_ring FROM exterior_ring)) THEN NULL
-												ELSE
-													ST_MakePolygon((SELECT shifted_ring FROM exterior_ring))
-											END
-									END
-								),
-								-- Fallback: if normalization fails, use original geometry
-								geom
-							)
-						ELSE
-							-- Not wrapped - leave it alone
-							geom
-					END AS geom
-				FROM all_with_spans
-			),
-			-- Filter out NULL geometries before union (they can't be unioned)
-			all_normalized_filtered AS (
-				SELECT geom FROM all_normalized WHERE geom IS NOT NULL
-			),
-			-- Step 3: Find coordinate space boundaries after normalization
-			coord_bounds AS (
-				SELECT 
-					MIN(ST_XMin(geom)) AS min_x,
-					MAX(ST_XMax(geom)) AS max_x
-				FROM all_normalized_filtered
-			),
-			-- Step 4: Shift all geometries into positive coordinate space for union
-			-- The shift amount is calculated to move the leftmost point to X=0
-			aligned_geoms AS (
-				SELECT 
-					ST_Translate(
-						geom,
-						-- Shift by -min_x to move leftmost point to 0
-						-LEAST((SELECT min_x FROM coord_bounds), 0.0),
-						0.0
-					) AS geom
-				FROM all_normalized_filtered
-			),
-			-- Step 5: Union all aligned geometries
-			unioned AS (
-				SELECT ST_Union(geom) AS merged_geom
-				FROM aligned_geoms
-			),
+						-- Step 3: For EACH wrapped geometry, normalize it using PostGIS-native operations
+						-- This approach properly handles polygons with holes (toruses) by processing each ring
+						all_normalized AS (
+							SELECT 
+								CASE 
+									-- Also normalize if max_x > half_ring (stored with wrapped coordinates, like merged zones)
+									WHEN span > (SELECT half_ring FROM constants) OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+										-- Wrapped geometry - use normalize_for_intersection which handles holes correctly 
+										-- Validate the normalized result before using it
+										CASE
+											WHEN normalize_for_intersection(geom) IS NULL THEN geom
+											WHEN NOT ST_IsValid(normalize_for_intersection(geom)) THEN geom
+											WHEN ST_IsEmpty(normalize_for_intersection(geom)) THEN geom
+											WHEN ST_GeometryType(normalize_for_intersection(geom)) NOT IN ('ST_Polygon', 'ST_MultiPolygon') THEN geom
+											ELSE normalize_for_intersection(geom)
+										END
+									ELSE
+										-- Not wrapped - leave it alone
+										geom
+								END AS geom
+							FROM all_with_spans
+						),
+						-- Filter out NULL and invalid geometries before union (they can't be unioned)
+						all_normalized_filtered AS (
+							SELECT geom 
+							FROM all_normalized 
+							WHERE geom IS NOT NULL
+							  AND ST_IsValid(geom)
+							  AND NOT ST_IsEmpty(geom)
+							  AND ST_GeometryType(geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+						),
+						-- Step 3: Find coordinate space boundaries after normalization
+						-- Ensure we have at least one valid geometry before proceeding
+						coord_bounds AS (
+							SELECT 
+								COALESCE(MIN(ST_XMin(geom)), 0.0) AS min_x,
+								COALESCE(MAX(ST_XMax(geom)), 0.0) AS max_x
+							FROM all_normalized_filtered
+							HAVING COUNT(*) > 0
+						),
+						-- Step 4: Shift all geometries into positive coordinate space for union
+						-- The shift amount is calculated to move the leftmost point to X=0
+						aligned_geoms AS (
+							SELECT 
+								ST_Translate(
+									geom,
+									-- Shift by -min_x to move leftmost point to 0
+									-COALESCE(LEAST((SELECT min_x FROM coord_bounds), 0.0), 0.0),
+									0.0
+								) AS geom
+							FROM all_normalized_filtered
+							CROSS JOIN coord_bounds
+						),
+						-- Step 5: Ensure all geometries are polygons (convert MultiPolygon to largest polygon if needed)
+						polygon_geoms AS (
+							SELECT 
+								CASE
+									WHEN ST_GeometryType(geom) = 'ST_MultiPolygon' THEN
+										-- Take largest polygon from MultiPolygon
+										(SELECT (ST_Dump(geom)).geom AS g
+										 ORDER BY ST_Area((ST_Dump(geom)).geom) DESC
+										 LIMIT 1)
+									ELSE
+										geom
+								END AS geom
+							FROM aligned_geoms
+							WHERE ST_IsValid(geom) AND NOT ST_IsEmpty(geom)
+						),
+						-- Step 6: Union all aligned geometries
+						unioned AS (
+							SELECT ST_Union(geom) AS merged_geom
+							FROM polygon_geoms
+						),
 			-- Step 6: Handle MultiPolygon results (convert to Polygon if possible)
 			single_geom AS (
 				SELECT 
@@ -723,7 +716,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					) AS geom
 				FROM final_single
 			),
-			-- Step 9: Wrap coordinates to [0, 264000000) range using modulo arithmetic
+						-- Step 10: Wrap coordinates to [0, 264000000) range using modulo arithmetic
 			wrapped AS (
 				SELECT 
 					CASE 
@@ -739,12 +732,12 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					END AS geom
 				FROM shifted_back
 			),
-			-- Step 10: Validate and ensure clean geometry structure
+						-- Step 11: Validate and ensure clean geometry structure
 			validated AS (
 				SELECT ST_MakeValid(geom) AS geom
 				FROM wrapped
 			)
-			-- Step 11: Convert to GeoJSON
+			-- Step 12: Convert to GeoJSON
 			SELECT 
 				CASE 
 					WHEN ST_IsEmpty(geom) THEN NULL::TEXT
@@ -1091,6 +1084,371 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	)
 
 	return scanZone(row)
+}
+
+// SubtractDezoneFromAllOverlapping finds all zones that overlap with the dezone geometry
+// and subtracts the dezone from each of them. This is an "anti-merge" operation.
+func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry json.RawMessage, userID int64) ([]*Zone, error) {
+	dezoneGeometryString := string(dezoneGeometry)
+	
+	// Find all zones on the same floor that overlap with the dezone geometry
+	// Unlike normal zone merging, dezone subtracts from ANY zone type it overlaps
+	overlapQuery := `
+		WITH 
+		dezone_geom AS (
+			SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($2), 0)) AS geom
+		),
+		existing_zones AS (
+			SELECT 
+				id,
+				normalize_for_intersection(geometry) AS normalized_geom
+			FROM zones
+			WHERE floor = $1
+			  AND normalize_for_intersection(geometry) IS NOT NULL
+		),
+		all_bounds AS (
+			SELECT 
+				LEAST(
+					COALESCE((SELECT ST_XMin(geom) FROM dezone_geom WHERE geom IS NOT NULL), 999999999),
+					COALESCE((SELECT MIN(ST_XMin(normalized_geom)) FROM existing_zones WHERE normalized_geom IS NOT NULL), 999999999)
+				) AS global_min_x
+		),
+		aligned_geoms AS (
+			SELECT 
+				ez.id,
+				ST_Translate(
+					ez.normalized_geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_existing,
+				ST_Translate(
+					(SELECT geom FROM dezone_geom),
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_dezone
+			FROM existing_zones ez
+			CROSS JOIN dezone_geom
+			CROSS JOIN all_bounds
+		)
+		SELECT id
+		FROM aligned_geoms
+		WHERE aligned_existing IS NOT NULL
+		  AND aligned_dezone IS NOT NULL
+		  AND ST_Intersects(aligned_existing, aligned_dezone)
+	`
+	
+	rows, err := s.db.Query(overlapQuery, floor, dezoneGeometryString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find overlapping zones: %w", err)
+	}
+	defer rows.Close()
+	
+	var overlappingZoneIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan overlapping zone ID: %w", err)
+		}
+		overlappingZoneIDs = append(overlappingZoneIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate overlapping zones: %w", err)
+	}
+	
+	if len(overlappingZoneIDs) == 0 {
+		log.Printf("[Dezone] No overlapping zones found - nothing to subtract")
+		return []*Zone{}, nil
+	}
+	
+	log.Printf("[Dezone] Found %d overlapping zones to subtract from: %v", len(overlappingZoneIDs), overlappingZoneIDs)
+	
+	// Subtract dezone from each overlapping zone
+	var updatedZones []*Zone
+	for _, zoneID := range overlappingZoneIDs {
+		// Verify ownership (user must own the zone to modify it)
+		zone, err := s.GetZoneByID(zoneID)
+		if err != nil {
+			log.Printf("[Dezone] WARNING: Failed to get zone %d: %v", zoneID, err)
+			continue
+		}
+		if zone == nil {
+			log.Printf("[Dezone] WARNING: Zone %d not found", zoneID)
+			continue
+		}
+		
+		// Check ownership - user must own the zone to modify it
+		if zone.OwnerID == nil || *zone.OwnerID != userID {
+			log.Printf("[Dezone] WARNING: Permission denied - user %d does not own zone %d", userID, zoneID)
+			continue
+		}
+		
+		// Subtract dezone from this zone
+		log.Printf("[Dezone] Attempting to subtract dezone from zone %d", zoneID)
+		resultZones, err := s.subtractDezoneFromZone(zoneID, dezoneGeometry)
+		if err != nil {
+			log.Printf("[Dezone] WARNING: Failed to subtract dezone from zone %d: %v", zoneID, err)
+			log.Printf("[Dezone] Error details: %+v", err)
+			continue
+		}
+		log.Printf("[Dezone] Successfully subtracted dezone from zone %d (resulted in %d zones)", zoneID, len(resultZones))
+		
+		updatedZones = append(updatedZones, resultZones...)
+	}
+	
+	log.Printf("[Dezone] Successfully subtracted dezone from %d zones", len(updatedZones))
+	return updatedZones, nil
+}
+
+// subtractDezoneFromZone subtracts a dezone geometry from a specific zone using ST_Difference.
+// Returns a slice of zones: the first is the updated original zone, and any additional ones
+// are new zones created from split components (when a zone is bisected).
+// Note: Ownership is already verified by the caller (SubtractDezoneFromAllOverlapping).
+func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry json.RawMessage) ([]*Zone, error) {
+	dezoneGeometryString := string(dezoneGeometry)
+	
+	// Get the original zone to copy its properties for new zones
+	originalZone, err := s.GetZoneByID(targetZoneID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get original zone: %w", err)
+	}
+	if originalZone == nil {
+		return nil, fmt.Errorf("zone %d not found", targetZoneID)
+	}
+	
+	// Use ST_Difference to subtract the dezone from the target zone
+	// This handles wrap-point normalization similar to the union query
+	// Returns all polygons if the zone is split (MultiPolygon result)
+	differenceQuery := `
+		WITH 
+		constants AS (
+			SELECT 264000000.0 AS ring_circ, 132000000.0 AS half_ring
+		),
+		-- Step 1: Load and validate both geometries
+		target_geom AS (
+			SELECT ST_MakeValid(geometry) AS geom FROM zones WHERE id = $1
+		),
+		dezone_geom AS (
+			SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($2), 0)) AS geom
+		),
+		-- Step 2: Normalize both geometries for wrap-point handling
+		-- Validate normalization results and fall back to original if normalization fails
+		target_normalized AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMax(geom) - ST_XMin(geom) > (SELECT half_ring FROM constants) 
+					     OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+						CASE
+							WHEN normalize_for_intersection(geom) IS NULL THEN geom
+							WHEN NOT ST_IsValid(normalize_for_intersection(geom)) THEN geom
+							WHEN ST_IsEmpty(normalize_for_intersection(geom)) THEN geom
+							ELSE normalize_for_intersection(geom)
+						END
+					ELSE
+						geom
+				END AS geom
+			FROM target_geom
+		),
+		dezone_normalized AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMax(geom) - ST_XMin(geom) > (SELECT half_ring FROM constants) 
+					     OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+						CASE
+							WHEN normalize_for_intersection(geom) IS NULL THEN geom
+							WHEN NOT ST_IsValid(normalize_for_intersection(geom)) THEN geom
+							WHEN ST_IsEmpty(normalize_for_intersection(geom)) THEN geom
+							ELSE normalize_for_intersection(geom)
+						END
+					ELSE
+						geom
+				END AS geom
+			FROM dezone_geom
+		),
+		-- Filter out NULL geometries before alignment
+		valid_geoms AS (
+			SELECT 
+				tg.geom AS target,
+				dg.geom AS dezone
+			FROM target_normalized tg
+			CROSS JOIN dezone_normalized dg
+			WHERE tg.geom IS NOT NULL
+			  AND dg.geom IS NOT NULL
+			  AND ST_IsValid(tg.geom)
+			  AND ST_IsValid(dg.geom)
+			  AND NOT ST_IsEmpty(tg.geom)
+			  AND NOT ST_IsEmpty(dg.geom)
+		),
+		-- Step 3: Align both geometries to common coordinate space
+		all_bounds AS (
+			SELECT 
+				LEAST(
+					COALESCE((SELECT ST_XMin(target) FROM valid_geoms WHERE target IS NOT NULL), 999999999),
+					COALESCE((SELECT ST_XMin(dezone) FROM valid_geoms WHERE dezone IS NOT NULL), 999999999)
+				) AS global_min_x
+		),
+		aligned_target AS (
+			SELECT 
+				ST_Translate(
+					target,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM valid_geoms
+			CROSS JOIN all_bounds
+		),
+		aligned_dezone AS (
+			SELECT 
+				ST_Translate(
+					dezone,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM valid_geoms
+			CROSS JOIN all_bounds
+		),
+		-- Step 4: Perform difference operation
+		differenced AS (
+			SELECT ST_Difference(
+				(SELECT geom FROM aligned_target),
+				(SELECT geom FROM aligned_dezone)
+			) AS geom
+		),
+		-- Step 5: Shift back to original coordinate space
+		shifted_back AS (
+			SELECT 
+				ST_Translate(
+					geom,
+					(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM differenced
+			CROSS JOIN all_bounds
+		),
+		-- Step 6: Wrap coordinates to [0, 264000000) range
+		wrapped AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMin(geom) < 0 THEN
+						ST_Translate(geom, 264000000.0, 0.0)
+					WHEN ST_XMax(geom) >= 264000000 THEN
+						ST_Translate(geom, -264000000.0, 0.0)
+					ELSE
+						geom
+				END AS geom
+			FROM shifted_back
+		),
+		-- Step 7: Validate result
+		validated AS (
+			SELECT ST_MakeValid(geom) AS geom
+			FROM wrapped
+		),
+		-- Step 8: Dump all polygons from result (handles both Polygon and MultiPolygon)
+		-- If the zone is bisected, ST_Difference returns MultiPolygon with multiple components
+		-- We want to create separate zones for each component
+		dumped_polygons AS (
+			SELECT 
+				(ST_Dump(geom)).geom AS geom
+			FROM validated
+			WHERE ST_IsValid(geom)
+				AND NOT ST_IsEmpty(geom)
+				AND ST_GeometryType(geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+		),
+		-- Step 9: Filter to only valid polygons and convert to GeoJSON
+		valid_polygons AS (
+			SELECT 
+				ST_AsGeoJSON(geom, 15, 0)::TEXT AS geom_json
+			FROM dumped_polygons
+			WHERE ST_IsValid(geom)
+				AND NOT ST_IsEmpty(geom)
+				AND ST_GeometryType(geom) = 'ST_Polygon'
+			ORDER BY ST_Area(geom) DESC  -- Largest first
+		)
+		-- Return all polygons (may be multiple rows if zone was split)
+		SELECT geom_json FROM valid_polygons
+	`
+	
+	// Query may return multiple rows if the zone was split into multiple components
+	rows, err := s.db.Query(differenceQuery, targetZoneID, dezoneGeometryString)
+	if err != nil {
+		log.Printf("[Dezone] Subtraction query failed for zone %d: %v", targetZoneID, err)
+		return nil, fmt.Errorf("failed to subtract dezone: %w", err)
+	}
+	defer rows.Close()
+	
+	// Collect all resulting geometries
+	var resultGeometries []json.RawMessage
+	for rows.Next() {
+		var geomJSON sql.NullString
+		if err := rows.Scan(&geomJSON); err != nil {
+			log.Printf("[Dezone] Failed to scan geometry result: %v", err)
+			continue
+		}
+		if !geomJSON.Valid || geomJSON.String == "" {
+			continue
+		}
+		resultGeometries = append(resultGeometries, json.RawMessage(geomJSON.String))
+	}
+	
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating geometry results: %w", err)
+	}
+	
+	if len(resultGeometries) == 0 {
+		log.Printf("[Dezone] Subtraction returned no valid geometries for zone %d - zone may be completely removed", targetZoneID)
+		return nil, fmt.Errorf("dezone subtraction resulted in empty or invalid geometry (zone may be completely removed)")
+	}
+	
+	log.Printf("[Dezone] Zone %d split into %d components", targetZoneID, len(resultGeometries))
+	
+	// Update the original zone with the first (largest) component
+	// Wrap coordinates to ensure they're within [0, 264000000) range
+	wrappedFirstGeometry, err := wrapGeoJSONCoordinates(resultGeometries[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to wrap coordinates for updated zone: %w", err)
+	}
+	
+	updateInput := ZoneUpdateInput{
+		Geometry: &wrappedFirstGeometry,
+	}
+	
+	updatedZone, err := s.UpdateZone(targetZoneID, updateInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update zone after dezone subtraction: %w", err)
+	}
+	
+	resultZones := []*Zone{updatedZone}
+	
+	// Create new zones for any additional components (zone was split)
+	for i := 1; i < len(resultGeometries); i++ {
+		// Wrap coordinates to ensure they're within [0, 264000000) range
+		wrappedGeometry, err := wrapGeoJSONCoordinates(resultGeometries[i])
+		if err != nil {
+			log.Printf("[Dezone] WARNING: Failed to wrap coordinates for split component %d: %v", i, err)
+			continue
+		}
+		
+		newZoneInput := &ZoneCreateInput{
+			Name:         fmt.Sprintf("%s (Split %d)", originalZone.Name, i),
+			ZoneType:     originalZone.ZoneType,
+			Floor:        originalZone.Floor,
+			OwnerID:      originalZone.OwnerID,
+			IsSystemZone: originalZone.IsSystemZone,
+			Geometry:     wrappedGeometry,
+			Properties:   originalZone.Properties,
+			Metadata:     originalZone.Metadata,
+		}
+		
+		newZone, err := s.CreateZone(newZoneInput)
+		if err != nil {
+			log.Printf("[Dezone] WARNING: Failed to create new zone for split component %d: %v", i, err)
+			continue
+		}
+		
+		log.Printf("[Dezone] Created new zone %d for split component %d", newZone.ID, i)
+		resultZones = append(resultZones, newZone)
+	}
+	
+	return resultZones, nil
 }
 
 // GetZoneByID retrieves a zone by its identifier.
