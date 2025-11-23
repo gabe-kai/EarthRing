@@ -405,7 +405,7 @@ Manages chunk loading and unloading based on viewport.
 - Tab-based system for different tool categories
 - "Zones" tab contains zone type selection, drawing tools, and settings
 - Zone type buttons: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted
-- Drawing tools: Select, Rectangle, Circle, Torus, Polygon, Paintbrush
+- Drawing tools: Select, Rectangle, Circle, Polygon, Paintbrush
 - Settings: Paintbrush radius (always visible), Brush size keyboard shortcuts (`[` and `]`)
 - Single-row horizontal layout with horizontal scrolling for overflow
 
@@ -419,7 +419,7 @@ Manages chunk loading and unloading based on viewport.
 - Integrated into bottom toolbar "Zones" tab
 - Provides interface for:
   - Zone type selection (6 types: Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
-  - Drawing tool selection (Select, Rectangle, Circle, Torus, Polygon, Paintbrush)
+  - Drawing tool selection (Select, Rectangle, Circle, Polygon, Paintbrush)
   - Paintbrush radius setting (always visible, default 10m)
   - Brush size keyboard shortcuts (`[` and `]` to decrease/increase)
   - Current tool and zone type display
@@ -477,7 +477,7 @@ gridOverlay.setVisible(false); // Hide grid
    - `normalizeRelativeToCamera` expects unwrapped camera position and handles wrapping internally
 
 3. **Preview Rendering (Zone Editor):**
-   - All drawing tools (Rectangle, Circle, Torus, Polygon, Paintbrush) use identical coordinate conversion logic
+   - All drawing tools (Rectangle, Circle, Polygon, Paintbrush) use identical coordinate conversion logic
    - Previews generate the exact absolute coordinates that will be stored in the database
    - Coordinates are then wrapped using the same logic as zone-manager.js (unwrapped camera position, always negate worldPos.z for fill shapes)
    - Preview mesh position is set to `(0, floorHeight + 0.001, 0)` since geometry coordinates are already in world space
@@ -1001,7 +1001,7 @@ class GraphicsAbstraction {
 
 3. **Zone Editor**
    - Bottom toolbar "Zones" tab with zone type selection and drawing tools
-   - Tools: Select, Rectangle, Circle, Torus, Polygon, Paintbrush
+   - Tools: Select, Rectangle, Circle, Polygon, Paintbrush
    - Zone selection with info window showing details and delete option
    - Current implementation: zone creation, selection, deletion via REST API
    - Roadmap: vertex editing, overlap indicators, advanced conflict resolution

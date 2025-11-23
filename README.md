@@ -33,7 +33,7 @@ EarthRing is set on a massive orbital ring structure:
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
-- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Torus, Polygon, Paintbrush), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
+- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Polygon, Paintbrush, Dezone), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted, Dezone). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
 
 ## Prerequisites
 
@@ -230,6 +230,60 @@ npm run dev
 - **Zone Types**: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
 - **Rendering**: Zones are rendered as world-anchored translucent polygons with colored outlines, remaining fully visible regardless of camera position
 - **Rate limit**: 200 requests per minute per user; authentication required for all zone routes
+- **Database Utilities** (psql commands):
+  - Delete all zones from database:
+    
+    **Option 1: TRUNCATE with CASCADE (Recommended for clean reset)**
+    
+    This command deletes all zones, resets the sequence numbering (next zone will be ID 1), and cascades to related tables. This will also delete related records in `structures`, `roads`, and `npcs` that reference zones.
+    
+    ```powershell
+    # Windows PowerShell
+    $env:PGPASSWORD = "your_password"; psql -U postgres -d earthring_dev -c "TRUNCATE zones RESTART IDENTITY CASCADE;"
+    
+    # Or connect interactively:
+    psql -U postgres -d earthring_dev
+    TRUNCATE zones RESTART IDENTITY CASCADE;
+    ```
+    ```bash
+    # Linux/Mac
+    PGPASSWORD="your_password" psql -U postgres -d earthring_dev -c "TRUNCATE zones RESTART IDENTITY CASCADE;"
+    
+    # Or connect interactively:
+    psql -U postgres -d earthring_dev
+    TRUNCATE zones RESTART IDENTITY CASCADE;
+    ```
+    
+    **Option 2: Selective DELETE (Preserves related records)**
+    
+    This approach preserves related records but clears their zone references. Note: This does NOT reset sequence numbering - the next zone will continue from the highest existing ID + 1. To reset numbering after DELETE, use `ALTER SEQUENCE zones_id_seq RESTART WITH 1;`
+    
+    ```powershell
+    # Windows PowerShell
+    $env:PGPASSWORD = "your_password"; psql -U postgres -d earthring_dev -c "UPDATE npcs SET home_zone_id = NULL, work_zone_id = NULL; DELETE FROM zones; ALTER SEQUENCE zones_id_seq RESTART WITH 1;"
+    
+    # Or connect interactively:
+    psql -U postgres -d earthring_dev
+    UPDATE npcs SET home_zone_id = NULL, work_zone_id = NULL;
+    DELETE FROM zones;
+    ALTER SEQUENCE zones_id_seq RESTART WITH 1;
+    ```
+    ```bash
+    # Linux/Mac
+    PGPASSWORD="your_password" psql -U postgres -d earthring_dev -c "UPDATE npcs SET home_zone_id = NULL, work_zone_id = NULL; DELETE FROM zones; ALTER SEQUENCE zones_id_seq RESTART WITH 1;"
+    
+    # Or connect interactively:
+    psql -U postgres -d earthring_dev
+    UPDATE npcs SET home_zone_id = NULL, work_zone_id = NULL;
+    DELETE FROM zones;
+    ALTER SEQUENCE zones_id_seq RESTART WITH 1;
+    ```
+    
+    **Foreign Key Relationships:**
+    - `structures.zone_id` → `zones.id` (ON DELETE SET NULL) - automatically cleared with DELETE
+    - `roads.zone_id` → `zones.id` (ON DELETE SET NULL) - automatically cleared with DELETE
+    - `npcs.home_zone_id` → `zones.id` (ON DELETE RESTRICT) - **must clear manually before DELETE**, or use TRUNCATE CASCADE
+    - `npcs.work_zone_id` → `zones.id` (ON DELETE RESTRICT) - **must clear manually before DELETE**, or use TRUNCATE CASCADE
 
 **Testing UI:**
 - After logging in, click "Player" or "Chunks" buttons in the user info bar to test endpoints

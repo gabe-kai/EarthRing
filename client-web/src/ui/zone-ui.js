@@ -70,6 +70,7 @@ function createZonesToolbarContent() {
     { id: 'mixed-use', icon: '🏢', label: 'Mixed-Use' },
     { id: 'park', icon: '🌳', label: 'Park' },
     { id: 'restricted', icon: '🚫', label: 'Restricted' },
+    { id: 'dezone', icon: '⊖', label: 'Dezone' },
   ];
   
   zoneTypes.forEach(({ id, icon, label }) => {
@@ -92,7 +93,6 @@ function createZonesToolbarContent() {
     { id: TOOLS.SELECT, icon: '👆', label: 'Select' },
     { id: TOOLS.RECTANGLE, icon: '▭', label: 'Rectangle' },
     { id: TOOLS.CIRCLE, icon: '○', label: 'Circle' },
-    { id: TOOLS.TORUS, icon: '⊚', label: 'Torus' },
     { id: TOOLS.POLYGON, icon: '⬟', label: 'Polygon' },
     { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush' },
   ];
@@ -179,6 +179,7 @@ function selectZoneType(zoneType) {
       'mixed-use': 'Mixed-Use',
       park: 'Park',
       restricted: 'Restricted',
+      dezone: 'Dezone',
     };
     typeDisplay.textContent = labels[zoneType] || zoneType;
   }
@@ -208,7 +209,6 @@ function selectTool(tool) {
       [TOOLS.SELECT]: 'Select',
       [TOOLS.RECTANGLE]: 'Rectangle',
       [TOOLS.CIRCLE]: 'Circle',
-      [TOOLS.TORUS]: 'Torus',
       [TOOLS.POLYGON]: 'Polygon',
       [TOOLS.PAINTBRUSH]: 'Paintbrush',
       [TOOLS.NONE]: 'None',
@@ -300,7 +300,7 @@ function setupZonesToolbarListeners() {
           [TOOLS.SELECT]: 'Select',
           [TOOLS.RECTANGLE]: 'Rectangle',
           [TOOLS.CIRCLE]: 'Circle',
-          [TOOLS.TORUS]: 'Torus',
+          [TOOLS.DEZONE]: 'Dezone',
           [TOOLS.POLYGON]: 'Polygon',
           [TOOLS.PAINTBRUSH]: 'Paintbrush',
           [TOOLS.NONE]: 'None',

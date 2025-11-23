@@ -1,7 +1,7 @@
 /**
  * Zone Editor
  * Handles interactive zone creation and editing tools
- * Supports: rectangle, circle, torus, polygon, and paintbrush tools
+ * Supports: rectangle, circle, dezone, polygon, and paintbrush tools
  */
 
 import * as THREE from 'three';
@@ -13,7 +13,6 @@ const TOOLS = {
   NONE: 'none',
   RECTANGLE: 'rectangle',
   CIRCLE: 'circle',
-  TORUS: 'torus',
   POLYGON: 'polygon',
   PAINTBRUSH: 'paintbrush',
   SELECT: 'select',
@@ -367,9 +366,6 @@ export class ZoneEditor {
         case TOOLS.CIRCLE:
           geometry = this.createCirclePreview(this.startPoint, currentPos);
           break;
-        case TOOLS.TORUS:
-          geometry = this.createTorusPreview(this.startPoint, currentPos);
-          break;
         case TOOLS.PAINTBRUSH:
           // Don't modify paintbrushPath here - it's managed in onMouseMove
           if (this.paintbrushPath.length > 0) {
@@ -492,10 +488,6 @@ export class ZoneEditor {
         console.log('[ZoneEditor] Using CIRCLE tool');
         geometry = this.createCircleGeometry(this.startPoint, endPos);
         break;
-      case TOOLS.TORUS:
-        console.log('[ZoneEditor] Using TORUS tool');
-        geometry = this.createTorusGeometry(this.startPoint, endPos);
-        break;
       case TOOLS.PAINTBRUSH:
         console.log('[ZoneEditor] Using PAINTBRUSH tool', {
           pathLength: this.paintbrushPath?.length,
@@ -562,6 +554,7 @@ export class ZoneEditor {
     // Create zone via API
     try {
       const currentUser = getCurrentUser();
+      
       const zone = await createZone({
         name: `${this.currentZoneType} Zone`,
         zone_type: this.currentZoneType,
@@ -585,9 +578,47 @@ export class ZoneEditor {
         });
       }
       
-      // Add to game state and render
-      this.gameStateManager.upsertZone(zone);
-      this.zoneManager.renderZone(zone);
+      // For dezone zone type, the server subtracts from all overlapping zones
+      if (this.currentZoneType === 'dezone') {
+        // Server returns a list of updated zones (with holes cut out)
+        // Dezone itself is not created - it's just used for subtraction
+        if (zone && zone.updated_zones) {
+          zone.updated_zones.forEach(updatedZone => {
+            this.gameStateManager.upsertZone(updatedZone);
+            this.zoneManager.renderZone(updatedZone);
+          });
+        } else if (zone && Array.isArray(zone)) {
+          // Handle case where server returns array directly
+          zone.forEach(updatedZone => {
+            this.gameStateManager.upsertZone(updatedZone);
+            this.zoneManager.renderZone(updatedZone);
+          });
+        }
+        // Deselect any selected zone after dezone operation
+        this.deselectZone();
+      } else {
+        // Normal zone creation
+        this.gameStateManager.upsertZone(zone);
+        this.zoneManager.renderZone(zone);
+        
+        // If zones were merged, the server returns the merged zone (which may have an existing ID)
+        // We need to remove any other zones from local state that were merged into this zone
+        // The server only merges zones with the same type, floor, and owner
+        const allZones = this.gameStateManager.getAllZones();
+        const zonesToRemove = allZones.filter(existingZone => 
+          existingZone.id !== zone.id && // Not the returned merged zone
+          existingZone.zone_type === zone.zone_type && // Same type
+          existingZone.floor === zone.floor && // Same floor
+          existingZone.owner_id === zone.owner_id // Same owner (handles null/undefined)
+        );
+        
+        // Remove merged zones from local state
+        zonesToRemove.forEach(mergedZone => {
+          console.log(`[ZoneEditor] Removing merged zone ${mergedZone.id} (merged into zone ${zone.id})`);
+          this.gameStateManager.removeZone(mergedZone.id);
+          this.zoneManager.removeZone(mergedZone.id);
+        });
+      }
       
       // Notify callbacks
       this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
@@ -1322,179 +1353,6 @@ export class ZoneEditor {
     return {
       type: 'Polygon',
       coordinates: [coordinates],
-    };
-  }
-  
-  createTorusPreview(center, edge) {
-    // Create the preview by first generating the exact geometry that will be stored
-    // then rendering it exactly as zone-manager.js does
-    // This ensures 100% match between preview and actual zone
-    
-    // Step 1: Generate the exact stored geometry (same as createTorusGeometry)
-    const outerRadius = Math.sqrt(
-      Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
-    );
-    const innerRadius = outerRadius * 0.6; // Torus inner radius is 60% of outer
-    const segments = 64;
-    
-    // Convert center to absolute coordinates first (same as final geometry)
-    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const absCenterY = center.y; // Y doesn't need conversion
-    
-    // Generate outer and inner ring points using absolute center
-    // This matches the exact coordinates that will be stored (before wrapping)
-    const outerAbsoluteCoords = [];
-    const innerAbsoluteCoords = [];
-    
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      
-      // Outer ring
-      const outerX = absCenterX + outerRadius * cos;
-      const outerY = absCenterY + outerRadius * sin;
-      outerAbsoluteCoords.push([outerX, outerY]);
-      
-      // Inner ring
-      const innerX = absCenterX + innerRadius * cos;
-      const innerY = absCenterY + innerRadius * sin;
-      innerAbsoluteCoords.push([innerX, innerY]);
-    }
-    
-    // Close rings
-    if (outerAbsoluteCoords.length > 0) {
-      outerAbsoluteCoords.push([outerAbsoluteCoords[0][0], outerAbsoluteCoords[0][1]]);
-    }
-    if (innerAbsoluteCoords.length > 0) {
-      innerAbsoluteCoords.push([innerAbsoluteCoords[0][0], innerAbsoluteCoords[0][1]]);
-    }
-    
-    // Step 2: Now render this exact geometry exactly as zone-manager.js does
-    // Wrap absolute coordinates relative to camera (same as renderZone)
-    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
-    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = cameraPos.x; // Use unwrapped camera position
-    
-    // Use the EXACT same wrapping function as zone-manager.js
-    const wrapZoneX = (x) => {
-      return normalizeRelativeToCamera(x, cameraX);
-    };
-    
-    // Step 3: Create shape using the EXACT same coordinates that will be rendered
-    const shape = new THREE.Shape();
-    
-    // Build outer ring EXACTLY as zone-manager.js does
-    let firstPos = null;
-    outerAbsoluteCoords.forEach(([x, y], idx) => {
-      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
-      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      // Always negate worldPos.z for the fill shape
-      const shapeY = -worldPos.z;
-      if (idx === 0) {
-        firstPos = { x: worldPos.x, z: shapeY };
-        shape.moveTo(worldPos.x, shapeY);
-      } else {
-        shape.lineTo(worldPos.x, shapeY);
-      }
-    });
-    
-    // Explicitly close outer ring
-    if (firstPos) {
-      shape.lineTo(firstPos.x, firstPos.z);
-    }
-    
-    // Build inner ring (hole) - reverse for proper winding (donut hole)
-    const holePath = new THREE.Path();
-    innerAbsoluteCoords.reverse(); // Reverse for proper winding
-    innerAbsoluteCoords.forEach(([x, y], idx) => {
-      const wrappedX = wrapZoneX(x);  // Wrap absolute coordinate relative to camera
-      const worldPos = toThreeJS({ x: wrappedX, y: y, z: this.currentFloor }, DEFAULT_FLOOR_HEIGHT);
-      // Holes use worldPos.z directly (not negated) - matching zone-manager.js behavior
-      if (idx === 0) {
-        holePath.moveTo(worldPos.x, worldPos.z);
-      } else {
-        holePath.lineTo(worldPos.x, worldPos.z);
-      }
-    });
-    
-    // Add hole to shape
-    shape.holes.push(holePath);
-    
-    // Create geometry from shape (same as zone rendering)
-    const geometry = new THREE.ShapeGeometry(shape);
-    
-    return geometry;
-  }
-  
-  createTorusGeometry(center, edge) {
-    const outerRadius = Math.sqrt(
-      Math.pow(edge.x - center.x, 2) + Math.pow(edge.y - center.y, 2)
-    );
-    const innerRadius = outerRadius * 0.6;
-    const segments = 64;
-    const outerCoords = [];
-    const innerCoords = [];
-    
-    // Convert center to absolute coordinates first
-    const absCenterX = this.convertRelativeToAbsoluteX(center.x);
-    const absCenterY = center.y; // Y doesn't need conversion
-    
-    // Generate outer ring points using absolute center
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const x = absCenterX + outerRadius * cos;
-      const y = absCenterY + outerRadius * sin;
-      
-      // Wrap X coordinate to valid range
-      const wrappedX = wrapRingPosition(x);
-      
-      outerCoords.push([wrappedX, y]);
-    }
-    // Close outer ring explicitly
-    if (outerCoords.length > 0) {
-      outerCoords.push([outerCoords[0][0], outerCoords[0][1]]);
-    }
-    
-    // Generate inner ring points using absolute center
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const x = absCenterX + innerRadius * cos;
-      const y = absCenterY + innerRadius * sin;
-      
-      // Wrap X coordinate to valid range
-      const wrappedX = wrapRingPosition(x);
-      
-      innerCoords.push([wrappedX, y]);
-    }
-    // Close inner ring explicitly
-    if (innerCoords.length > 0) {
-      innerCoords.push([innerCoords[0][0], innerCoords[0][1]]);
-    }
-    
-    // Reverse inner ring for proper winding (donut hole)
-    innerCoords.reverse();
-    
-    // Combine outer and inner rings into a single polygon
-    // The polygon should be: outer ring (clockwise) + inner ring (counter-clockwise)
-    const combinedCoords = outerCoords.concat(innerCoords);
-    
-    // Ensure the combined polygon is closed
-    if (combinedCoords.length > 0) {
-      const first = combinedCoords[0];
-      const last = combinedCoords[combinedCoords.length - 1];
-      if (first[0] !== last[0] || first[1] !== last[1]) {
-        combinedCoords.push([first[0], first[1]]);
-      }
-    }
-    
-    return {
-      type: 'Polygon',
-      coordinates: [combinedCoords],
     };
   }
   

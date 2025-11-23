@@ -90,6 +90,29 @@ func (h *ZoneHandlers) CreateZone(w http.ResponseWriter, r *http.Request) {
 		ownerID = *req.OwnerID
 	}
 
+	// Check if this is a dezone operation (subtract from all overlapping zones)
+	if req.ZoneType == "dezone" {
+		// Dezone is special: it subtracts from any zone it overlaps, regardless of type
+		// It doesn't create a zone itself - it's just used for subtraction
+		updatedZones, err := h.storage.SubtractDezoneFromAllOverlapping(req.Floor, req.Geometry, authUserID)
+		if err != nil {
+			log.Printf("SubtractDezoneFromAllOverlapping error: %v", err)
+			respondWithError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		
+		// Return the list of updated zones
+		responses := make([]zoneResponse, len(updatedZones))
+		for i, zone := range updatedZones {
+			responses[i] = *toZoneResponse(zone)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"updated_zones": responses,
+			"count":         len(updatedZones),
+		})
+		return
+	}
+
 	input := &database.ZoneCreateInput{
 		Name:       req.Name,
 		ZoneType:   req.ZoneType,
