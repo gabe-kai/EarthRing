@@ -213,7 +213,7 @@ npm run dev
 
 **Zone Management:**
 - **Zones Toolbar**: Click the "Z" icon on the left side of the screen to expand the zones toolbar:
-  - Grid visibility toggle (show/hide the 250m circular grid overlay)
+  - Grid visibility toggle (show/hide the 250m circular LineSegments grid with fade + LOD)
   - All Zones toggle (show/hide all zones at once)
   - Per-zone-type visibility toggles (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
   - Each toggle shows current state (green "Hide" when visible, red "Show" when hidden)
@@ -370,7 +370,7 @@ EarthRing/
 │   │   ├── network/                   # WebSocket client and network utilities
 │   │   ├── rendering/                 # Rendering engine
 │   │   │   ├── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
-│   │   │   └── grid-overlay.js         # Grid overlay (circular grid with fade-out)
+│   │   │   └── grid-overlay.js         # Grid overlay (sharp LineSegments grid with shader fade + LOD)
 │   │   ├── input/                     # Input handling
 │   │   │   └── camera-controller.js   # Camera controller (OrbitControls integration)
 │   │   ├── state/                     # Game state management

@@ -163,7 +163,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 1. ✅ Zone creation API and validation (GeoJSON polygons validated server-side, PostGIS constraints)
 2. ✅ Zone storage in database (new `ZoneStorage`, spatial indexes, area queries, owner filters)
 3. ✅ Zone rendering in client (world-anchored meshes with ring wrapping, translucent fills with colored outlines)
-4. ✅ Grid overlay system (250m circular grid with fade-out, separate from zones, world-aligned texture)
+4. ✅ Grid overlay system (250m circular LineSegments grid with shader fade + LOD, separate from zones)
 5. ✅ Zones toolbar UI (left-side expandable toolbar with grid visibility and per-zone-type visibility toggles)
 6. ✅ Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
 7. ✅ Restricted zone type (red overlay for preventing/limiting procedural spawning)

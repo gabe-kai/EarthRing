@@ -7,7 +7,8 @@ const DEFAULTS = {
   minorSpacing: 1,
   fadeStart: 0.8,
   elevation: 0.002,
-  textureSize: 512,
+  // LOD settings: hide minor lines when zoomed out
+  minorLineMaxHeight: 300, // Hide minor lines when camera > 300m above grid
 };
 
 const MOD = (value, modulus) => ((value % modulus) + modulus) % modulus;
@@ -17,46 +18,79 @@ export class GridOverlay {
     this.sceneManager = sceneManager;
     this.cameraController = cameraController;
     this.settings = { ...DEFAULTS, ...options };
-    this.lastTextureOffset = { x: NaN, y: NaN };
-    this.textureNeedsUpdate = true;
-
-    this.initTexture();
-    this.buildGridMesh();
+    this.lastUpdatePosition = { x: NaN, y: NaN };
+    
+    this.buildGridGroup();
     this.sceneManager.getScene().add(this.group);
     this.updatePosition(true);
   }
 
-  initTexture() {
-    const size = this.settings.textureSize;
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = this.canvas.height = size;
-    this.ctx = this.canvas.getContext('2d');
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.wrapS = this.texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.texture.anisotropy = 4;
-    this.texture.needsUpdate = true;
-  }
-
-  buildGridMesh() {
-    const geometry = new THREE.CircleGeometry(this.settings.radius, 128);
-    const material = new THREE.MeshBasicMaterial({
-      map: this.texture,
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      opacity: 1,
-    });
-
-    this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.rotation.x = -Math.PI / 2;
-    this.mesh.position.y = this.settings.elevation;
-    this.mesh.frustumCulled = false;
-
+  buildGridGroup() {
     this.group = new THREE.Group();
     this.group.name = 'GridOverlay';
     this.group.renderOrder = 1;
     this.group.frustumCulled = false;
-    this.group.add(this.mesh);
+    
+    // Create separate groups for major and minor lines
+    this.majorLinesGroup = new THREE.Group();
+    this.majorLinesGroup.name = 'MajorGridLines';
+    this.minorLinesGroup = new THREE.Group();
+    this.minorLinesGroup.name = 'MinorGridLines';
+    
+    this.group.add(this.majorLinesGroup);
+    this.group.add(this.minorLinesGroup);
+    
+    // Create shader material for smooth fade effect
+    const createFadeMaterial = (baseColor, baseOpacity = 1.0) => {
+      return new THREE.ShaderMaterial({
+        uniforms: {
+          fadeRadius: { value: this.settings.radius * this.settings.fadeStart },
+          maxRadius: { value: this.settings.radius },
+          color: { value: baseColor.clone ? baseColor.clone() : new THREE.Color(baseColor) },
+          baseOpacity: { value: baseOpacity },
+        },
+        vertexShader: `
+          attribute float distanceFromCenter;
+          varying float vOpacity;
+          uniform float fadeRadius;
+          uniform float maxRadius;
+          uniform float baseOpacity;
+          
+          void main() {
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            
+            // Calculate opacity based on distance from center
+            float dist = distanceFromCenter;
+            if (dist > fadeRadius) {
+              float fadeFactor = (dist - fadeRadius) / (maxRadius - fadeRadius);
+              vOpacity = max(0.0, baseOpacity * (1.0 - fadeFactor));
+            } else {
+              vOpacity = baseOpacity;
+            }
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 color;
+          varying float vOpacity;
+          
+          void main() {
+            gl_FragColor = vec4(color, vOpacity);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+      });
+    };
+    
+    // Materials for grid lines (using shader for fade)
+    this.majorHorizontalMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95);
+    
+    this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95);
+    
+    this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.5);
+    
     this.visible = true;
   }
 
@@ -69,8 +103,8 @@ export class GridOverlay {
     this.updatePosition();
   }
 
-  updatePosition(forceTextureUpdate = false) {
-    if (!this.cameraController || !this.mesh) return;
+  updatePosition(forceUpdate = false) {
+    if (!this.cameraController || !this.group) return;
 
     const camera = this.sceneManager.getCamera();
     const anchorThree =
@@ -84,104 +118,272 @@ export class GridOverlay {
 
     this.group.position.set(anchorThree.x, floorHeight, anchorThree.z);
 
-    const offsetX = anchorEarth.x;
-    const offsetY = anchorEarth.y;
+    const worldX = anchorEarth.x;
+    const worldY = anchorEarth.y;
     const smallestSpacing = Math.min(this.settings.majorSpacing, this.settings.minorSpacing);
 
     const movedEnough =
-      Math.abs(offsetX - this.lastTextureOffset.x) >= smallestSpacing ||
-      Math.abs(offsetY - this.lastTextureOffset.y) >= smallestSpacing;
+      Math.abs(worldX - this.lastUpdatePosition.x) >= smallestSpacing ||
+      Math.abs(worldY - this.lastUpdatePosition.y) >= smallestSpacing;
 
-    if (forceTextureUpdate || this.textureNeedsUpdate || movedEnough) {
-      this.lastTextureOffset = { x: offsetX, y: offsetY };
-      this.drawGridTexture(offsetX, offsetY);
-      this.textureNeedsUpdate = false;
+    if (forceUpdate || movedEnough) {
+      this.lastUpdatePosition = { x: worldX, y: worldY };
+      this.updateGridLines(worldX, worldY);
+    }
+    
+    // Update fade based on current settings
+    this.updateFade();
+  }
+
+  updateGridLines(worldX, worldY) {
+    const radius = this.settings.radius;
+    
+    // Clear existing lines
+    this.clearLines();
+    
+    // Calculate camera height for LOD
+    const camera = this.sceneManager.getCamera();
+    const heightAboveGrid = Math.abs(camera.position.y - this.group.position.y);
+    const showMinorLines = heightAboveGrid < this.settings.minorLineMaxHeight;
+    
+    // Generate major grid lines
+    this.generateMajorLines(worldX, worldY, radius);
+    
+    // Generate minor grid lines (if within LOD distance)
+    if (showMinorLines) {
+      this.generateMinorLines(worldX, worldY, radius);
     }
   }
 
-  drawGridTexture(worldX, worldY) {
-    const size = this.settings.textureSize;
-    const ctx = this.ctx;
-    const center = size / 2;
-    const radiusPx = size / 2;
-    const ppm = radiusPx / this.settings.radius;
-
-    ctx.clearRect(0, 0, size, size);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(center, center, radiusPx, 0, Math.PI * 2);
-    ctx.clip();
-
-    const drawLines = (spacing, color, width, orientation) => {
-      const cameraCoord = orientation === 'horizontal' ? worldY : worldX;
-      const remainder = MOD(cameraCoord, spacing);
-      const steps = Math.ceil((this.settings.radius + spacing) / spacing) + 2;
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-
-      for (let k = -steps; k <= steps; k++) {
-        const localPos = k * spacing - remainder;
-        if (localPos < -this.settings.radius - spacing || localPos > this.settings.radius + spacing) {
-          continue;
-        }
-        const pixelPos = center + localPos * ppm;
-        ctx.beginPath();
-        if (orientation === 'horizontal') {
-          ctx.moveTo(center - radiusPx, pixelPos);
-          ctx.lineTo(center + radiusPx, pixelPos);
-        } else {
-          ctx.moveTo(pixelPos, center - radiusPx);
-          ctx.lineTo(pixelPos, center + radiusPx);
-        }
-        ctx.stroke();
+  generateMajorLines(worldX, worldY, radius) {
+    const spacing = this.settings.majorSpacing;
+    const steps = Math.ceil((radius + spacing) / spacing) + 2;
+    
+    // Horizontal lines (red)
+    const horizontalVertices = [];
+    const horizontalDistances = [];
+    const horizontalRemainder = MOD(worldY, spacing);
+    
+    for (let k = -steps; k <= steps; k++) {
+      const localY = k * spacing - horizontalRemainder;
+      if (localY < -radius - spacing || localY > radius + spacing) {
+        continue;
       }
-    };
+      
+      // Calculate start and end X positions for the circle
+      const yAbs = Math.abs(localY);
+      if (yAbs <= radius) {
+        const xOffset = Math.sqrt(radius * radius - localY * localY);
+        // Distance from center: for horizontal lines, use Y distance
+        const distanceFromCenter = Math.abs(localY);
+        
+        horizontalVertices.push(-xOffset, 0, localY);
+        horizontalDistances.push(distanceFromCenter);
+        horizontalVertices.push(xOffset, 0, localY);
+        horizontalDistances.push(distanceFromCenter);
+      }
+    }
+    
+    if (horizontalVertices.length > 0) {
+      const horizontalGeometry = new THREE.BufferGeometry();
+      horizontalGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(horizontalVertices, 3)
+      );
+      horizontalGeometry.setAttribute(
+        'distanceFromCenter',
+        new THREE.Float32BufferAttribute(horizontalDistances, 1)
+      );
+      const horizontalLines = new THREE.LineSegments(
+        horizontalGeometry,
+        this.majorHorizontalMaterial
+      );
+      this.majorLinesGroup.add(horizontalLines);
+    }
+    
+    // Vertical lines (blue)
+    const verticalVertices = [];
+    const verticalDistances = [];
+    const verticalRemainder = MOD(worldX, spacing);
+    
+    for (let k = -steps; k <= steps; k++) {
+      const localX = k * spacing - verticalRemainder;
+      if (localX < -radius - spacing || localX > radius + spacing) {
+        continue;
+      }
+      
+      // Calculate start and end Y positions for the circle
+      const xAbs = Math.abs(localX);
+      if (xAbs <= radius) {
+        const yOffset = Math.sqrt(radius * radius - localX * localX);
+        // Distance from center: for vertical lines, use X distance
+        const distanceFromCenter = Math.abs(localX);
+        
+        verticalVertices.push(localX, 0, -yOffset);
+        verticalDistances.push(distanceFromCenter);
+        verticalVertices.push(localX, 0, yOffset);
+        verticalDistances.push(distanceFromCenter);
+      }
+    }
+    
+    if (verticalVertices.length > 0) {
+      const verticalGeometry = new THREE.BufferGeometry();
+      verticalGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(verticalVertices, 3)
+      );
+      verticalGeometry.setAttribute(
+        'distanceFromCenter',
+        new THREE.Float32BufferAttribute(verticalDistances, 1)
+      );
+      const verticalLines = new THREE.LineSegments(
+        verticalGeometry,
+        this.majorVerticalMaterial
+      );
+      this.majorLinesGroup.add(verticalLines);
+    }
+  }
 
-    drawLines(this.settings.minorSpacing, 'rgba(40,40,40,0.6)', 1, 'horizontal');
-    drawLines(this.settings.minorSpacing, 'rgba(40,40,40,0.6)', 1, 'vertical');
+  generateMinorLines(worldX, worldY, radius) {
+    const spacing = this.settings.minorSpacing;
+    const steps = Math.ceil((radius + spacing) / spacing) + 2;
+    
+    // Horizontal lines
+    const horizontalVertices = [];
+    const horizontalDistances = [];
+    const horizontalRemainder = MOD(worldY, spacing);
+    
+    for (let k = -steps; k <= steps; k++) {
+      const localY = k * spacing - horizontalRemainder;
+      // Skip if this is a major line
+      if (Math.abs(MOD(localY, this.settings.majorSpacing)) < 0.01) {
+        continue;
+      }
+      
+      if (localY < -radius - spacing || localY > radius + spacing) {
+        continue;
+      }
+      
+      const yAbs = Math.abs(localY);
+      if (yAbs <= radius) {
+        const xOffset = Math.sqrt(radius * radius - localY * localY);
+        // Distance from center: for horizontal lines, use Y distance
+        const distanceFromCenter = Math.abs(localY);
+        
+        horizontalVertices.push(-xOffset, 0, localY);
+        horizontalDistances.push(distanceFromCenter);
+        horizontalVertices.push(xOffset, 0, localY);
+        horizontalDistances.push(distanceFromCenter);
+      }
+    }
+    
+    if (horizontalVertices.length > 0) {
+      const horizontalGeometry = new THREE.BufferGeometry();
+      horizontalGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(horizontalVertices, 3)
+      );
+      horizontalGeometry.setAttribute(
+        'distanceFromCenter',
+        new THREE.Float32BufferAttribute(horizontalDistances, 1)
+      );
+      const horizontalLines = new THREE.LineSegments(
+        horizontalGeometry,
+        this.minorMaterial
+      );
+      this.minorLinesGroup.add(horizontalLines);
+    }
+    
+    // Vertical lines
+    const verticalVertices = [];
+    const verticalDistances = [];
+    const verticalRemainder = MOD(worldX, spacing);
+    
+    for (let k = -steps; k <= steps; k++) {
+      const localX = k * spacing - verticalRemainder;
+      // Skip if this is a major line
+      if (Math.abs(MOD(localX, this.settings.majorSpacing)) < 0.01) {
+        continue;
+      }
+      
+      if (localX < -radius - spacing || localX > radius + spacing) {
+        continue;
+      }
+      
+      const xAbs = Math.abs(localX);
+      if (xAbs <= radius) {
+        const yOffset = Math.sqrt(radius * radius - localX * localX);
+        // Distance from center: for vertical lines, use X distance
+        const distanceFromCenter = Math.abs(localX);
+        
+        verticalVertices.push(localX, 0, -yOffset);
+        verticalDistances.push(distanceFromCenter);
+        verticalVertices.push(localX, 0, yOffset);
+        verticalDistances.push(distanceFromCenter);
+      }
+    }
+    
+    if (verticalVertices.length > 0) {
+      const verticalGeometry = new THREE.BufferGeometry();
+      verticalGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(verticalVertices, 3)
+      );
+      verticalGeometry.setAttribute(
+        'distanceFromCenter',
+        new THREE.Float32BufferAttribute(verticalDistances, 1)
+      );
+      const verticalLines = new THREE.LineSegments(
+        verticalGeometry,
+        this.minorMaterial
+      );
+      this.minorLinesGroup.add(verticalLines);
+    }
+  }
 
-    drawLines(this.settings.majorSpacing, 'rgba(255,45,45,0.9)', 1.6, 'horizontal');
-    drawLines(this.settings.majorSpacing, 'rgba(45,123,255,0.9)', 1.6, 'vertical');
+  updateFade() {
+    // Update shader uniforms for fade effect
+    const fadeRadius = this.settings.radius * this.settings.fadeStart;
+    this.majorHorizontalMaterial.uniforms.fadeRadius.value = fadeRadius;
+    this.majorVerticalMaterial.uniforms.fadeRadius.value = fadeRadius;
+    this.minorMaterial.uniforms.fadeRadius.value = fadeRadius;
+    
+    this.majorHorizontalMaterial.uniforms.maxRadius.value = this.settings.radius;
+    this.majorVerticalMaterial.uniforms.maxRadius.value = this.settings.radius;
+    this.minorMaterial.uniforms.maxRadius.value = this.settings.radius;
+  }
 
-    ctx.restore();
-
-    // Apply fade-out gradient only to the grid (not zones)
-    ctx.save();
-    const gradient = ctx.createRadialGradient(
-      center,
-      center,
-      radiusPx * this.settings.fadeStart,
-      center,
-      center,
-      radiusPx
-    );
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    ctx.restore();
-    ctx.globalCompositeOperation = 'source-over';
-
-    this.texture.needsUpdate = true;
+  clearLines() {
+    // Dispose of existing geometries
+    this.majorLinesGroup.traverse((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+    });
+    this.minorLinesGroup.traverse((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+    });
+    
+    // Clear groups
+    this.majorLinesGroup.clear();
+    this.minorLinesGroup.clear();
   }
 
   getPosition() {
     return { ...this.group.position };
   }
 
-
   dispose() {
-    if (this.mesh?.material?.map) {
-      this.mesh.material.map.dispose();
-    }
+    this.clearLines();
+    
+    // Dispose materials
+    this.majorHorizontalMaterial.dispose();
+    this.majorVerticalMaterial.dispose();
+    this.minorMaterial.dispose();
+    
     this.sceneManager.getScene().remove(this.group);
-    this.group.traverse(child => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) child.material.dispose();
-    });
     this.group.clear();
   }
 }
-

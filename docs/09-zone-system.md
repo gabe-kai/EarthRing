@@ -694,7 +694,7 @@ See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
   - Per-type visibility: Individual zone types can be shown/hidden independently
   - Zones toolbar provides UI controls for both levels
 
-- **Grid Overlay Separation**: Grid is rendered separately as a circular canvas texture that fades at edges. Zones are NOT part of the grid texture, allowing zones to remain fully visible while grid fades.
+- **Grid Overlay Separation**: Grid is rendered separately using circular `THREE.LineSegments` geometry with shader-driven fade and LOD. Zones are NOT part of the grid overlay, allowing them to remain fully visible while the grid thins/fades based on camera distance.
 
 ### Zone Type Support
 

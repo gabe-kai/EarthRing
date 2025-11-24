@@ -34,6 +34,12 @@
 - ✅ `TestDatabaseSchemaVerification` - All objects exist
 - ✅ `TestNormalizeForIntersectionFunction` - Function works
 
+### ✅ Client-Side Tests (4 tests)
+- ✅ `GridOverlay adds itself to the scene` - Ensures `THREE.Group` scaffolding is created and registered
+- ✅ `GridOverlay toggles visibility` - Verifies UI toggle wiring via `setVisible`
+- ✅ `GridOverlay renders minor lines near the surface` - Confirms shader/LOD logic shows fine lines when the camera is close
+- ✅ `GridOverlay hides minor lines when above LOD threshold` - Validates minor-line suppression when zoomed out
+
 ### ❌ Missing Tests
 
 #### Critical Missing Tests
@@ -95,6 +101,7 @@
 | Dezone multiple zones | ⏭️ | ❌ | **Skipped** |
 | Client geometry gen | ❌ | ❌ | **Missing** |
 | Wrap boundary edge cases | ⏭️ | ❌ | **Skipped** |
+| Grid overlay rendering/LOD | ❌ | ✅ | Partial |
 
 ## Priority Recommendations
 
@@ -170,7 +177,7 @@ client-web/src/zones/__tests__/
 
 ### Current Coverage
 - **Server-side**: ~96% (26/27 potential tests, 0 skipped) ✅
-- **Client-side**: 0% (no tests)
+- **Client-side**: 4 tests (grid overlay behavior)
 - **Integration**: 0% (no E2E tests)
 
 ### Target Coverage
