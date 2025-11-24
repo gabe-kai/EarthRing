@@ -9,6 +9,9 @@ const DEFAULTS = {
   elevation: 0.002,
   // LOD settings: hide minor lines when zoomed out
   minorLineMaxHeight: 300, // Hide minor lines when camera > 300m above grid
+  // Performance settings: reduce update frequency
+  updateThreshold: 2.5, // Only regenerate grid when camera moves >= 2.5m
+  updateThrottleMs: 50, // Minimum time between updates (50ms = max 20 updates/sec)
 };
 
 const MOD = (value, modulus) => ((value % modulus) + modulus) % modulus;
@@ -16,8 +19,8 @@ const MOD = (value, modulus) => ((value % modulus) + modulus) % modulus;
 const MULTIPLE_STEP = 20;
 const MULTIPLE_EPSILON = 0.05;
 const THICKNESS_STYLES = {
-  axis: { repeats: 7, spacing: 0.4 },
-  multiple: { repeats: 3, spacing: 0.25 },
+  axis: { repeats: 5, spacing: 0.4 }, // Reduced from 7 to 5 for performance
+  multiple: { repeats: 2, spacing: 0.25 }, // Reduced from 3 to 2 for performance
   default: { repeats: 1, spacing: 0 },
 };
 
@@ -66,6 +69,7 @@ export class GridOverlay {
     this.cameraController = cameraController;
     this.settings = { ...DEFAULTS, ...options };
     this.lastUpdatePosition = { x: NaN, y: NaN };
+    this.lastUpdateTime = 0; // For throttling
     
     this.buildGridGroup();
     this.sceneManager.getScene().add(this.group);
@@ -90,6 +94,22 @@ export class GridOverlay {
     this.group.add(this.majorLinesGroup);
     this.group.add(this.minorLinesGroup);
     this.group.add(this.axisLinesGroup);
+    
+    // Track reusable geometries and line segments for performance
+    this.reusableGeometries = {
+      majorHorizontal: null,
+      majorVertical: null,
+      minorHorizontal: null,
+      minorVertical: null,
+      axis: null,
+    };
+    this.reusableLineSegments = {
+      majorHorizontal: null,
+      majorVertical: null,
+      minorHorizontal: null,
+      minorVertical: null,
+      axis: null,
+    };
     
     // Create shader material for smooth fade effect
     const createFadeMaterial = (baseColor, baseOpacity = 1.0) => {
@@ -172,14 +192,21 @@ export class GridOverlay {
 
     const worldX = anchorEarth.x;
     const worldY = anchorEarth.y;
-    const smallestSpacing = Math.min(this.settings.majorSpacing, this.settings.minorSpacing);
+    const updateThreshold = this.settings.updateThreshold;
 
+    // Check if camera moved enough to warrant a grid update
     const movedEnough =
-      Math.abs(worldX - this.lastUpdatePosition.x) >= smallestSpacing ||
-      Math.abs(worldY - this.lastUpdatePosition.y) >= smallestSpacing;
+      Math.abs(worldX - this.lastUpdatePosition.x) >= updateThreshold ||
+      Math.abs(worldY - this.lastUpdatePosition.y) >= updateThreshold;
 
-    if (forceUpdate || movedEnough) {
+    // Throttle: don't update more than once per throttle period
+    const now = performance.now();
+    const timeSinceLastUpdate = now - this.lastUpdateTime;
+    const throttleExpired = timeSinceLastUpdate >= this.settings.updateThrottleMs;
+
+    if (forceUpdate || (movedEnough && throttleExpired)) {
       this.lastUpdatePosition = { x: worldX, y: worldY };
+      this.lastUpdateTime = now;
       this.updateGridLines(worldX, worldY);
     }
     
@@ -190,23 +217,43 @@ export class GridOverlay {
   updateGridLines(worldX, worldY) {
     const radius = this.settings.radius;
     
-    // Clear existing lines
-    this.clearLines();
-    
     // Calculate camera height for LOD
     const camera = this.sceneManager.getCamera();
     const heightAboveGrid = Math.abs(camera.position.y - this.group.position.y);
     const showMinorLines = heightAboveGrid < this.settings.minorLineMaxHeight;
+    
+    // Adaptive minor spacing: increase spacing when camera is further away
+    // This reduces line count and improves performance
+    let effectiveMinorSpacing = this.settings.minorSpacing;
+    if (showMinorLines && heightAboveGrid > 50) {
+      // When camera is 50-300m above grid, use 2m spacing instead of 1m
+      // This cuts minor line count in half
+      effectiveMinorSpacing = 2;
+    }
     
     // Generate major grid lines
     this.generateMajorLines(worldX, worldY, radius);
     
     // Generate minor grid lines (if within LOD distance)
     if (showMinorLines) {
-      this.generateMinorLines(worldX, worldY, radius);
+      this.generateMinorLines(worldX, worldY, radius, effectiveMinorSpacing);
+    } else {
+      // Remove minor line segments when LOD hides them
+      this.removeLineSegments('minorHorizontal', this.minorLinesGroup);
+      this.removeLineSegments('minorVertical', this.minorLinesGroup);
     }
 
     this.updateAxisLine(worldY, radius);
+  }
+  
+  /**
+   * Remove line segments from a group when they're not needed
+   */
+  removeLineSegments(geometryKey, group) {
+    const lineSegments = this.reusableLineSegments[geometryKey];
+    if (lineSegments && group.children.includes(lineSegments)) {
+      group.remove(lineSegments);
+    }
   }
 
   generateMajorLines(worldX, worldY, radius) {
@@ -248,20 +295,13 @@ export class GridOverlay {
     }
     
     if (horizontalVertices.length > 0) {
-      const horizontalGeometry = new THREE.BufferGeometry();
-      horizontalGeometry.setAttribute(
-        'position',
-        new THREE.Float32BufferAttribute(horizontalVertices, 3)
-      );
-      horizontalGeometry.setAttribute(
-        'distanceFromCenter',
-        new THREE.Float32BufferAttribute(horizontalDistances, 1)
-      );
-      const horizontalLines = new THREE.LineSegments(
-        horizontalGeometry,
+      this.updateOrCreateGeometry(
+        'majorHorizontal',
+        horizontalVertices,
+        horizontalDistances,
+        this.majorLinesGroup,
         this.majorHorizontalMaterial
       );
-      this.majorLinesGroup.add(horizontalLines);
     }
     
     // Vertical lines (blue)
@@ -299,25 +339,18 @@ export class GridOverlay {
     }
     
     if (verticalVertices.length > 0) {
-      const verticalGeometry = new THREE.BufferGeometry();
-      verticalGeometry.setAttribute(
-        'position',
-        new THREE.Float32BufferAttribute(verticalVertices, 3)
-      );
-      verticalGeometry.setAttribute(
-        'distanceFromCenter',
-        new THREE.Float32BufferAttribute(verticalDistances, 1)
-      );
-      const verticalLines = new THREE.LineSegments(
-        verticalGeometry,
+      this.updateOrCreateGeometry(
+        'majorVertical',
+        verticalVertices,
+        verticalDistances,
+        this.majorLinesGroup,
         this.majorVerticalMaterial
       );
-      this.majorLinesGroup.add(verticalLines);
     }
   }
 
-  generateMinorLines(worldX, worldY, radius) {
-    const spacing = this.settings.minorSpacing;
+  generateMinorLines(worldX, worldY, radius, spacingOverride = null) {
+    const spacing = spacingOverride ?? this.settings.minorSpacing;
     const steps = Math.ceil((radius + spacing) / spacing) + 2;
     
     // Horizontal lines
@@ -359,20 +392,13 @@ export class GridOverlay {
     }
     
     if (horizontalVertices.length > 0) {
-      const horizontalGeometry = new THREE.BufferGeometry();
-      horizontalGeometry.setAttribute(
-        'position',
-        new THREE.Float32BufferAttribute(horizontalVertices, 3)
-      );
-      horizontalGeometry.setAttribute(
-        'distanceFromCenter',
-        new THREE.Float32BufferAttribute(horizontalDistances, 1)
-      );
-      const horizontalLines = new THREE.LineSegments(
-        horizontalGeometry,
+      this.updateOrCreateGeometry(
+        'minorHorizontal',
+        horizontalVertices,
+        horizontalDistances,
+        this.minorLinesGroup,
         this.minorMaterial
       );
-      this.minorLinesGroup.add(horizontalLines);
     }
     
     // Vertical lines
@@ -414,29 +440,17 @@ export class GridOverlay {
     }
     
     if (verticalVertices.length > 0) {
-      const verticalGeometry = new THREE.BufferGeometry();
-      verticalGeometry.setAttribute(
-        'position',
-        new THREE.Float32BufferAttribute(verticalVertices, 3)
-      );
-      verticalGeometry.setAttribute(
-        'distanceFromCenter',
-        new THREE.Float32BufferAttribute(verticalDistances, 1)
-      );
-      const verticalLines = new THREE.LineSegments(
-        verticalGeometry,
+      this.updateOrCreateGeometry(
+        'minorVertical',
+        verticalVertices,
+        verticalDistances,
+        this.minorLinesGroup,
         this.minorMaterial
       );
-      this.minorLinesGroup.add(verticalLines);
     }
   }
 
   updateAxisLine(worldY, radius) {
-    this.axisLinesGroup.traverse((child) => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-    });
     this.axisLinesGroup.clear();
 
     const localY = -worldY;
@@ -463,14 +477,13 @@ export class GridOverlay {
       return;
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute(
-      'distanceFromCenter',
-      new THREE.Float32BufferAttribute(distances, 1)
+    this.updateOrCreateGeometry(
+      'axis',
+      vertices,
+      distances,
+      this.axisLinesGroup,
+      this.axisMaterial
     );
-    const axisLine = new THREE.LineSegments(geometry, this.axisMaterial);
-    this.axisLinesGroup.add(axisLine);
   }
 
   updateCenterLine(radius) {
@@ -521,27 +534,71 @@ export class GridOverlay {
   }
 
   clearLines() {
-    // Dispose of existing geometries
-    this.majorLinesGroup.traverse((child) => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-    });
-    this.minorLinesGroup.traverse((child) => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-    });
-    this.axisLinesGroup.traverse((child) => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-    });
+    // Remove children from groups but keep geometries and line segments for reuse
+    // Only dispose if we're shutting down (handled in dispose())
+    // Note: We don't actually clear here since we're reusing line segments
+    // The updateOrCreateGeometry function will handle adding/updating
+  }
+  
+  /**
+   * Update or create a geometry with new vertex data
+   * Reuses existing geometry if available and size matches, otherwise creates new one
+   */
+  updateOrCreateGeometry(geometryKey, vertices, distances, group, material) {
+    let geometry = this.reusableGeometries[geometryKey];
+    const vertexCount = vertices.length / 3;
     
-    // Clear groups
-    this.majorLinesGroup.clear();
-    this.minorLinesGroup.clear();
-    this.axisLinesGroup.clear();
+    if (geometry && geometry.attributes.position.count === vertexCount) {
+      // Reuse existing geometry - just update the attributes
+      const positionAttr = geometry.attributes.position;
+      const distanceAttr = geometry.attributes.distanceFromCenter;
+      
+      // Update position attribute
+      if (positionAttr.array.length === vertices.length) {
+        positionAttr.array.set(vertices);
+        positionAttr.needsUpdate = true;
+      } else {
+        // Size changed, need to recreate attribute
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      }
+      
+      // Update distance attribute
+      if (distanceAttr.array.length === distances.length) {
+        distanceAttr.array.set(distances);
+        distanceAttr.needsUpdate = true;
+      } else {
+        // Size changed, need to recreate attribute
+        geometry.setAttribute('distanceFromCenter', new THREE.Float32BufferAttribute(distances, 1));
+      }
+    } else {
+      // Create new geometry (or replace if size changed)
+      if (geometry) {
+        geometry.dispose();
+      }
+      
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setAttribute('distanceFromCenter', new THREE.Float32BufferAttribute(distances, 1));
+      
+      this.reusableGeometries[geometryKey] = geometry;
+    }
+    
+    // Create or update line segments
+    let lineSegments = this.reusableLineSegments[geometryKey];
+    if (!lineSegments) {
+      lineSegments = new THREE.LineSegments(geometry, material);
+      group.add(lineSegments);
+      this.reusableLineSegments[geometryKey] = lineSegments;
+    } else {
+      // Update existing line segments with new geometry
+      lineSegments.geometry = geometry;
+      // Make sure it's in the group (in case it was removed)
+      if (!group.children.includes(lineSegments)) {
+        group.add(lineSegments);
+      }
+    }
+    
+    return lineSegments;
   }
 
   getPosition() {
@@ -549,6 +606,15 @@ export class GridOverlay {
   }
 
   dispose() {
+    // Dispose reusable geometries
+    Object.values(this.reusableGeometries).forEach(geometry => {
+      if (geometry) {
+        geometry.dispose();
+      }
+    });
+    this.reusableGeometries = {};
+    
+    // Clear groups (geometries already disposed above)
     this.clearLines();
     
     // Dispose materials
