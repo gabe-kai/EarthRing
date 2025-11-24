@@ -34,11 +34,14 @@
 - ✅ `TestDatabaseSchemaVerification` - All objects exist
 - ✅ `TestNormalizeForIntersectionFunction` - Function works
 
-### ✅ Client-Side Tests (4 tests)
+### ✅ Client-Side Tests (7 tests)
 - ✅ `GridOverlay adds itself to the scene` - Ensures `THREE.Group` scaffolding is created and registered
 - ✅ `GridOverlay toggles visibility` - Verifies UI toggle wiring via `setVisible`
 - ✅ `GridOverlay renders minor lines near the surface` - Confirms shader/LOD logic shows fine lines when the camera is close
 - ✅ `GridOverlay hides minor lines when above LOD threshold` - Validates minor-line suppression when zoomed out
+- ✅ `GridOverlay renders a bold centerline at Y=0` - Ensures the axis line persists as the global station spine
+- ✅ `GridOverlay keeps the centerline anchored when the camera shifts` - Validates world-relative axis placement
+- ✅ `GridOverlay thickens 20m multiples on X/Y axes` - Confirms medium-thickness stripes render at 20m intervals
 
 ### ❌ Missing Tests
 
@@ -101,7 +104,7 @@
 | Dezone multiple zones | ⏭️ | ❌ | **Skipped** |
 | Client geometry gen | ❌ | ❌ | **Missing** |
 | Wrap boundary edge cases | ⏭️ | ❌ | **Skipped** |
-| Grid overlay rendering/LOD | ❌ | ✅ | Partial |
+| Grid overlay rendering/LOD + axis/multiples | ❌ | ✅ | Partial |
 
 ## Priority Recommendations
 
@@ -177,7 +180,7 @@ client-web/src/zones/__tests__/
 
 ### Current Coverage
 - **Server-side**: ~96% (26/27 potential tests, 0 skipped) ✅
-- **Client-side**: 4 tests (grid overlay behavior)
+- **Client-side**: 7 tests (grid overlay centerline / LOD / 20m multiples)
 - **Integration**: 0% (no E2E tests)
 
 ### Target Coverage

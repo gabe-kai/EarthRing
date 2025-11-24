@@ -394,6 +394,7 @@ Manages chunk loading and unloading based on viewport.
 - 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
 - Sharpened rendering via dynamic `THREE.LineSegments` geometry (no textures, no blurring at zoom)
 - Shader-driven fade at the outer radius plus base opacity controls so zones stay fully visible
+- Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
 - Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
 - Visibility control via `setVisible()` method
 
@@ -525,6 +526,7 @@ gridOverlay.setVisible(false); // Hide grid
 6. **Grid Overlay Separation:**
    - Grid is rendered separately as a circular `THREE.LineSegments` group with shader fade/LOD
    - Geometry recenters around the camera target each frame so lines stay sharp regardless of zoom
+   - Bold Y=0 axis and 20m multiples are recomputed world-relative so they remain consistent even when the camera moves
    - Zones are NOT part of the grid overlay (they're separate meshes)
    - This allows zones to remain fully visible while the grid fades and thins based on distance
 

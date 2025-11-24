@@ -22,6 +22,11 @@ function createMockInterfaces({ cameraY = 5 } = {}) {
   return { scene, camera, sceneManager, cameraController };
 }
 
+const getPositionCounts = (group) =>
+  group.children.map((child) => child.geometry?.attributes?.position?.count ?? 0);
+
+const THICK_LINE_TOLERANCE = 1.5;
+
 describe('GridOverlay', () => {
   let overlay;
   let mocks;
@@ -61,6 +66,33 @@ describe('GridOverlay', () => {
     overlay.updateGridLines(0, 0);
 
     expect(overlay.minorLinesGroup.children.length).toBe(0);
+  });
+
+  it('always renders a bold centerline at Y=0 across the circumference', () => {
+    overlay.updateGridLines(0, 0);
+    expect(overlay.axisLinesGroup.children.length).toBe(1);
+    const centerLine = overlay.axisLinesGroup.children[0];
+    expect(centerLine.geometry.attributes.position.count).toBeGreaterThan(2);
+    const positions = centerLine.geometry.attributes.position.array;
+    for (let i = 2; i < positions.length; i += 3) {
+      expect(Math.abs(positions[i])).toBeLessThan(THICK_LINE_TOLERANCE);
+    }
+  });
+
+  it('keeps the centerline anchored to world Y=0 when the camera shifts sideways', () => {
+    overlay.updateGridLines(0, 40);
+    expect(overlay.axisLinesGroup.children.length).toBe(1);
+    const centerLine = overlay.axisLinesGroup.children[0];
+    const positions = centerLine.geometry.attributes.position.array;
+    for (let i = 2; i < positions.length; i += 3) {
+      expect(Math.abs(positions[i] + 40)).toBeLessThan(THICK_LINE_TOLERANCE);
+    }
+  });
+
+  it('thickens grid lines at multiples of 20 on both axes', () => {
+    overlay.updateGridLines(0, 0);
+    const majorCounts = getPositionCounts(overlay.majorLinesGroup);
+    expect(majorCounts.some((count) => count >= 6)).toBe(true);
   });
 });
 

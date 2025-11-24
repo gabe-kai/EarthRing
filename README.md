@@ -370,7 +370,7 @@ EarthRing/
 │   │   ├── network/                   # WebSocket client and network utilities
 │   │   ├── rendering/                 # Rendering engine
 │   │   │   ├── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
-│   │   │   └── grid-overlay.js         # Grid overlay (sharp LineSegments grid with shader fade + LOD)
+│   │   │   └── grid-overlay.js         # Grid overlay (LineSegments grid w/ shader fade, centerline, LOD)
 │   │   ├── input/                     # Input handling
 │   │   │   └── camera-controller.js   # Camera controller (OrbitControls integration)
 │   │   ├── state/                     # Game state management

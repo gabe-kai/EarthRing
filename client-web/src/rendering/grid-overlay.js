@@ -13,6 +13,53 @@ const DEFAULTS = {
 
 const MOD = (value, modulus) => ((value % modulus) + modulus) % modulus;
 
+const MULTIPLE_STEP = 20;
+const MULTIPLE_EPSILON = 0.05;
+const THICKNESS_STYLES = {
+  axis: { repeats: 7, spacing: 0.4 },
+  multiple: { repeats: 3, spacing: 0.25 },
+  default: { repeats: 1, spacing: 0 },
+};
+
+const isMultipleOf = (value, step, epsilon = MULTIPLE_EPSILON) => {
+  if (!isFinite(value) || step === 0) return false;
+  const remainder = ((value % step) + step) % step;
+  return remainder < epsilon || step - remainder < epsilon;
+};
+
+const getThicknessStyle = ({ isAxis = false, isMultiple = false } = {}) => {
+  if (isAxis) return THICKNESS_STYLES.axis;
+  if (isMultiple) return THICKNESS_STYLES.multiple;
+  return THICKNESS_STYLES.default;
+};
+
+const pushThickLineVertices = (
+  targetVertices,
+  targetDistances,
+  orientation,
+  start,
+  end,
+  basePos,
+  lineDistance,
+  style = THICKNESS_STYLES.default
+) => {
+  const repeats = style.repeats ?? 1;
+  const spacing = style.spacing ?? 0;
+  const half = (repeats - 1) / 2;
+
+  for (let i = 0; i < repeats; i++) {
+    const offset = repeats === 1 ? 0 : (i - half) * spacing;
+    if (orientation === 'horizontal') {
+      targetVertices.push(start, 0, basePos + offset);
+      targetVertices.push(end, 0, basePos + offset);
+    } else {
+      targetVertices.push(basePos + offset, 0, start);
+      targetVertices.push(basePos + offset, 0, end);
+    }
+    targetDistances.push(lineDistance, lineDistance);
+  }
+};
+
 export class GridOverlay {
   constructor(sceneManager, cameraController, options = {}) {
     this.sceneManager = sceneManager;
@@ -37,8 +84,12 @@ export class GridOverlay {
     this.minorLinesGroup = new THREE.Group();
     this.minorLinesGroup.name = 'MinorGridLines';
     
+    this.axisLinesGroup = new THREE.Group();
+    this.axisLinesGroup.name = 'AxisLines';
+    
     this.group.add(this.majorLinesGroup);
     this.group.add(this.minorLinesGroup);
+    this.group.add(this.axisLinesGroup);
     
     // Create shader material for smooth fade effect
     const createFadeMaterial = (baseColor, baseOpacity = 1.0) => {
@@ -90,6 +141,7 @@ export class GridOverlay {
     this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95);
     
     this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.5);
+    this.axisMaterial = createFadeMaterial(new THREE.Color(0xffffff), 1.0);
     
     this.visible = true;
   }
@@ -153,6 +205,8 @@ export class GridOverlay {
     if (showMinorLines) {
       this.generateMinorLines(worldX, worldY, radius);
     }
+
+    this.updateAxisLine(worldY, radius);
   }
 
   generateMajorLines(worldX, worldY, radius) {
@@ -174,13 +228,22 @@ export class GridOverlay {
       const yAbs = Math.abs(localY);
       if (yAbs <= radius) {
         const xOffset = Math.sqrt(radius * radius - localY * localY);
-        // Distance from center: for horizontal lines, use Y distance
         const distanceFromCenter = Math.abs(localY);
+        const worldCoordinate = worldY + localY;
+        const thicknessStyle = getThicknessStyle({
+          isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
+        });
         
-        horizontalVertices.push(-xOffset, 0, localY);
-        horizontalDistances.push(distanceFromCenter);
-        horizontalVertices.push(xOffset, 0, localY);
-        horizontalDistances.push(distanceFromCenter);
+        pushThickLineVertices(
+          horizontalVertices,
+          horizontalDistances,
+          'horizontal',
+          -xOffset,
+          xOffset,
+          localY,
+          distanceFromCenter,
+          thicknessStyle
+        );
       }
     }
     
@@ -216,13 +279,22 @@ export class GridOverlay {
       const xAbs = Math.abs(localX);
       if (xAbs <= radius) {
         const yOffset = Math.sqrt(radius * radius - localX * localX);
-        // Distance from center: for vertical lines, use X distance
         const distanceFromCenter = Math.abs(localX);
+        const worldCoordinate = worldX + localX;
+        const thicknessStyle = getThicknessStyle({
+          isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
+        });
         
-        verticalVertices.push(localX, 0, -yOffset);
-        verticalDistances.push(distanceFromCenter);
-        verticalVertices.push(localX, 0, yOffset);
-        verticalDistances.push(distanceFromCenter);
+        pushThickLineVertices(
+          verticalVertices,
+          verticalDistances,
+          'vertical',
+          -yOffset,
+          yOffset,
+          localX,
+          distanceFromCenter,
+          thicknessStyle
+        );
       }
     }
     
@@ -267,13 +339,22 @@ export class GridOverlay {
       const yAbs = Math.abs(localY);
       if (yAbs <= radius) {
         const xOffset = Math.sqrt(radius * radius - localY * localY);
-        // Distance from center: for horizontal lines, use Y distance
         const distanceFromCenter = Math.abs(localY);
+        const worldCoordinate = worldY + localY;
+        const thicknessStyle = getThicknessStyle({
+          isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
+        });
         
-        horizontalVertices.push(-xOffset, 0, localY);
-        horizontalDistances.push(distanceFromCenter);
-        horizontalVertices.push(xOffset, 0, localY);
-        horizontalDistances.push(distanceFromCenter);
+        pushThickLineVertices(
+          horizontalVertices,
+          horizontalDistances,
+          'horizontal',
+          -xOffset,
+          xOffset,
+          localY,
+          distanceFromCenter,
+          thicknessStyle
+        );
       }
     }
     
@@ -313,13 +394,22 @@ export class GridOverlay {
       const xAbs = Math.abs(localX);
       if (xAbs <= radius) {
         const yOffset = Math.sqrt(radius * radius - localX * localX);
-        // Distance from center: for vertical lines, use X distance
         const distanceFromCenter = Math.abs(localX);
+        const worldCoordinate = worldX + localX;
+        const thicknessStyle = getThicknessStyle({
+          isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
+        });
         
-        verticalVertices.push(localX, 0, -yOffset);
-        verticalDistances.push(distanceFromCenter);
-        verticalVertices.push(localX, 0, yOffset);
-        verticalDistances.push(distanceFromCenter);
+        pushThickLineVertices(
+          verticalVertices,
+          verticalDistances,
+          'vertical',
+          -yOffset,
+          yOffset,
+          localX,
+          distanceFromCenter,
+          thicknessStyle
+        );
       }
     }
     
@@ -339,6 +429,83 @@ export class GridOverlay {
       );
       this.minorLinesGroup.add(verticalLines);
     }
+  }
+
+  updateAxisLine(worldY, radius) {
+    this.axisLinesGroup.traverse((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+    });
+    this.axisLinesGroup.clear();
+
+    const localY = -worldY;
+    if (Math.abs(localY) > radius) {
+      return;
+    }
+
+    const xExtent = Math.sqrt(Math.max(radius * radius - localY * localY, 0));
+    const vertices = [];
+    const distances = [];
+
+    pushThickLineVertices(
+      vertices,
+      distances,
+      'horizontal',
+      -xExtent,
+      xExtent,
+      localY,
+      Math.abs(worldY),
+      THICKNESS_STYLES.axis
+    );
+
+    if (!vertices.length) {
+      return;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute(
+      'distanceFromCenter',
+      new THREE.Float32BufferAttribute(distances, 1)
+    );
+    const axisLine = new THREE.LineSegments(geometry, this.axisMaterial);
+    this.axisLinesGroup.add(axisLine);
+  }
+
+  updateCenterLine(radius) {
+    this.axisLinesGroup.traverse((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+    });
+    this.axisLinesGroup.clear();
+
+    const vertices = [];
+    const distances = [];
+    pushThickLineVertices(
+      vertices,
+      distances,
+      'horizontal',
+      -radius,
+      radius,
+      0,
+      0,
+      THICKNESS_STYLES.axis
+    );
+
+    if (!vertices.length) {
+      return;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute(
+      'distanceFromCenter',
+      new THREE.Float32BufferAttribute(distances, 1)
+    );
+    const axisLine = new THREE.LineSegments(geometry, this.axisMaterial);
+    this.axisLinesGroup.add(axisLine);
   }
 
   updateFade() {
@@ -365,10 +532,16 @@ export class GridOverlay {
         child.geometry.dispose();
       }
     });
+    this.axisLinesGroup.traverse((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+    });
     
     // Clear groups
     this.majorLinesGroup.clear();
     this.minorLinesGroup.clear();
+    this.axisLinesGroup.clear();
   }
 
   getPosition() {
@@ -382,6 +555,7 @@ export class GridOverlay {
     this.majorHorizontalMaterial.dispose();
     this.majorVerticalMaterial.dispose();
     this.minorMaterial.dispose();
+    this.axisMaterial.dispose();
     
     this.sceneManager.getScene().remove(this.group);
     this.group.clear();
