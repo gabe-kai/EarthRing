@@ -19,9 +19,9 @@ const MOD = (value, modulus) => ((value % modulus) + modulus) % modulus;
 const MULTIPLE_STEP = 20;
 const MULTIPLE_EPSILON = 0.05;
 const THICKNESS_STYLES = {
-  axis: { repeats: 5, spacing: 0.4 }, // Reduced from 7 to 5 for performance
-  multiple: { repeats: 2, spacing: 0.25 }, // Reduced from 3 to 2 for performance
-  default: { repeats: 1, spacing: 0 },
+  axis: { width: 0.8 }, // Line width in world units (meters)
+  multiple: { width: 0.3 }, // Line width in world units (meters)
+  default: { width: 0.1 }, // Thin line width
 };
 
 const isMultipleOf = (value, step, epsilon = MULTIPLE_EPSILON) => {
@@ -36,9 +36,15 @@ const getThicknessStyle = ({ isAxis = false, isMultiple = false } = {}) => {
   return THICKNESS_STYLES.default;
 };
 
+/**
+ * Generate quad vertices for a thick line segment
+ * Creates a rectangle/quad instead of a thin line for better visual thickness
+ */
 const pushThickLineVertices = (
   targetVertices,
   targetDistances,
+  targetIndices,
+  indexOffset,
   orientation,
   start,
   end,
@@ -46,21 +52,37 @@ const pushThickLineVertices = (
   lineDistance,
   style = THICKNESS_STYLES.default
 ) => {
-  const repeats = style.repeats ?? 1;
-  const spacing = style.spacing ?? 0;
-  const half = (repeats - 1) / 2;
-
-  for (let i = 0; i < repeats; i++) {
-    const offset = repeats === 1 ? 0 : (i - half) * spacing;
-    if (orientation === 'horizontal') {
-      targetVertices.push(start, 0, basePos + offset);
-      targetVertices.push(end, 0, basePos + offset);
-    } else {
-      targetVertices.push(basePos + offset, 0, start);
-      targetVertices.push(basePos + offset, 0, end);
-    }
-    targetDistances.push(lineDistance, lineDistance);
+  const lineWidth = style.width ?? 0.1;
+  const halfWidth = lineWidth / 2;
+  
+  let v0, v1, v2, v3; // Four corners of the quad
+  
+  if (orientation === 'horizontal') {
+    // Horizontal line: quad extends in Z direction (width)
+    v0 = [start, 0, basePos - halfWidth];  // Bottom-left
+    v1 = [end, 0, basePos - halfWidth];    // Bottom-right
+    v2 = [end, 0, basePos + halfWidth];    // Top-right
+    v3 = [start, 0, basePos + halfWidth];  // Top-left
+  } else {
+    // Vertical line: quad extends in X direction (width)
+    v0 = [basePos - halfWidth, 0, start];  // Bottom-left
+    v1 = [basePos + halfWidth, 0, start];  // Bottom-right
+    v2 = [basePos + halfWidth, 0, end];    // Top-right
+    v3 = [basePos - halfWidth, 0, end];    // Top-left
   }
+  
+  // Add vertices
+  const baseIndex = indexOffset;
+  targetVertices.push(...v0, ...v1, ...v2, ...v3);
+  targetDistances.push(lineDistance, lineDistance, lineDistance, lineDistance);
+  
+  // Add indices for two triangles forming the quad
+  // Triangle 1: v0, v1, v2
+  targetIndices.push(baseIndex, baseIndex + 1, baseIndex + 2);
+  // Triangle 2: v0, v2, v3
+  targetIndices.push(baseIndex, baseIndex + 2, baseIndex + 3);
+  
+  return 4; // Return number of vertices added
 };
 
 export class GridOverlay {
@@ -70,7 +92,8 @@ export class GridOverlay {
     this.settings = { ...DEFAULTS, ...options };
     this.lastUpdatePosition = { x: NaN, y: NaN };
     this.lastUpdateTime = 0; // For throttling
-    
+    this.lastFadeValues = { fadeRadius: null, maxRadius: null }; // Cache for conditional updates
+
     this.buildGridGroup();
     this.sceneManager.getScene().add(this.group);
     this.updatePosition(true);
@@ -95,7 +118,7 @@ export class GridOverlay {
     this.group.add(this.minorLinesGroup);
     this.group.add(this.axisLinesGroup);
     
-    // Track reusable geometries and line segments for performance
+    // Track reusable geometries and meshes for performance
     this.reusableGeometries = {
       majorHorizontal: null,
       majorVertical: null,
@@ -103,7 +126,7 @@ export class GridOverlay {
       minorVertical: null,
       axis: null,
     };
-    this.reusableLineSegments = {
+    this.reusableMeshes = {
       majorHorizontal: null,
       majorVertical: null,
       minorHorizontal: null,
@@ -152,6 +175,7 @@ export class GridOverlay {
         transparent: true,
         depthWrite: false,
         depthTest: false,
+        side: THREE.DoubleSide, // Render both sides of quads
       });
     };
     
@@ -161,7 +185,7 @@ export class GridOverlay {
     this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95);
     
     this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.5);
-    this.axisMaterial = createFadeMaterial(new THREE.Color(0xffffff), 1.0);
+    this.axisMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95); // Red to match horizontal lines
     
     this.visible = true;
   }
@@ -188,8 +212,6 @@ export class GridOverlay {
       this.cameraController.getCurrentFloor?.() ?? Math.round(anchorEarth.z);
     const floorHeight = currentFloor * DEFAULT_FLOOR_HEIGHT;
 
-    this.group.position.set(anchorThree.x, floorHeight, anchorThree.z);
-
     const worldX = anchorEarth.x;
     const worldY = anchorEarth.y;
     const updateThreshold = this.settings.updateThreshold;
@@ -205,6 +227,10 @@ export class GridOverlay {
     const throttleExpired = timeSinceLastUpdate >= this.settings.updateThrottleMs;
 
     if (forceUpdate || (movedEnough && throttleExpired)) {
+      // Only update grid group position when regenerating grid lines
+      // This keeps the grid stable in world space instead of following the camera
+      this.group.position.set(anchorThree.x, floorHeight, anchorThree.z);
+      
       this.lastUpdatePosition = { x: worldX, y: worldY };
       this.lastUpdateTime = now;
       this.updateGridLines(worldX, worldY);
@@ -247,12 +273,12 @@ export class GridOverlay {
   }
   
   /**
-   * Remove line segments from a group when they're not needed
+   * Remove mesh from a group when it's not needed
    */
   removeLineSegments(geometryKey, group) {
-    const lineSegments = this.reusableLineSegments[geometryKey];
-    if (lineSegments && group.children.includes(lineSegments)) {
-      group.remove(lineSegments);
+    const mesh = this.reusableMeshes[geometryKey];
+    if (mesh && group.children.includes(mesh)) {
+      group.remove(mesh);
     }
   }
 
@@ -263,6 +289,8 @@ export class GridOverlay {
     // Horizontal lines (red)
     const horizontalVertices = [];
     const horizontalDistances = [];
+    const horizontalIndices = [];
+    let horizontalIndexOffset = 0;
     const horizontalRemainder = MOD(worldY, spacing);
     
     for (let k = -steps; k <= steps; k++) {
@@ -281,9 +309,11 @@ export class GridOverlay {
           isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
         });
         
-        pushThickLineVertices(
+        const verticesAdded = pushThickLineVertices(
           horizontalVertices,
           horizontalDistances,
+          horizontalIndices,
+          horizontalIndexOffset,
           'horizontal',
           -xOffset,
           xOffset,
@@ -291,6 +321,7 @@ export class GridOverlay {
           distanceFromCenter,
           thicknessStyle
         );
+        horizontalIndexOffset += verticesAdded;
       }
     }
     
@@ -299,14 +330,20 @@ export class GridOverlay {
         'majorHorizontal',
         horizontalVertices,
         horizontalDistances,
+        horizontalIndices,
         this.majorLinesGroup,
         this.majorHorizontalMaterial
       );
+      if (typeof window !== 'undefined' && window.earthring?.debug) {
+        console.log(`[GridOverlay] Created majorHorizontal: ${horizontalVertices.length / 3} vertices, ${horizontalIndices.length / 3} triangles`);
+      }
     }
     
     // Vertical lines (blue)
     const verticalVertices = [];
     const verticalDistances = [];
+    const verticalIndices = [];
+    let verticalIndexOffset = 0;
     const verticalRemainder = MOD(worldX, spacing);
     
     for (let k = -steps; k <= steps; k++) {
@@ -325,9 +362,11 @@ export class GridOverlay {
           isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
         });
         
-        pushThickLineVertices(
+        const verticesAdded = pushThickLineVertices(
           verticalVertices,
           verticalDistances,
+          verticalIndices,
+          verticalIndexOffset,
           'vertical',
           -yOffset,
           yOffset,
@@ -335,6 +374,7 @@ export class GridOverlay {
           distanceFromCenter,
           thicknessStyle
         );
+        verticalIndexOffset += verticesAdded;
       }
     }
     
@@ -343,9 +383,13 @@ export class GridOverlay {
         'majorVertical',
         verticalVertices,
         verticalDistances,
+        verticalIndices,
         this.majorLinesGroup,
         this.majorVerticalMaterial
       );
+      if (typeof window !== 'undefined' && window.earthring?.debug) {
+        console.log(`[GridOverlay] Created majorVertical: ${verticalVertices.length / 3} vertices, ${verticalIndices.length / 3} triangles`);
+      }
     }
   }
 
@@ -356,6 +400,8 @@ export class GridOverlay {
     // Horizontal lines
     const horizontalVertices = [];
     const horizontalDistances = [];
+    const horizontalIndices = [];
+    let horizontalIndexOffset = 0;
     const horizontalRemainder = MOD(worldY, spacing);
     
     for (let k = -steps; k <= steps; k++) {
@@ -378,9 +424,11 @@ export class GridOverlay {
           isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
         });
         
-        pushThickLineVertices(
+        const verticesAdded = pushThickLineVertices(
           horizontalVertices,
           horizontalDistances,
+          horizontalIndices,
+          horizontalIndexOffset,
           'horizontal',
           -xOffset,
           xOffset,
@@ -388,6 +436,7 @@ export class GridOverlay {
           distanceFromCenter,
           thicknessStyle
         );
+        horizontalIndexOffset += verticesAdded;
       }
     }
     
@@ -396,6 +445,7 @@ export class GridOverlay {
         'minorHorizontal',
         horizontalVertices,
         horizontalDistances,
+        horizontalIndices,
         this.minorLinesGroup,
         this.minorMaterial
       );
@@ -404,14 +454,16 @@ export class GridOverlay {
     // Vertical lines
     const verticalVertices = [];
     const verticalDistances = [];
+    const verticalIndices = [];
+    let verticalIndexOffset = 0;
     const verticalRemainder = MOD(worldX, spacing);
-    
-    for (let k = -steps; k <= steps; k++) {
+
+      for (let k = -steps; k <= steps; k++) {
       const localX = k * spacing - verticalRemainder;
       // Skip if this is a major line
       if (Math.abs(MOD(localX, this.settings.majorSpacing)) < 0.01) {
-        continue;
-      }
+          continue;
+        }
       
       if (localX < -radius - spacing || localX > radius + spacing) {
         continue;
@@ -426,9 +478,11 @@ export class GridOverlay {
           isMultiple: isMultipleOf(worldCoordinate, MULTIPLE_STEP),
         });
         
-        pushThickLineVertices(
+        const verticesAdded = pushThickLineVertices(
           verticalVertices,
           verticalDistances,
+          verticalIndices,
+          verticalIndexOffset,
           'vertical',
           -yOffset,
           yOffset,
@@ -436,6 +490,7 @@ export class GridOverlay {
           distanceFromCenter,
           thicknessStyle
         );
+        verticalIndexOffset += verticesAdded;
       }
     }
     
@@ -444,6 +499,7 @@ export class GridOverlay {
         'minorVertical',
         verticalVertices,
         verticalDistances,
+        verticalIndices,
         this.minorLinesGroup,
         this.minorMaterial
       );
@@ -453,23 +509,33 @@ export class GridOverlay {
   updateAxisLine(worldY, radius) {
     this.axisLinesGroup.clear();
 
+    // The axis line is always at world Y=0
+    // Calculate local Y offset: worldCoordinate = worldY + localY, so for worldCoordinate = 0, localY = -worldY
     const localY = -worldY;
-    if (Math.abs(localY) > radius) {
+    
+    // Check if world Y=0 is within the visible radius
+    const yAbs = Math.abs(localY);
+    if (yAbs > radius) {
+      // World Y=0 is outside the visible grid area, don't render the axis line
       return;
     }
-
+    
     const xExtent = Math.sqrt(Math.max(radius * radius - localY * localY, 0));
     const vertices = [];
     const distances = [];
+    const indices = [];
+    const indexOffset = 0;
 
     pushThickLineVertices(
       vertices,
       distances,
+      indices,
+      indexOffset,
       'horizontal',
       -xExtent,
       xExtent,
       localY,
-      Math.abs(worldY),
+      yAbs, // Distance from center for fade calculation
       THICKNESS_STYLES.axis
     );
 
@@ -481,6 +547,7 @@ export class GridOverlay {
       'axis',
       vertices,
       distances,
+      indices,
       this.axisLinesGroup,
       this.axisMaterial
     );
@@ -496,9 +563,14 @@ export class GridOverlay {
 
     const vertices = [];
     const distances = [];
+    const indices = [];
+    const indexOffset = 0;
+    
     pushThickLineVertices(
       vertices,
       distances,
+      indices,
+      indexOffset,
       'horizontal',
       -radius,
       radius,
@@ -511,26 +583,37 @@ export class GridOverlay {
       return;
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute(
-      'distanceFromCenter',
-      new THREE.Float32BufferAttribute(distances, 1)
+    this.updateOrCreateGeometry(
+      'axis',
+      vertices,
+      distances,
+      indices,
+      this.axisLinesGroup,
+      this.axisMaterial
     );
-    const axisLine = new THREE.LineSegments(geometry, this.axisMaterial);
-    this.axisLinesGroup.add(axisLine);
   }
 
   updateFade() {
-    // Update shader uniforms for fade effect
+    // Update shader uniforms for fade effect (only if values changed)
     const fadeRadius = this.settings.radius * this.settings.fadeStart;
-    this.majorHorizontalMaterial.uniforms.fadeRadius.value = fadeRadius;
-    this.majorVerticalMaterial.uniforms.fadeRadius.value = fadeRadius;
-    this.minorMaterial.uniforms.fadeRadius.value = fadeRadius;
+    const maxRadius = this.settings.radius;
     
-    this.majorHorizontalMaterial.uniforms.maxRadius.value = this.settings.radius;
-    this.majorVerticalMaterial.uniforms.maxRadius.value = this.settings.radius;
-    this.minorMaterial.uniforms.maxRadius.value = this.settings.radius;
+    // Only update if values actually changed
+    if (
+      this.lastFadeValues.fadeRadius !== fadeRadius ||
+      this.lastFadeValues.maxRadius !== maxRadius
+    ) {
+      this.majorHorizontalMaterial.uniforms.fadeRadius.value = fadeRadius;
+      this.majorVerticalMaterial.uniforms.fadeRadius.value = fadeRadius;
+      this.minorMaterial.uniforms.fadeRadius.value = fadeRadius;
+      
+      this.majorHorizontalMaterial.uniforms.maxRadius.value = maxRadius;
+      this.majorVerticalMaterial.uniforms.maxRadius.value = maxRadius;
+      this.minorMaterial.uniforms.maxRadius.value = maxRadius;
+      
+      this.lastFadeValues.fadeRadius = fadeRadius;
+      this.lastFadeValues.maxRadius = maxRadius;
+    }
   }
 
   clearLines() {
@@ -543,15 +626,19 @@ export class GridOverlay {
   /**
    * Update or create a geometry with new vertex data
    * Reuses existing geometry if available and size matches, otherwise creates new one
+   * All grid lines use Mesh with quads and shader materials for optimal performance
    */
-  updateOrCreateGeometry(geometryKey, vertices, distances, group, material) {
+  updateOrCreateGeometry(geometryKey, vertices, distances, indices, group, material) {
     let geometry = this.reusableGeometries[geometryKey];
     const vertexCount = vertices.length / 3;
+    const indexCount = indices.length;
     
-    if (geometry && geometry.attributes.position.count === vertexCount) {
+    if (geometry && geometry.attributes.position.count === vertexCount && 
+        geometry.index && geometry.index.count === indexCount) {
       // Reuse existing geometry - just update the attributes
       const positionAttr = geometry.attributes.position;
       const distanceAttr = geometry.attributes.distanceFromCenter;
+      const indexAttr = geometry.index;
       
       // Update position attribute
       if (positionAttr.array.length === vertices.length) {
@@ -570,6 +657,18 @@ export class GridOverlay {
         // Size changed, need to recreate attribute
         geometry.setAttribute('distanceFromCenter', new THREE.Float32BufferAttribute(distances, 1));
       }
+      
+      // Update index attribute
+      if (indexAttr.array.length === indices.length) {
+        indexAttr.array.set(indices);
+        indexAttr.needsUpdate = true;
+      } else {
+        // Size changed, need to recreate index
+        geometry.setIndex(indices);
+      }
+      
+      // Recompute normals when geometry is updated
+      geometry.computeVertexNormals();
     } else {
       // Create new geometry (or replace if size changed)
       if (geometry) {
@@ -579,26 +678,30 @@ export class GridOverlay {
       geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       geometry.setAttribute('distanceFromCenter', new THREE.Float32BufferAttribute(distances, 1));
+      geometry.setIndex(indices);
+      
+      // Compute normals for proper quad rendering
+      geometry.computeVertexNormals();
       
       this.reusableGeometries[geometryKey] = geometry;
     }
     
-    // Create or update line segments
-    let lineSegments = this.reusableLineSegments[geometryKey];
-    if (!lineSegments) {
-      lineSegments = new THREE.LineSegments(geometry, material);
-      group.add(lineSegments);
-      this.reusableLineSegments[geometryKey] = lineSegments;
+    // Create or update mesh (all grid lines use Mesh with quads)
+    let mesh = this.reusableMeshes[geometryKey];
+    if (!mesh) {
+      mesh = new THREE.Mesh(geometry, material);
+      group.add(mesh);
+      this.reusableMeshes[geometryKey] = mesh;
     } else {
-      // Update existing line segments with new geometry
-      lineSegments.geometry = geometry;
+      // Update existing mesh with new geometry
+      mesh.geometry = geometry;
       // Make sure it's in the group (in case it was removed)
-      if (!group.children.includes(lineSegments)) {
-        group.add(lineSegments);
+      if (!group.children.includes(mesh)) {
+        group.add(mesh);
       }
     }
     
-    return lineSegments;
+    return mesh;
   }
 
   getPosition() {
