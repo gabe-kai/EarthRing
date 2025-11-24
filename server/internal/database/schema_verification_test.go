@@ -21,7 +21,7 @@ func TestDatabaseSchemaVerification(t *testing.T) {
 
 	t.Run("RequiredFunctions", func(t *testing.T) {
 		requiredFunctions := []string{
-			"normalize_for_intersection",      // Migration 000016 - overlap detection
+			"normalize_for_intersection",       // Migration 000016 - overlap detection
 			"normalize_zone_geometry_for_area", // Migration 000015 - area calculation
 			"update_chunk_versions",            // Migration 000014 - bulk chunk updates
 			"update_zone_timestamp",            // Migration 000013 - zone update trigger
@@ -180,7 +180,7 @@ func TestDatabaseSchemaVerification(t *testing.T) {
 func TestNormalizeForIntersectionFunction(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	defer testutil.CloseDB(t, db)
-	
+
 	// Create the function for this test
 	createNormalizeForIntersectionFunction(t, db)
 
@@ -199,7 +199,7 @@ func TestNormalizeForIntersectionFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to check if normalize_for_intersection exists: %v", err)
 	}
-	
+
 	if !exists {
 		t.Fatal("❌ normalize_for_intersection function does not exist. This function is CRITICAL for wrapped zone overlap detection.")
 	}
@@ -332,4 +332,3 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 		t.Fatalf("failed to create normalize_for_intersection function: %v", err)
 	}
 }
-

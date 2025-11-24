@@ -893,8 +893,8 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 			case "23505": // unique_violation on pg_class_relname_nsp_index
 				t.Logf("Note: chunks table already exists (race condition)")
 			default:
-		t.Fatalf("Failed to create chunks table: %v", err)
-	}
+				t.Fatalf("Failed to create chunks table: %v", err)
+			}
 		} else {
 			t.Fatalf("Failed to create chunks table: %v", err)
 		}
@@ -922,7 +922,7 @@ func setupChunkTables(t *testing.T, db *sql.DB) {
 			case "23505": // unique_violation on pg_class_relname_nsp_index
 				t.Logf("Note: chunk_data table already exists (race condition)")
 			default:
-		t.Fatalf("Failed to create chunk_data table: %v", err)
+				t.Fatalf("Failed to create chunk_data table: %v", err)
 			}
 		} else {
 			t.Fatalf("Failed to create chunk_data table: %v", err)

@@ -31,7 +31,7 @@ func wrapGeoJSONCoordinates(geom json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(geom, &geomData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal geometry: %w", err)
 	}
-	
+
 	// Recursively wrap coordinates
 	var wrapCoords func(interface{}) interface{}
 	wrapCoords = func(v interface{}) interface{} {
@@ -56,18 +56,18 @@ func wrapGeoJSONCoordinates(geom json.RawMessage) (json.RawMessage, error) {
 			return val
 		}
 	}
-	
+
 	// Wrap coordinates in the geometry
-	if coords, ok := geomData["coordinates"].(interface{}); ok {
+	if coords, ok := geomData["coordinates"]; ok {
 		geomData["coordinates"] = wrapCoords(coords)
 	}
-	
+
 	// Marshal back to JSON
 	wrappedJSON, err := json.Marshal(geomData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal wrapped geometry: %w", err)
 	}
-	
+
 	return json.RawMessage(wrappedJSON), nil
 }
 
@@ -202,7 +202,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	// Log overlap detection for debugging
 	log.Printf("[ZoneMerge] Checking overlaps: type=%s, floor=%d, owner=%v, is_system=%v, geometry_length=%d",
 		input.ZoneType, input.Floor, input.OwnerID, input.IsSystemZone, len(geometryString))
-	
+
 	// First, check how many zones exist with matching criteria (before intersection check)
 	countQuery := `
 		SELECT COUNT(*)
@@ -276,7 +276,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	if len(directlyOverlappingIDs) > 0 {
 		overlappingIDs = make([]int64, 0, len(directlyOverlappingIDs)*2) // Pre-allocate with some headroom
 		overlappingIDs = append(overlappingIDs, directlyOverlappingIDs...)
-		
+
 		// Keep expanding the set until no new overlapping zones are found
 		// This finds the transitive closure: if A overlaps B and B overlaps C, we find C
 		for {
@@ -337,12 +337,16 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				  AND aligned_other IS NOT NULL
 				  AND ST_Intersects(aligned_current, aligned_other)
 			`
-			
+
 			var newOverlappingIDs []int64
-			expandRows, err := s.db.Query(expandQuery, 
+			expandRows, err := s.db.Query(expandQuery,
 				pq.Array(overlappingIDs), input.Floor, input.ZoneType, owner, input.IsSystemZone)
 			if err == nil {
-				defer expandRows.Close()
+				defer func() {
+					if closeErr := expandRows.Close(); closeErr != nil {
+						log.Printf("Error closing expandRows: %v", closeErr)
+					}
+				}()
 				for expandRows.Next() {
 					var id int64
 					if err := expandRows.Scan(&id); err == nil {
@@ -364,17 +368,17 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				log.Printf("[ZoneMerge] WARNING: Failed to expand overlap set: %v", err)
 				break
 			}
-			
+
 			if !expanded {
 				break
 			}
-			
+
 			// Add newly found overlapping zones to the set
 			overlappingIDs = append(overlappingIDs, newOverlappingIDs...)
 		}
-		
+
 		if len(overlappingIDs) > len(directlyOverlappingIDs) {
-			log.Printf("[ZoneMerge] Expanded overlap set: directly overlapping=%v, full connected set=%v", 
+			log.Printf("[ZoneMerge] Expanded overlap set: directly overlapping=%v, full connected set=%v",
 				directlyOverlappingIDs, overlappingIDs)
 		}
 	}
@@ -390,7 +394,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			log.Printf("[ZoneMerge] DEBUG:   1. Zones don't actually overlap (only touch at edges)")
 			log.Printf("[ZoneMerge] DEBUG:   2. normalize_for_intersection returned NULL for some geometries")
 			log.Printf("[ZoneMerge] DEBUG:   3. ST_Intersects is not detecting the overlap correctly")
-			
+
 			// Try to get one existing zone and test intersection manually with detailed alignment debugging
 			testQuery := `
 				SELECT id, 
@@ -461,15 +465,15 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					var newMinX, newMaxX, newMinY, newMaxY sql.NullFloat64
 					var refX sql.NullFloat64
 					if err := s.db.QueryRow(intersectTestQuery, geometryString, testID).Scan(
-						&intersects, 
+						&intersects,
 						&existingMinX, &existingMaxX, &existingMinY, &existingMaxY,
 						&newMinX, &newMaxX, &newMinY, &newMaxY,
 						&refX); err == nil {
 						log.Printf("[ZoneMerge] DEBUG: Manual intersection test with zone %d:", testID)
 						log.Printf("[ZoneMerge] DEBUG:   Reference X (global_min_x): %v", refX)
-						log.Printf("[ZoneMerge] DEBUG:   Existing aligned: X=[%v, %v], Y=[%v, %v]", 
+						log.Printf("[ZoneMerge] DEBUG:   Existing aligned: X=[%v, %v], Y=[%v, %v]",
 							existingMinX, existingMaxX, existingMinY, existingMaxY)
-						log.Printf("[ZoneMerge] DEBUG:   New aligned: X=[%v, %v], Y=[%v, %v]", 
+						log.Printf("[ZoneMerge] DEBUG:   New aligned: X=[%v, %v], Y=[%v, %v]",
 							newMinX, newMaxX, newMinY, newMaxY)
 						log.Printf("[ZoneMerge] DEBUG:   Intersects: %v", intersects)
 						if !intersects {
@@ -509,25 +513,25 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			ORDER BY id ASC, created_at ASC
 			LIMIT 1
 		`
-		
+
 		deletePlaceholders := make([]string, len(overlappingIDs))
 		deleteArgs := make([]interface{}, len(overlappingIDs))
 		for i, id := range overlappingIDs {
 			deletePlaceholders[i] = fmt.Sprintf("$%d", i+1)
 			deleteArgs[i] = id
 		}
-		
+
 		var oldestZoneID int64
 		var oldestZoneCreatedAt time.Time
 		oldestZoneQueryFormatted := fmt.Sprintf(oldestZoneQuery, strings.Join(deletePlaceholders, ","))
 		if err := s.db.QueryRow(oldestZoneQueryFormatted, deleteArgs...).Scan(&oldestZoneID, &oldestZoneCreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to find oldest overlapping zone: %w", err)
 		}
-		
+
 		log.Printf("[ZoneMerge] Oldest zone ID to keep: %d (created: %v)", oldestZoneID, oldestZoneCreatedAt)
 		log.Printf("[ZoneMerge] Will merge ALL %d overlapping zones together (including oldest zone %d)", len(overlappingIDs), oldestZoneID)
 		if len(overlappingIDs) > 1 {
-			log.Printf("[ZoneMerge] NOTE: Merging %d zones into one. Zones %v will be deleted, zone %d will contain the merged geometry.", 
+			log.Printf("[ZoneMerge] NOTE: Merging %d zones into one. Zones %v will be deleted, zone %d will contain the merged geometry.",
 				len(overlappingIDs), func() []int64 {
 					toDelete := make([]int64, 0, len(overlappingIDs)-1)
 					for _, id := range overlappingIDs {
@@ -538,7 +542,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					return toDelete
 				}(), oldestZoneID)
 		}
-		
+
 		// Build placeholders for union query
 		// We need to include all overlapping zone IDs in the union, plus the new geometry
 		// CRITICAL: ALL overlapping zones are included in the union, not just one!
@@ -555,12 +559,16 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("Error rolling back transaction: %v", rollbackErr)
+			}
+		}()
 
 		// Build query to merge new geometry with all overlapping zones using ST_Union
-		// 
+		//
 		// WRAPPING APPROACH - Per-geometry normalization with hole detection
-		// 
+		//
 		// CRITICAL: normalize_zone_geometry_for_area does NOT handle polygons with holes!
 		// The unionQuery uses normalize_for_intersection which properly handles
 		// polygons with holes by processing each ring (outer and inner) separately.
@@ -747,14 +755,14 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		// Log input geometries for debugging
 		log.Printf("[ZoneMerge] Merging %d geometries (new + %d existing)", 1, len(overlappingIDs))
 		log.Printf("[ZoneMerge] Zones being merged: new zone (not yet in DB) + existing zones %v", overlappingIDs)
-		log.Printf("[ZoneMerge] New geometry (first 200 chars): %s", 
+		log.Printf("[ZoneMerge] New geometry (first 200 chars): %s",
 			func() string {
 				if len(geometryString) > 200 {
 					return geometryString[:200] + "..."
 				}
 				return geometryString
 			}())
-		
+
 		// Log existing zone geometries
 		for i, id := range overlappingIDs {
 			var existingGeom sql.NullString
@@ -879,7 +887,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				FROM unioned
 			`, strings.Join(unionPlaceholders, ","))
 			if debugErr := tx.QueryRow(debugQuery, unionArgs...).Scan(&debugGeomType, &debugIsValid, &debugMinX, &debugMaxX); debugErr == nil {
-				log.Printf("[ZoneMerge] Debug: union result - type: %v, valid: %v, X range: [%.2f, %.2f]", 
+				log.Printf("[ZoneMerge] Debug: union result - type: %v, valid: %v, X range: [%.2f, %.2f]",
 					debugGeomType.String, debugIsValid.Bool, debugMinX.Float64, debugMaxX.Float64)
 			} else {
 				log.Printf("[ZoneMerge] Debug query failed: %v", debugErr)
@@ -889,7 +897,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		if !mergedGeometryJSON.Valid {
 			return nil, fmt.Errorf("merged geometry is null")
 		}
-		
+
 		// Log the merged geometry type and area for debugging
 		// Also check if union resulted in MultiPolygon and log component count
 		var mergedGeomType sql.NullString
@@ -914,17 +922,17 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		} else {
 			log.Printf("[ZoneMerge] Warning: Merged geometry type check returned NULL")
 		}
-		
-		log.Printf("[ZoneMerge] Successfully merged %d zones into new geometry (result length: %d, type: %s)", 
+
+		log.Printf("[ZoneMerge] Successfully merged %d zones into new geometry (result length: %d, type: %s)",
 			len(overlappingIDs)+1, len(mergedGeometryJSON.String), func() string {
 				if mergedGeomType.Valid {
 					return mergedGeomType.String
 				}
 				return "unknown"
 			}())
-		log.Printf("[ZoneMerge] Merged result includes: new zone + existing zones %v (all %d zones)", 
+		log.Printf("[ZoneMerge] Merged result includes: new zone + existing zones %v (all %d zones)",
 			overlappingIDs, len(overlappingIDs)+1)
-		
+
 		// Check if any geometry wraps around (spans > half ring) - this causes union issues
 		const RING_CIRCUMFERENCE = 264000000.0
 		const HALF_RING = 132000000.0
@@ -936,20 +944,20 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		`
 		spanCheckErr := tx.QueryRow(fmt.Sprintf(spanCheckQuery, strings.Join(unionPlaceholders, ",")), unionArgs...).Scan(&newGeomSpan, &existingGeomSpan)
 		if spanCheckErr == nil {
-			log.Printf("[ZoneMerge] Geometry spans: new=%.2f, existing=%.2f (ring=%.2f, half_ring=%.2f)", 
+			log.Printf("[ZoneMerge] Geometry spans: new=%.2f, existing=%.2f (ring=%.2f, half_ring=%.2f)",
 				newGeomSpan, existingGeomSpan, RING_CIRCUMFERENCE, HALF_RING)
 			if newGeomSpan > HALF_RING || existingGeomSpan > HALF_RING {
 				log.Printf("[ZoneMerge] WARNING: One or more geometries wrap around X-axis - PostGIS union may produce incorrect results")
 			}
 		}
-		
+
 		// Log merged geometry preview
 		mergedPreview := mergedGeometryJSON.String
 		if len(mergedPreview) > 300 {
 			mergedPreview = mergedPreview[:300] + "..."
 		}
 		log.Printf("[ZoneMerge] Merged geometry (first 300 chars): %s", mergedPreview)
-		
+
 		// Log area comparison
 		var newArea, mergedArea float64
 		if err := tx.QueryRow(`SELECT ST_Area(normalize_zone_geometry_for_area(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)))`, geometryString).Scan(&newArea); err == nil {
@@ -961,9 +969,15 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 					areaPlaceholders[i] = fmt.Sprintf("$%d", i+1)
 				}
 				areaQuery := fmt.Sprintf(`SELECT ST_Area(normalize_zone_geometry_for_area(geometry)) FROM zones WHERE id IN (%s)`, strings.Join(areaPlaceholders, ","))
-				areaRows, _ := tx.Query(areaQuery, unionIDs...)
-				if areaRows != nil {
-					defer areaRows.Close()
+				areaRows, err := tx.Query(areaQuery, unionIDs...)
+				if err != nil {
+					log.Printf("Error querying area: %v", err)
+				} else if areaRows != nil {
+					defer func() {
+						if closeErr := areaRows.Close(); closeErr != nil {
+							log.Printf("Error closing areaRows: %v", closeErr)
+						}
+					}()
 					for areaRows.Next() {
 						var area float64
 						if areaRows.Scan(&area) == nil {
@@ -975,7 +989,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				for _, area := range existingAreas {
 					sumExisting += area
 				}
-				log.Printf("[ZoneMerge] Area comparison: new=%.2f, existing sum=%.2f, merged=%.2f (merged should be >= max of new/existing, less than sum if they overlap)", 
+				log.Printf("[ZoneMerge] Area comparison: new=%.2f, existing sum=%.2f, merged=%.2f (merged should be >= max of new/existing, less than sum if they overlap)",
 					newArea, sumExisting, mergedArea)
 			}
 		}
@@ -987,7 +1001,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 				zonesToDelete = append(zonesToDelete, id)
 			}
 		}
-		
+
 		if len(zonesToDelete) > 0 {
 			deletePlaceholdersForDelete := make([]string, len(zonesToDelete))
 			deleteArgsForDelete := make([]interface{}, len(zonesToDelete))
@@ -1024,7 +1038,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to update merged zone: %w", err)
 		}
-		
+
 		log.Printf("[ZoneMerge] Updated zone %d with merged geometry (area: %f)", zone.ID, zone.Area)
 
 		// Commit transaction
@@ -1040,7 +1054,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	var geomDebug map[string]interface{}
 	if err := json.Unmarshal([]byte(geometryString), &geomDebug); err == nil {
 		if coords, ok := geomDebug["coordinates"].([]interface{}); ok {
-			log.Printf("[ZoneCreate] Geometry structure: type=%s, ring_count=%d", 
+			log.Printf("[ZoneCreate] Geometry structure: type=%s, ring_count=%d",
 				geomDebug["type"], len(coords))
 			for i, ring := range coords {
 				if ringArray, ok := ring.([]interface{}); ok {
@@ -1049,7 +1063,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			}
 		}
 	}
-	
+
 	query := `
 		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
 		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
@@ -1077,7 +1091,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 // and subtracts the dezone from each of them. This is an "anti-merge" operation.
 func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry json.RawMessage, userID int64) ([]*Zone, error) {
 	dezoneGeometryString := string(dezoneGeometry)
-	
+
 	// Find all zones on the same floor that overlap with the dezone geometry
 	// Unlike normal zone merging, dezone subtracts from ANY zone type it overlaps
 	overlapQuery := `
@@ -1123,13 +1137,17 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 		  AND aligned_dezone IS NOT NULL
 		  AND ST_Intersects(aligned_existing, aligned_dezone)
 	`
-	
+
 	rows, err := s.db.Query(overlapQuery, floor, dezoneGeometryString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find overlapping zones: %w", err)
 	}
-	defer rows.Close()
-	
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Error closing rows: %v", closeErr)
+		}
+	}()
+
 	var overlappingZoneIDs []int64
 	for rows.Next() {
 		var id int64
@@ -1141,14 +1159,14 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate overlapping zones: %w", err)
 	}
-	
+
 	if len(overlappingZoneIDs) == 0 {
 		log.Printf("[Dezone] No overlapping zones found - nothing to subtract")
 		return []*Zone{}, nil
 	}
-	
+
 	log.Printf("[Dezone] Found %d overlapping zones to subtract from: %v", len(overlappingZoneIDs), overlappingZoneIDs)
-	
+
 	// Subtract dezone from each overlapping zone
 	var updatedZones []*Zone
 	for _, zoneID := range overlappingZoneIDs {
@@ -1162,13 +1180,13 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 			log.Printf("[Dezone] WARNING: Zone %d not found", zoneID)
 			continue
 		}
-		
+
 		// Check ownership - user must own the zone to modify it
 		if zone.OwnerID == nil || *zone.OwnerID != userID {
 			log.Printf("[Dezone] WARNING: Permission denied - user %d does not own zone %d", userID, zoneID)
 			continue
 		}
-		
+
 		// Subtract dezone from this zone
 		log.Printf("[Dezone] Attempting to subtract dezone from zone %d", zoneID)
 		resultZones, err := s.subtractDezoneFromZone(zoneID, dezoneGeometry)
@@ -1178,10 +1196,10 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 			continue
 		}
 		log.Printf("[Dezone] Successfully subtracted dezone from zone %d (resulted in %d zones)", zoneID, len(resultZones))
-		
+
 		updatedZones = append(updatedZones, resultZones...)
 	}
-	
+
 	log.Printf("[Dezone] Successfully subtracted dezone from %d zones", len(updatedZones))
 	return updatedZones, nil
 }
@@ -1192,7 +1210,7 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 // Note: Ownership is already verified by the caller (SubtractDezoneFromAllOverlapping).
 func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry json.RawMessage) ([]*Zone, error) {
 	dezoneGeometryString := string(dezoneGeometry)
-	
+
 	// Get the original zone to copy its properties for new zones
 	originalZone, err := s.GetZoneByID(targetZoneID)
 	if err != nil {
@@ -1201,7 +1219,7 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 	if originalZone == nil {
 		return nil, fmt.Errorf("zone %d not found", targetZoneID)
 	}
-	
+
 	// Use ST_Difference to subtract the dezone from the target zone
 	// This handles wrap-point normalization similar to the union query
 	// Returns all polygons if the zone is split (MultiPolygon result)
@@ -1353,15 +1371,19 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 		-- Return all polygons (may be multiple rows if zone was split)
 		SELECT geom_json FROM valid_polygons
 	`
-	
+
 	// Query may return multiple rows if the zone was split into multiple components
 	rows, err := s.db.Query(differenceQuery, targetZoneID, dezoneGeometryString)
 	if err != nil {
 		log.Printf("[Dezone] Subtraction query failed for zone %d: %v", targetZoneID, err)
 		return nil, fmt.Errorf("failed to subtract dezone: %w", err)
 	}
-	defer rows.Close()
-	
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Error closing rows: %v", closeErr)
+		}
+	}()
+
 	// Collect all resulting geometries
 	var resultGeometries []json.RawMessage
 	for rows.Next() {
@@ -1375,36 +1397,36 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 		}
 		resultGeometries = append(resultGeometries, json.RawMessage(geomJSON.String))
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating geometry results: %w", err)
 	}
-	
+
 	if len(resultGeometries) == 0 {
 		log.Printf("[Dezone] Subtraction returned no valid geometries for zone %d - zone may be completely removed", targetZoneID)
 		return nil, fmt.Errorf("dezone subtraction resulted in empty or invalid geometry (zone may be completely removed)")
 	}
-	
+
 	log.Printf("[Dezone] Zone %d split into %d components", targetZoneID, len(resultGeometries))
-	
+
 	// Update the original zone with the first (largest) component
 	// Wrap coordinates to ensure they're within [0, 264000000) range
 	wrappedFirstGeometry, err := wrapGeoJSONCoordinates(resultGeometries[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to wrap coordinates for updated zone: %w", err)
 	}
-	
+
 	updateInput := ZoneUpdateInput{
 		Geometry: &wrappedFirstGeometry,
 	}
-	
+
 	updatedZone, err := s.UpdateZone(targetZoneID, updateInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update zone after dezone subtraction: %w", err)
 	}
-	
+
 	resultZones := []*Zone{updatedZone}
-	
+
 	// Create new zones for any additional components (zone was split)
 	for i := 1; i < len(resultGeometries); i++ {
 		// Wrap coordinates to ensure they're within [0, 264000000) range
@@ -1413,7 +1435,7 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			log.Printf("[Dezone] WARNING: Failed to wrap coordinates for split component %d: %v", i, err)
 			continue
 		}
-		
+
 		newZoneInput := &ZoneCreateInput{
 			Name:         fmt.Sprintf("%s (Split %d)", originalZone.Name, i),
 			ZoneType:     originalZone.ZoneType,
@@ -1424,17 +1446,17 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			Properties:   originalZone.Properties,
 			Metadata:     originalZone.Metadata,
 		}
-		
+
 		newZone, err := s.CreateZone(newZoneInput)
 		if err != nil {
 			log.Printf("[Dezone] WARNING: Failed to create new zone for split component %d: %v", i, err)
 			continue
 		}
-		
+
 		log.Printf("[Dezone] Created new zone %d for split component %d", newZone.ID, i)
 		resultZones = append(resultZones, newZone)
 	}
-	
+
 	return resultZones, nil
 }
 
@@ -1597,12 +1619,12 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 			// If query fails, just proceed with truncate
 			count = 0
 		}
-		
+
 		_, err = s.db.Exec(`TRUNCATE zones RESTART IDENTITY CASCADE`)
 		if err != nil {
 			return 0, fmt.Errorf("failed to truncate all zones: %w", err)
 		}
-		
+
 		return count, nil
 	} else {
 		// Preserve Related Records: DELETE with manual cleanup
@@ -1611,7 +1633,7 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("failed to clear npc zone references: %w", err)
 		}
-		
+
 		// Then delete all zones (structures and roads will have zone_id set to NULL automatically due to ON DELETE SET NULL)
 		result, err := s.db.Exec(`DELETE FROM zones`)
 		if err != nil {
@@ -1621,14 +1643,14 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("failed to get rows affected: %w", err)
 		}
-		
+
 		// Reset sequence numbering
 		_, err = s.db.Exec(`ALTER SEQUENCE zones_id_seq RESTART WITH 1`)
 		if err != nil {
 			// Log but don't fail - sequence reset is nice to have but not critical
 			log.Printf("Warning: Failed to reset zones sequence: %v", err)
 		}
-		
+
 		return rowsAffected, nil
 	}
 }

@@ -100,7 +100,7 @@ func (h *ZoneHandlers) CreateZone(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		
+
 		// Return the list of updated zones
 		responses := make([]zoneResponse, len(updatedZones))
 		for i, zone := range updatedZones {

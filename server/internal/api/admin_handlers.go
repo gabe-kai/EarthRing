@@ -12,10 +12,10 @@ import (
 
 // AdminHandlers handles admin operations
 type AdminHandlers struct {
-	db      *sql.DB
-	cfg     *config.Config
-	zones   *database.ZoneStorage
-	chunks  *database.ChunkStorage
+	db     *sql.DB
+	cfg    *config.Config
+	zones  *database.ZoneStorage
+	chunks *database.ChunkStorage
 }
 
 // NewAdminHandlers creates a new AdminHandlers instance
@@ -125,4 +125,3 @@ func (h *AdminHandlers) ResetAllChunks(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to encode reset chunks response: %v", err)
 	}
 }
-

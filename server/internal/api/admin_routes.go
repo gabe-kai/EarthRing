@@ -43,4 +43,3 @@ func SetupAdminRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/api/admin/", rateLimited)
 	mux.Handle("/api/admin", rateLimited)
 }
-

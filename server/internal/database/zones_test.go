@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/earthring/server/internal/testutil"
@@ -234,7 +233,7 @@ func TestZoneStorage_AreaCalculation_NormalizationFunction(t *testing.T) {
 	truncateZonesTable(t, db)
 
 	storage := NewZoneStorage(db)
-	
+
 	// Test 1: Verify the normalization function exists and is called
 	// Normal zone (doesn't wrap) - should calculate area correctly
 	// 30m x 30m square = 900 m²
@@ -248,20 +247,20 @@ func TestZoneStorage_AreaCalculation_NormalizationFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
 	}
-	
+
 	// Expected area: 30 * 30 = 900 m²
 	// Allow 10% tolerance for floating point precision
 	expectedArea := 900.0
 	if normalZone.Area < expectedArea*0.9 || normalZone.Area > expectedArea*1.1 {
 		t.Errorf("Normal zone area: expected ~%.0f m², got %.2f m²", expectedArea, normalZone.Area)
 	}
-	
+
 	// Test 2: Verify normalization function exists by checking it doesn't error
 	// Note: Full wrap-around testing requires manual verification because:
 	// - Coordinates must be in range [0, 264000000) to pass validation
 	// - Creating geometries that truly wrap requires special handling in the client
 	// - The normalization function is applied automatically via ST_Area(normalize_zone_geometry_for_area(...))
-	
+
 	// Test with a zone near the boundary to verify function works
 	boundaryGeometry := json.RawMessage(`{"type":"Polygon","coordinates":[[[263999900,0],[263999950,0],[263999950,50],[263999900,50],[263999900,0]]]}`)
 	boundaryZone, err := storage.CreateZone(&ZoneCreateInput{
@@ -273,12 +272,12 @@ func TestZoneStorage_AreaCalculation_NormalizationFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateZone failed for boundary zone: %v", err)
 	}
-	
+
 	// Should calculate area correctly (2500 m² for 50x50)
 	if boundaryZone.Area <= 0 {
 		t.Errorf("Boundary zone area should be positive, got %.2f m²", boundaryZone.Area)
 	}
-	
+
 	t.Logf("Normal zone area: %.2f m²", normalZone.Area)
 	t.Logf("Boundary zone area: %.2f m²", boundaryZone.Area)
 	t.Logf("✓ Normalization function exists and is being called correctly")
@@ -318,11 +317,11 @@ func TestZoneStorage_AreaCalculation_WrappingZone(t *testing.T) {
 	maxReasonableArea := 600.0
 
 	if zone.Area < minReasonableArea {
-		t.Errorf("Wrapping zone area too small: got %.2f m² (expected > %.0f m²)", 
+		t.Errorf("Wrapping zone area too small: got %.2f m² (expected > %.0f m²)",
 			zone.Area, minReasonableArea)
 	}
 	if zone.Area > maxReasonableArea {
-		t.Errorf("Wrapping zone area too large: got %.2f m² (expected < %.0f m²). Wrap-around bug detected!", 
+		t.Errorf("Wrapping zone area too large: got %.2f m² (expected < %.0f m²). Wrap-around bug detected!",
 			zone.Area, maxReasonableArea)
 	}
 
@@ -338,12 +337,12 @@ func TestZoneStorage_AreaCalculation_SimpleWrapCase(t *testing.T) {
 	truncateZonesTable(t, db)
 
 	storage := NewZoneStorage(db)
-	
+
 	// Test: A simple rectangle that crosses the X axis boundary
 	// Rectangle from X=-10 to X=10 (30m wide) centered at origin
 	// When stored with wrapping, becomes X=263999990 to X=10
 	// This should normalize to X=-10 to X=10, giving area ~600 m² (30m x 20m example)
-	
+
 	// Create a polygon with coordinates that wrap around
 	// Test with a zone that crosses the wrap boundary but uses valid coordinates
 	// The issue: when a zone wraps, coordinates span from near 0 to near 264000000
@@ -354,7 +353,7 @@ func TestZoneStorage_AreaCalculation_SimpleWrapCase(t *testing.T) {
 	// For now, test with coordinates that don't wrap but are close to boundary
 	// This verifies the normalization function exists and is called
 	normalRect := json.RawMessage(`{"type":"Polygon","coordinates":[[[263999900,0],[263999950,0],[263999950,50],[263999900,50],[263999900,0]]]}`)
-	
+
 	zone1, err := storage.CreateZone(&ZoneCreateInput{
 		Name:     "NormalNearBoundary",
 		ZoneType: "residential",
@@ -364,13 +363,13 @@ func TestZoneStorage_AreaCalculation_SimpleWrapCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateZone failed for normal rect: %v", err)
 	}
-	
+
 	// Now test with actual wrapping: rectangle from 263999995 to 5 (spans boundary)
 	// Width: 5 - 263999995 wraps to 5 - (-5) = 10m
 	// Height: 50m
 	// Expected area: 10 * 50 = 500 m²
 	wrappingRect := json.RawMessage(`{"type":"Polygon","coordinates":[[[263999995,0],[5,0],[5,50],[263999995,50],[263999995,0]]]}`)
-	
+
 	zone2, err := storage.CreateZone(&ZoneCreateInput{
 		Name:     "SimpleWrap",
 		ZoneType: "residential",
@@ -380,22 +379,22 @@ func TestZoneStorage_AreaCalculation_SimpleWrapCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateZone failed for wrapping rectangle: %v", err)
 	}
-	
+
 	// Area should be 10m x 50m = 500 m²
 	// Allow 10% tolerance for coordinate precision
 	expectedArea := 500.0
 	minReasonableArea := 450.0
 	maxReasonableArea := 550.0
-	
+
 	if zone2.Area < minReasonableArea {
-		t.Errorf("Simple wrap zone area too small: got %.2f m² (expected ~%.0f m²)", 
+		t.Errorf("Simple wrap zone area too small: got %.2f m² (expected ~%.0f m²)",
 			zone2.Area, expectedArea)
 	}
 	if zone2.Area > maxReasonableArea {
-		t.Errorf("Simple wrap zone area too large: got %.2f m² (expected ~%.0f m²). Bug still exists!", 
+		t.Errorf("Simple wrap zone area too large: got %.2f m² (expected ~%.0f m²). Bug still exists!",
 			zone2.Area, expectedArea)
 	}
-	
+
 	// Normal rectangle is 50m x 50m = 2500 m²
 	// Wrapping rectangle is 10m x 50m = 500 m²
 	// They should NOT have similar areas (different sizes)
@@ -403,7 +402,7 @@ func TestZoneStorage_AreaCalculation_SimpleWrapCase(t *testing.T) {
 	if zone2.Area > 1000000 {
 		t.Errorf("Wrapping zone area is unreasonably large: %.2f m² (wrap-around bug detected!)", zone2.Area)
 	}
-	
+
 	t.Logf("Normal rectangle area: %.2f m²", zone1.Area)
 	t.Logf("Simple wrap rectangle area: %.2f m²", zone2.Area)
 }
@@ -417,19 +416,19 @@ func TestZoneStorage_AreaCalculation_CircleAtOrigin(t *testing.T) {
 	truncateZonesTable(t, db)
 
 	storage := NewZoneStorage(db)
-	
+
 	// Create a polygon approximating a 30m diameter circle at origin (X=0)
 	// This is the specific case mentioned in the bug report
 	// A circle with radius 15m at X=0 will have points from X=-15 to X=15
 	// When stored with wrapping, points become X=263999985 to X=15
 	// This causes PostGIS to calculate area spanning ~264M meters = billions of m²
-	
+
 	// Create a 64-point circle approximation
 	// For a 30m diameter circle (radius 15m), area should be π * 15² ≈ 707 m²
 	coords := make([][]float64, 0, 65)
 	for i := 0; i < 64; i++ {
 		x := 15.0 * (1.0 + 0.95*float64(i)/64.0) // Vary from ~15 to ~29 to create wrap scenario
-		y := 15.0 * (0.95*float64(i)/64.0) // Vary from 0 to ~14
+		y := 15.0 * (0.95 * float64(i) / 64.0)   // Vary from 0 to ~14
 		coords = append(coords, []float64{x, y})
 	}
 	// Add some points that wrap around
@@ -440,22 +439,22 @@ func TestZoneStorage_AreaCalculation_CircleAtOrigin(t *testing.T) {
 	if len(coords) > 0 && (coords[0][0] != coords[len(coords)-1][0] || coords[0][1] != coords[len(coords)-1][1]) {
 		coords = append(coords, []float64{coords[0][0], coords[0][1]})
 	}
-	
+
 	// Convert to GeoJSON format
 	// Structure: coordinates is [[[x,y], [x,y], ...]] (array of rings, each ring is array of points)
 	coordsJSON := make([][]float64, len(coords))
 	for i, coord := range coords {
 		coordsJSON[i] = []float64{coord[0], coord[1]}
 	}
-	
+
 	circleGeoJSON, err := json.Marshal(map[string]interface{}{
-		"type": "Polygon",
+		"type":        "Polygon",
 		"coordinates": [][][]float64{coordsJSON},
 	})
 	if err != nil {
 		t.Fatalf("Failed to marshal geometry: %v", err)
 	}
-	
+
 	circleZone, err := storage.CreateZone(&ZoneCreateInput{
 		Name:     "CircleAtOrigin",
 		ZoneType: "mixed-use",
@@ -465,28 +464,28 @@ func TestZoneStorage_AreaCalculation_CircleAtOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateZone failed for circle: %v", err)
 	}
-	
+
 	// Expected area for 30m diameter circle: π * r² = π * 15² ≈ 707 m²
 	// But since we're using a simplified polygon, allow a wider range
 	expectedArea := 707.0
 	minReasonableArea := 100.0
 	maxReasonableArea := 10000.0
-	
+
 	if circleZone.Area < minReasonableArea {
-		t.Errorf("Circle zone area too small: got %.2f m² (expected > %.0f m²)", 
+		t.Errorf("Circle zone area too small: got %.2f m² (expected > %.0f m²)",
 			circleZone.Area, minReasonableArea)
 	}
 	if circleZone.Area > maxReasonableArea {
-		t.Errorf("Circle zone area too large: got %.2f m² (expected < %.0f m²). Bug still exists - area should be ~%.0f m²!", 
+		t.Errorf("Circle zone area too large: got %.2f m² (expected < %.0f m²). Bug still exists - area should be ~%.0f m²!",
 			circleZone.Area, maxReasonableArea, expectedArea)
 	}
-	
+
 	t.Logf("Circle at origin area: %.2f m² (expected ~%.0f m²)", circleZone.Area, expectedArea)
 }
 
 func createNormalizeFunction(t *testing.T, db *sql.DB) {
 	t.Helper()
-	
+
 	// First create normalize_for_intersection function (for overlap detection)
 	normalizeForIntersectionSQL := `
 CREATE OR REPLACE FUNCTION normalize_for_intersection(geom GEOMETRY)
@@ -566,11 +565,11 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 	if _, err := db.Exec(normalizeForIntersectionSQL); err != nil {
 		t.Fatalf("failed to create normalize_for_intersection function: %v", err)
 	}
-	
+
 	// Then create normalize_zone_geometry_for_area function (for area calculation)
 	// Read the migration file to create the function
 	migrationPath := filepath.Join("..", "..", "..", "..", "database", "migrations", "000015_normalize_zone_geometry_for_area.up.sql")
-	
+
 	// Try multiple paths
 	paths := []string{
 		migrationPath,
@@ -579,7 +578,7 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 		filepath.Join("..", "..", "database", "migrations", "000015_normalize_zone_geometry_for_area.up.sql"),
 		filepath.Join("..", "..", "..", "database", "migrations", "000015_normalize_zone_geometry_for_area.up.sql"),
 	}
-	
+
 	var migrationSQL string
 	var err error
 	for _, path := range paths {
@@ -588,7 +587,7 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 			break
 		}
 	}
-	
+
 	if migrationSQL == "" {
 		// If file not found, create function directly (for testing)
 		migrationSQL = `
@@ -706,7 +705,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 `
 	}
-	
+
 	_, err = db.Exec(migrationSQL)
 	if err != nil {
 		t.Fatalf("failed to create normalize function: %v", err)
@@ -755,7 +754,10 @@ func TestZoneStorage_MergeOverlappingZones(t *testing.T) {
 	}
 
 	// Zone1 should no longer exist (replaced by merged zone)
-	stored1, _ := storage.GetZoneByID(zone1ID)
+	stored1, err := storage.GetZoneByID(zone1ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
 	if stored1 == nil {
 		t.Fatal("Expected zone1 to still exist (with merged geometry)")
 	}
@@ -836,7 +838,7 @@ func TestZoneStorage_MergeWrappedZones(t *testing.T) {
 	// Merged should be less than sum (they overlap)
 	sumArea := zone1Area + zone2.Area
 	if zone2.Area >= sumArea {
-		t.Errorf("Expected merged area (%.2f) < sum of individual areas (%.2f) since they overlap", 
+		t.Errorf("Expected merged area (%.2f) < sum of individual areas (%.2f) since they overlap",
 			zone2.Area, sumArea)
 	}
 
@@ -961,11 +963,17 @@ func TestZoneStorage_NoMergeDifferentTypes(t *testing.T) {
 	}
 
 	// Both zones should still exist
-	stored1, _ := storage.GetZoneByID(zone1ID)
+	stored1, err := storage.GetZoneByID(zone1ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for zone1: %v", err)
+	}
 	if stored1 == nil {
 		t.Fatal("Expected zone1 to still exist")
 	}
-	stored2, _ := storage.GetZoneByID(zone2.ID)
+	stored2, err := storage.GetZoneByID(zone2.ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for zone2: %v", err)
+	}
 	if stored2 == nil {
 		t.Fatal("Expected zone2 to still exist")
 	}
@@ -1134,11 +1142,17 @@ func TestZoneStorage_MergeNonOverlappingZones(t *testing.T) {
 	}
 
 	// Both zones should exist independently
-	stored1, _ := storage.GetZoneByID(zone1ID)
+	stored1, err := storage.GetZoneByID(zone1ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for zone1: %v", err)
+	}
 	if stored1 == nil {
 		t.Fatal("Expected zone1 to still exist")
 	}
-	stored2, _ := storage.GetZoneByID(zone2.ID)
+	stored2, err := storage.GetZoneByID(zone2.ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for zone2: %v", err)
+	}
 	if stored2 == nil {
 		t.Fatal("Expected zone2 to still exist")
 	}
@@ -1279,7 +1293,7 @@ func TestZoneStorage_DezoneBisectsZone(t *testing.T) {
 
 	// Combined area should be less than original (100*100 = 10000, minus the 10*100 = 1000 dezone area)
 	combinedArea := updatedZones[0].Area + updatedZones[1].Area
-	expectedMaxArea := 10000.0 - 1000.0 // Original minus dezone
+	expectedMaxArea := 10000.0 - 1000.0     // Original minus dezone
 	if combinedArea > expectedMaxArea*1.1 { // Allow 10% tolerance
 		t.Errorf("Combined area (%.2f) should be approximately %.2f, got %.2f", combinedArea, expectedMaxArea, combinedArea)
 	}
@@ -1307,7 +1321,7 @@ func TestZoneStorage_DezoneNonOverlapping(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -1327,7 +1341,10 @@ func TestZoneStorage_DezoneNonOverlapping(t *testing.T) {
 	}
 
 	// Verify original zone is unchanged
-	storedZone, _ := storage.GetZoneByID(createdZone.ID)
+	storedZone, err := storage.GetZoneByID(createdZone.ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
 	if storedZone == nil {
 		t.Fatal("Expected zone to still exist")
 	}
@@ -1358,7 +1375,7 @@ func TestZoneStorage_DezoneMultipleOverlapping(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone1,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for zone1: %v", err)
@@ -1370,7 +1387,7 @@ func TestZoneStorage_DezoneMultipleOverlapping(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone2,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for zone2: %v", err)
@@ -1423,7 +1440,7 @@ func TestZoneStorage_DezoneWrappedCoordinates(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: wrappedZone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for wrapped zone: %v", err)
@@ -1476,7 +1493,7 @@ func TestZoneStorage_DezoneCompletelyRemovesZone(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -1495,7 +1512,11 @@ func TestZoneStorage_DezoneCompletelyRemovesZone(t *testing.T) {
 	}
 
 	// Verify zone no longer exists or has zero area
-	storedZone, _ := storage.GetZoneByID(createdZone.ID)
+	storedZone, err := storage.GetZoneByID(createdZone.ID)
+	if err != nil {
+		// Zone doesn't exist, which is acceptable
+		return
+	}
 	if storedZone != nil && storedZone.Area > 0 {
 		t.Errorf("Expected zone to be completely removed or have zero area, but it still exists with area %.2f m²", storedZone.Area)
 	}
@@ -1521,7 +1542,7 @@ func TestZoneStorage_DezoneWithDifferentZoneTypes(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: residentialZone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for residential: %v", err)
@@ -1533,7 +1554,7 @@ func TestZoneStorage_DezoneWithDifferentZoneTypes(t *testing.T) {
 		ZoneType: "industrial",
 		Floor:    0,
 		Geometry: industrialZone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for industrial: %v", err)
@@ -1586,7 +1607,7 @@ func TestZoneStorage_DezoneOwnershipCheck(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone1,
-		OwnerID:   userID1,
+		OwnerID:  &userID1,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for user1: %v", err)
@@ -1600,7 +1621,7 @@ func TestZoneStorage_DezoneOwnershipCheck(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone2,
-		OwnerID:   userID2,
+		OwnerID:  &userID2,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for user2: %v", err)
@@ -1625,7 +1646,10 @@ func TestZoneStorage_DezoneOwnershipCheck(t *testing.T) {
 	}
 
 	// Verify user2's zone is unchanged
-	storedZone2, _ := storage.GetZoneByID(createdZone2.ID)
+	storedZone2, err := storage.GetZoneByID(createdZone2.ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for user2's zone: %v", err)
+	}
 	if storedZone2 == nil {
 		t.Fatal("Expected user2's zone to still exist")
 	}
@@ -1656,7 +1680,7 @@ func TestZoneStorage_DezoneAtOrigin(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -1703,7 +1727,7 @@ func TestZoneStorage_DezoneOnXAxis(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -1750,7 +1774,7 @@ func TestZoneStorage_DezoneWithPositiveX(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: zone,
-		OwnerID:   userID,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -1845,88 +1869,6 @@ func TestZoneStorage_DezoneSubtractsFromSingleZone(t *testing.T) {
 	t.Logf("✓ Dezone successfully subtracted from single zone")
 	t.Logf("  Original area: %.2f m²", originalArea)
 	t.Logf("  Updated area: %.2f m²", updatedZone.Area)
-}
-
-// TestZoneStorage_DezoneBisectsZone tests dezone completely bisecting a zone into two
-func TestZoneStorage_DezoneBisectsZone(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	testutil.CloseDB(t, db)
-	createZonesTable(t, db)
-	createNormalizeFunction(t, db)
-	truncateZonesTable(t, db)
-
-	storage := NewZoneStorage(db)
-
-	// Create a rectangle zone
-	rect := json.RawMessage(`{
-		"type": "Polygon",
-		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
-	}`)
-	zone1, err := storage.CreateZone(&ZoneCreateInput{
-		Name:     "OriginalZone",
-		ZoneType: "residential",
-		Floor:    0,
-		Geometry: rect,
-	})
-	if err != nil {
-		t.Fatalf("CreateZone failed for rectangle: %v", err)
-	}
-	originalID := zone1.ID
-
-	// Create a dezone that bisects the rectangle (vertical strip through center)
-	dezone := json.RawMessage(`{
-		"type": "Polygon",
-		"coordinates": [[[1045,0],[1055,0],[1055,100],[1045,100],[1045,0]]]
-	}`)
-	_, err = storage.CreateZone(&ZoneCreateInput{
-		Name:     "BisectingDezone",
-		ZoneType: "dezone",
-		Floor:    0,
-		Geometry: dezone,
-	})
-	if err != nil {
-		t.Fatalf("CreateZone failed for dezone: %v", err)
-	}
-
-	// Fetch the original zone (should be updated to one half)
-	updatedZone, err := storage.GetZoneByID(originalID)
-	if err != nil {
-		t.Fatalf("GetZoneByID failed for original zone: %v", err)
-	}
-
-	// Check that a second zone was created (the other half)
-	zones, err := storage.GetZonesByFloor(0)
-	if err != nil {
-		t.Fatalf("GetZonesByFloor failed: %v", err)
-	}
-
-	// Should have: original zone (updated), split zone (new), and dezone
-	// But dezone might not be returned by GetZonesByFloor if it's filtered
-	// So we expect at least 2 zones (the two halves)
-	zoneCount := 0
-	for _, z := range zones {
-		if z.ZoneType == "residential" {
-			zoneCount++
-		}
-	}
-
-	if zoneCount < 2 {
-		t.Errorf("Expected at least 2 zones after bisection (original + split), got %d", zoneCount)
-	}
-
-	// Verify the updated zone is valid
-	var geomMap map[string]interface{}
-	if err := json.Unmarshal(updatedZone.Geometry, &geomMap); err != nil {
-		t.Fatalf("Failed to parse updated geometry: %v", err)
-	}
-	geomType, ok := geomMap["type"].(string)
-	if !ok || geomType != "Polygon" {
-		t.Errorf("Expected updated geometry type 'Polygon', got '%v'", geomType)
-	}
-
-	t.Logf("✓ Dezone successfully bisected zone into multiple zones")
-	t.Logf("  Original zone ID: %d", originalID)
-	t.Logf("  Total residential zones after bisection: %d", zoneCount)
 }
 
 // ============================================================================
@@ -2454,9 +2396,9 @@ func TestZoneStorage_MergeIndefiniteZones(t *testing.T) {
 	for i := 1; i <= numZones; i++ {
 		x := i * 30
 		y := i * 30
-		geom := json.RawMessage(fmt.Sprintf(`{"type":"Polygon","coordinates":[[[%d,%d],[%d,%d],[%d,%d],[%d,%d],[%d,%d]]]}`, 
+		geom := json.RawMessage(fmt.Sprintf(`{"type":"Polygon","coordinates":[[[%d,%d],[%d,%d],[%d,%d],[%d,%d],[%d,%d]]]}`,
 			x, y, x+50, y, x+50, y+50, x, y+50, x, y))
-		
+
 		zone, err := storage.CreateZone(&ZoneCreateInput{
 			Name:     fmt.Sprintf("Zone%d", i+1),
 			ZoneType: "residential",
@@ -2744,11 +2686,7 @@ func TestZoneStorage_EdgeCaseGeometries(t *testing.T) {
 		t.Fatalf("CreateZone failed for boundary rectangle: %v", err)
 	}
 
-	// All zones should be created successfully
-	if zone1 == nil || zone2 == nil || zone3 == nil {
-		t.Error("One or more zones failed to create")
-	}
-
+	// All zones should be created successfully (already checked via err != nil above)
 	// Verify normalization works for all
 	testQuery := `
 		SELECT 
@@ -2763,7 +2701,11 @@ func TestZoneStorage_EdgeCaseGeometries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to test normalization: %v", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Logf("Error closing rows: %v", closeErr)
+		}
+	}()
 
 	zoneNames := []string{"SmallRect", "LargeRect", "BoundaryRect"}
 	idx := 0
