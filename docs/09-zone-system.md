@@ -642,6 +642,35 @@ See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
 - Polygon division operation
 - Properties distributed or copied
 
+### Dezone (Zone Subtraction)
+
+**Dezone Tool** (Implemented):
+
+The dezone tool allows players to subtract areas from existing zones, effectively "cutting out" portions of zones:
+
+1. **Dezone Creation**: When a player creates a zone with `zone_type: "dezone"`, it triggers a subtraction operation rather than creating a new zone
+2. **Overlap Detection**: The system finds all zones on the same floor that overlap with the dezone geometry
+3. **Ownership Check**: Only zones owned by the user creating the dezone can be modified
+4. **Subtraction Operation**: PostGIS `ST_Difference` subtracts the dezone geometry from each overlapping zone
+5. **Result Handling**:
+   - **Partial Overlap**: Zone is updated with the remaining geometry (after subtraction)
+   - **Complete Removal**: If the dezone completely covers a zone, the zone is deleted
+   - **Zone Bisection**: If subtraction splits a zone into multiple disconnected pieces, the original zone is updated with the largest piece, and additional zones are created for the remaining pieces
+
+**Wrap-Around Handling**:
+
+Dezone operations handle wrapped coordinates (zones crossing the X-axis boundary) using the same normalization approach as zone merging:
+- Both the target zone and dezone geometry are normalized using `normalize_for_intersection`
+- Geometries are aligned to a common coordinate space
+- Subtraction is performed in aligned space
+- Result is shifted back and wrapped to `[0, 264,000,000)` range
+
+**API Behavior**:
+
+- `POST /api/zones` with `zone_type: "dezone"` returns `{"updated_zones": [...], "count": N}` instead of a single zone
+- The response contains all zones that were modified by the dezone operation
+- If no zones overlap the dezone, an empty array is returned
+
 ## Special Zone Rules
 
 ### Elevator Station Zones

@@ -1812,6 +1812,7 @@ func TestZoneStorage_DezoneSubtractsFromSingleZone(t *testing.T) {
 	truncateZonesTable(t, db)
 
 	storage := NewZoneStorage(db)
+	userID := int64(1)
 
 	// Create a rectangle zone
 	rect := json.RawMessage(`{
@@ -1823,6 +1824,7 @@ func TestZoneStorage_DezoneSubtractsFromSingleZone(t *testing.T) {
 		ZoneType: "residential",
 		Floor:    0,
 		Geometry: rect,
+		OwnerID:  &userID,
 	})
 	if err != nil {
 		t.Fatalf("CreateZone failed for rectangle: %v", err)
@@ -1835,18 +1837,25 @@ func TestZoneStorage_DezoneSubtractsFromSingleZone(t *testing.T) {
 		"type": "Polygon",
 		"coordinates": [[[1030,30],[1070,30],[1070,70],[1030,70],[1030,30]]]
 	}`)
-	_, err = storage.CreateZone(&ZoneCreateInput{
-		Name:     "Dezone",
-		ZoneType: "dezone",
-		Floor:    0,
-		Geometry: dezone,
-	})
+
+	// Subtract the dezone from overlapping zones
+	updatedZones, err := storage.SubtractDezoneFromAllOverlapping(0, dezone, userID)
 	if err != nil {
-		t.Fatalf("CreateZone failed for dezone: %v", err)
+		t.Fatalf("SubtractDezoneFromAllOverlapping failed: %v", err)
+	}
+
+	if len(updatedZones) != 1 {
+		t.Fatalf("Expected 1 updated zone, got %d", len(updatedZones))
 	}
 
 	// Fetch the updated zone
-	updatedZone, err := storage.GetZoneByID(originalID)
+	updatedZone := updatedZones[0]
+	if updatedZone.ID != originalID {
+		t.Fatalf("Expected updated zone to have ID %d, got %d", originalID, updatedZone.ID)
+	}
+
+	// Also verify by fetching directly
+	updatedZone, err = storage.GetZoneByID(originalID)
 	if err != nil {
 		t.Fatalf("GetZoneByID failed: %v", err)
 	}

@@ -74,6 +74,11 @@ const pushThickLineVertices = (
   // Add vertices
   const baseIndex = indexOffset;
   targetVertices.push(...v0, ...v1, ...v2, ...v3);
+  // TODO: Currently this creates a directional fade (horizontal lines fade N-S, vertical fade E-W)
+  //       rather than a true radial fade. To fix this, we need to calculate the actual radial
+  //       distance sqrt(x^2 + z^2) for each vertex, but this caused issues where all edge
+  //       vertices had distance = radius, making everything transparent. Need to find a better
+  //       approach that gives smooth radial fade without making the grid disappear.
   targetDistances.push(lineDistance, lineDistance, lineDistance, lineDistance);
   
   // Add indices for two triangles forming the quad

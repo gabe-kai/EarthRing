@@ -393,7 +393,8 @@ Manages chunk loading and unloading based on viewport.
 - Circular 250m radius grid overlay centered on camera target
 - 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
 - Sharpened rendering via dynamic `THREE.LineSegments` geometry (no textures, no blurring at zoom)
-- Shader-driven fade at the outer radius plus base opacity controls so zones stay fully visible
+- Shader-driven fade at the outer radius (currently directional: horizontal lines fade N-S, vertical fade E-W; TODO: implement true radial fade)
+- Base opacity controls so zones stay fully visible
 - Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
 - Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
 - Visibility control via `setVisible()` method
