@@ -248,6 +248,15 @@ export class GameStateManager {
   }
   
   /**
+   * Determine whether the user is currently authenticated.
+   * Relies on connectionState.api to be updated by the auth workflow.
+   * @returns {boolean}
+   */
+  isUserAuthenticated() {
+    return !!this.connectionState.api?.authenticated;
+  }
+  
+  /**
    * Register an event listener
    * @param {string} event - Event name ('chunkAdded', 'chunkRemoved', 'playerStateChanged', 'connectionStateChanged')
    * @param {Function} callback - Callback function

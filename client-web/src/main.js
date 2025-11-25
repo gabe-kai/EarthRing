@@ -144,6 +144,9 @@ const CHUNK_LOAD_DISTANCE_THRESHOLD = 500; // Load new chunks if moved more than
 sceneManager.onRender((deltaTime) => {
   // Update camera controller with deltaTime for smooth movement
   cameraController.update(deltaTime);
+  const userAuthenticated = gameStateManager.isUserAuthenticated
+    ? gameStateManager.isUserAuthenticated()
+    : isAuthenticated();
   
   // Rotate test cube
   cube.rotation.x += 0.01;
@@ -159,7 +162,8 @@ sceneManager.onRender((deltaTime) => {
   // Check if camera has moved enough to load new chunks
   // Throttle chunk loading to avoid excessive requests
   const now = performance.now();
-  if (wsClient.isConnected() && 
+  if (userAuthenticated &&
+      wsClient.isConnected() && 
       !pendingChunkLoad && 
       (now - lastChunkLoadTime) >= CHUNK_LOAD_THROTTLE_MS) {
     const cameraPos = cameraController.getEarthRingPosition();
@@ -204,14 +208,18 @@ sceneManager.onRender((deltaTime) => {
           pendingChunkLoad = false;
         });
     }
+  } else if (!userAuthenticated) {
+    pendingChunkLoad = false;
   }
 
-  // Refresh zone overlays (ZoneManager throttles internally)
-  zoneManager.loadZonesAroundCamera();
-  
-  // Re-render zones if camera moved significantly (for proper wrapping)
-  if (zoneManager.shouldReRenderZones()) {
-    zoneManager.reRenderAllZones();
+  // Only refresh zones when authenticated
+  if (userAuthenticated) {
+    zoneManager.loadZonesAroundCamera();
+    
+    // Re-render zones if camera moved significantly (for proper wrapping)
+    if (zoneManager.shouldReRenderZones()) {
+      zoneManager.reRenderAllZones();
+    }
   }
   
   // Update zone editor floor based on camera position
@@ -348,6 +356,11 @@ wsClient.onOpen(async () => {
     connected: true, 
     connecting: false 
   });
+  
+  if (!gameStateManager.isUserAuthenticated?.() && !isAuthenticated()) {
+    // User is not authenticated yet; skip auto-loading world data
+    return;
+  }
   
   // Automatically load chunks around the camera position
   try {

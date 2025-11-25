@@ -177,6 +177,7 @@ Manages local game state and synchronization with server.
 - Player state updates with event notifications
 - Connection state tracking (WebSocket and API)
 - **Active Floor**: Player-selected floor (-2 to +2) that determines which floor's content is loaded and where actions occur, independent of camera elevation
+- **Authentication signal**: `gameStateManager.isUserAuthenticated()` mirrors `connectionState.api.authenticated`, allowing rendering systems to completely idle chunk/zone streaming until a login succeeds. This prevents the unauthenticated fetch loops we previously saw on cold starts.
 - Event listeners for state changes (chunkAdded, chunkRemoved, playerStateChanged, connectionStateChanged, activeFloorChanged)
 - State reset for logout/cleanup
 
@@ -398,6 +399,7 @@ Manages chunk loading and unloading based on viewport.
 - Automatic chunk rendering when added to game state (only if chunk matches active floor)
 - **Automatic geometry decompression**: Compressed geometry is automatically detected and decompressed (<3ms per chunk)
 - Ring floor geometry rendering with variable width from station flares
+- **Mesh reuse + precision fix**: Each `renderChunk()` call now computes a chunk-local origin, stores the large absolute X coordinate on the mesh transform, and caches meshes keyed by a `chunkVersionToken`. Identical geometry is skipped entirely unless the camera wraps by >5 km. This both eliminated the far-side platform flicker and keeps 264,000 km coordinates numerically stable inside `Float32Array` buffers.
 - Keyboard-relative camera controls (WASD for forward/backward/strafe movement relative to camera view, QE for vertical up/down) integrated with OrbitControls while respecting focused input fields
 - Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam
 - **Floor change handling**: When active floor changes, all chunk meshes from the old floor are removed, chunks are removed from game state, and chunks for the new floor are automatically loaded

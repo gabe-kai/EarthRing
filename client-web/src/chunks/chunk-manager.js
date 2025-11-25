@@ -39,6 +39,41 @@ export class ChunkManager {
     // Store re-render threshold
     this.WRAP_RE_RENDER_THRESHOLD = WRAP_RE_RENDER_THRESHOLD;
   }
+
+  /**
+   * Get the current camera X position in EarthRing coordinates.
+   * Falls back to the Three.js camera if the controller isn't available.
+   * @returns {number}
+   */
+  getCurrentCameraX() {
+    if (this.cameraController?.getEarthRingPosition) {
+      const pos = this.cameraController.getEarthRingPosition();
+      if (pos && typeof pos.x === 'number') {
+        return pos.x;
+      }
+    }
+    const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
+    if (camera) {
+      const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+      const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
+      if (cameraEarthRingPos && typeof cameraEarthRingPos.x === 'number') {
+        return cameraEarthRingPos.x;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Calculate wrapped ring distance between two X positions.
+   * @param {number} a
+   * @param {number} b
+   * @returns {number}
+   */
+  getWrappedRingDistance(a, b) {
+    const RING_CIRCUMFERENCE = 264000000;
+    const direct = Math.abs(a - b);
+    return Math.min(direct, RING_CIRCUMFERENCE - direct);
+  }
   
   /**
    * Set up WebSocket message handlers for chunk data
@@ -421,6 +456,9 @@ export class ChunkManager {
    * @param {boolean} forceReRender - Force re-render even if data is the same (for wrapping)
    */
   renderChunk(chunkID, chunkData, forceReRender = false) {
+    const cameraX = this.getCurrentCameraX();
+    const newVersionToken = this.getChunkVersionToken(chunkData);
+
     // Only render chunks that match the active floor
     const activeFloor = this.gameStateManager.getActiveFloor();
     const chunkFloor = this.getFloorFromChunkID(chunkID);
@@ -430,16 +468,21 @@ export class ChunkManager {
       return;
     }
     
-    // Check if chunk is already rendered and hasn't changed
+    // Check if chunk is already rendered and hasn't changed (or camera hasn't moved significantly)
     // Only skip if we're not forcing a re-render (for wrapping)
     if (!forceReRender) {
       const existingMesh = this.chunkMeshes.get(chunkID);
       if (existingMesh) {
-        // Check if this is the same chunk data by comparing chunk ID
-        // This prevents re-rendering when we receive duplicate chunk data from server
-        const existingChunkID = existingMesh.userData.chunkID;
-        if (existingChunkID === chunkID) {
-          // Chunk is already rendered, skip re-rendering unless forced
+        const existingToken = existingMesh.userData?.chunkVersionToken || null;
+        const lastCameraXUsed = existingMesh.userData?.lastCameraXUsed;
+        const cameraDelta = (typeof lastCameraXUsed === 'number')
+          ? this.getWrappedRingDistance(lastCameraXUsed, cameraX)
+          : 0;
+        const sameData = existingToken && newVersionToken && existingToken === newVersionToken;
+        const cameraStable = cameraDelta < this.WRAP_RE_RENDER_THRESHOLD;
+
+        if (sameData && cameraStable) {
+          // Chunk is already rendered with the same data and wrapping, skip re-rendering
           return;
         }
       }
@@ -451,8 +494,10 @@ export class ChunkManager {
     // Check if chunk has geometry data
     if (chunkData.geometry && chunkData.geometry.type === 'ring_floor') {
       // Render actual geometry (Phase 2)
-      const mesh = this.createRingFloorMesh(chunkID, chunkData);
+      const mesh = this.createRingFloorMesh(chunkID, chunkData, cameraX);
       if (mesh) {
+        mesh.userData.chunkVersionToken = newVersionToken || chunkID;
+        mesh.userData.lastCameraXUsed = cameraX;
         this.scene.add(mesh);
         this.chunkMeshes.set(chunkID, mesh);
         
@@ -485,8 +530,10 @@ export class ChunkManager {
     }
     
     // Fallback to placeholder if no geometry or geometry creation failed
-    const placeholder = this.createChunkPlaceholder(chunkID, chunkData);
+    const placeholder = this.createChunkPlaceholder(chunkID, chunkData, cameraX);
     if (placeholder) {
+      placeholder.userData.chunkVersionToken = newVersionToken || chunkID;
+      placeholder.userData.lastCameraXUsed = cameraX;
       this.scene.add(placeholder);
       this.chunkMeshes.set(chunkID, placeholder);
       // Only log placeholder rendering in debug mode
@@ -502,7 +549,7 @@ export class ChunkManager {
    * @param {Object} chunkData - Chunk data with geometry
    * @returns {THREE.Mesh|null} Three.js mesh or null
    */
-  createRingFloorMesh(chunkID, chunkData) {
+  createRingFloorMesh(chunkID, chunkData, cameraXOverride = null) {
     const geometry = chunkData.geometry;
     
     if (!geometry.vertices || !geometry.faces) {
@@ -533,7 +580,8 @@ export class ChunkManager {
     const cameraEarthRingPosRaw = fromThreeJS(cameraThreeJSPos);
     const RING_CIRCUMFERENCE = 264000000;
     // Use raw camera X (may be negative or very large) for wrapping calculation
-    const cameraX = cameraEarthRingPosRaw.x || 0;
+    const cameraXFromScene = cameraEarthRingPosRaw.x || 0;
+    const cameraX = (typeof cameraXOverride === 'number') ? cameraXOverride : cameraXFromScene;
     
     // Determine chunk index and base position
     const chunkIndex = (chunkData.chunk_index ?? parseInt(chunkID.split('_')[1], 10)) || 0;
@@ -543,6 +591,7 @@ export class ChunkManager {
     // Calculate an offset (multiple of ring circumference) that moves this chunk closest to the camera.
     const circumferenceOffsetMultiple = Math.round((cameraX - chunkBaseX) / RING_CIRCUMFERENCE);
     const chunkOffset = circumferenceOffsetMultiple * RING_CIRCUMFERENCE;
+    const chunkOriginX = chunkBaseX + chunkOffset;
     
     // Process vertices
     let minX = Infinity, maxX = -Infinity;
@@ -552,8 +601,14 @@ export class ChunkManager {
     geometry.vertices.forEach(vertex => {
       // Shift vertex by the chunk offset so this chunk sits closest to the camera.
       const earthringX = vertex[0] + chunkOffset;
+      // Keep vertex coordinates near origin (relative to chunk origin) to avoid float precision loss
+      const localEarthringPos = {
+        x: earthringX - chunkOriginX,
+        y: vertex[1],
+        z: vertex[2],
+      };
       
-      const earthringPos = { x: earthringX, y: vertex[1], z: vertex[2] };
+      const earthringPos = localEarthringPos;
       const threeJSPos = toThreeJS(earthringPos);
       
       // Don't add Y offset - chunks should align perfectly when wrapping
@@ -622,6 +677,7 @@ export class ChunkManager {
     const mesh = new THREE.Mesh(threeGeometry, material);
     mesh.userData.chunkID = chunkID;
     mesh.userData.chunkData = chunkData;
+    mesh.position.x = chunkOriginX;
     
     // Disable frustum culling for wrapped chunks to ensure they're always visible
     // This is important because chunks may be wrapped to positions that are technically
@@ -648,6 +704,52 @@ export class ChunkManager {
     
     return mesh;
   }
+
+  /**
+   * Build a version token for chunk data to detect changes.
+   * @param {Object} chunkData
+   * @returns {string|null}
+   */
+  getChunkVersionToken(chunkData) {
+    if (!chunkData) {
+      return null;
+    }
+    const metadata = chunkData.metadata || chunkData.Metadata || {};
+    const version = metadata.version ?? metadata.Version ?? '';
+    const lastModified = metadata.last_modified ?? metadata.lastModified ?? '';
+    const isDirty = metadata.is_dirty ?? metadata.isDirty ?? '';
+
+    const geometry = chunkData.geometry || {};
+    const geometryVersion = geometry.version ?? geometry.Version ?? '';
+    const geometryUpdated = geometry.updated_at ?? geometry.updatedAt ?? '';
+    const geometryHash =
+      geometry.hash ??
+      geometry.Hash ??
+      geometry.checksum ??
+      geometry.Checksum ??
+      geometry.signature ??
+      '';
+
+    let fallbackCounts = '';
+    if (!geometryHash && Array.isArray(geometry.vertices) && Array.isArray(geometry.faces)) {
+      fallbackCounts = `v${geometry.vertices.length}-f${geometry.faces.length}`;
+    }
+
+    const tokenParts = [
+      version,
+      lastModified,
+      isDirty,
+      geometryVersion,
+      geometryUpdated,
+      geometryHash || fallbackCounts,
+    ].filter(part => part !== '' && part !== null && typeof part !== 'undefined');
+
+    if (tokenParts.length === 0) {
+      return null;
+    }
+
+    return tokenParts.join('|');
+  }
   
   /**
    * Create a placeholder mesh for a chunk (Phase 1: empty chunks)
@@ -655,7 +757,7 @@ export class ChunkManager {
    * @param {Object} chunkData - Chunk data
    * @returns {THREE.Mesh|null} Placeholder mesh or null
    */
-  createChunkPlaceholder(chunkID, chunkData) {
+  createChunkPlaceholder(chunkID, chunkData, cameraX = 0) {
     // Parse chunk ID to get floor and chunk index
     const [floor, chunkIndex] = chunkID.split('_').map(Number);
     
@@ -684,6 +786,7 @@ export class ChunkManager {
     const mesh = createMeshAtEarthRingPosition(geometry, material, chunkPosition);
     mesh.userData.chunkID = chunkID;
     mesh.userData.chunkData = chunkData;
+    mesh.userData.lastCameraXUsed = cameraX;
     
     return mesh;
   }

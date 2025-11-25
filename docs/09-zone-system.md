@@ -741,6 +741,12 @@ Dezone operations handle wrapped coordinates (zones crossing the X-axis boundary
 
 - **Grid Overlay Separation**: Grid is rendered separately using circular `THREE.LineSegments` geometry with shader-driven fade and LOD. The overlay renders a bold world Y=0 axis plus thicker 20m multiples, while zones stay separate so they remain fully visible while the grid thins/fades based on camera distance.
 
+#### Full-Ring Zones & Current Limitations
+
+- **Full-ring caching**: Zones whose span exceeds half the circumference (e.g., the default maglev `restricted` stripe) are cached once and simply re-positioned as the camera wraps. This prevents the previous remove/re-add flicker loop.
+- **Authentication gating**: `ZoneManager` no longer attempts API calls while the user is logged out. World streaming begins only after login, avoiding the earlier unauthenticated fetch spam.
+- **Outstanding bug**: The five default maglev zones (floors -2 through +2) are recreated on every reset but still fail to render after a cold start. The geometry exists in the database and the caching layer eliminates flicker once drawn, but the initial fetch pipeline is still skipping system full-ring zones. Keep this documented until the maglev stripe renders automatically.
+
 ### Zone Type Support
 
 **Implemented Zone Types:**
