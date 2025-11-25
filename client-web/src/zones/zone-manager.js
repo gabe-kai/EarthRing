@@ -59,6 +59,35 @@ export class ZoneManager {
     this.gameState.on('zoneUpdated', ({ zone }) => this.renderZone(zone));
     this.gameState.on('zoneRemoved', ({ zoneID }) => this.removeZone(zoneID));
     this.gameState.on('zonesCleared', () => this.clearAllZones());
+    // Reload zones when active floor changes
+    this.gameState.on('activeFloorChanged', ({ newFloor }) => {
+      // Remove all zone meshes that don't match the new floor
+      const zonesToRemove = [];
+      this.zoneMeshes.forEach((mesh, zoneID) => {
+        const zone = mesh.userData.zone;
+        const zoneFloor = zone?.floor ?? 0;
+        if (zoneFloor !== newFloor) {
+          zonesToRemove.push(zoneID);
+        }
+      });
+      zonesToRemove.forEach(zoneID => this.removeZone(zoneID));
+      
+      // Also remove zones from game state that don't match
+      const allZones = this.gameState.getAllZones();
+      allZones.forEach(zone => {
+        const zoneFloor = zone.floor ?? 0;
+        if (zoneFloor !== newFloor) {
+          this.gameState.removeZone(zone.id);
+        }
+      });
+      
+      // Clear fetch throttle to force immediate reload
+      this.lastFetchTime = 0;
+      // Update visibility for remaining zones
+      this.updateAllZoneVisibility();
+      // Load zones for the new floor
+      this.loadZonesAroundCamera();
+    });
   }
 
   async loadZonesAroundCamera(range = DEFAULT_ZONE_RANGE) {
@@ -79,7 +108,8 @@ export class ZoneManager {
     }
 
     const cameraPos = this.cameraController.getEarthRingPosition();
-    const floor = 0; // Force floor 0 fetch until multi-floor zones are supported client-side
+    // Get active floor from game state (independent of camera elevation)
+    const floor = this.gameState.getActiveFloor();
 
     // Wrap camera X to valid range before calculating bounds
     const cameraXWrapped = wrapRingPosition(cameraPos.x);
@@ -193,6 +223,15 @@ export class ZoneManager {
 
   renderZone(zone) {
     if (!zone || !zone.geometry) {
+      return;
+    }
+
+    // Only render zones that match the active floor
+    const activeFloor = this.gameState.getActiveFloor();
+    const zoneFloor = zone.floor ?? 0;
+    if (zoneFloor !== activeFloor) {
+      // Zone is for a different floor - remove it if it exists
+      this.removeZone(zone.id);
       return;
     }
 
@@ -491,7 +530,16 @@ export class ZoneManager {
   }
 
   updateAllZoneVisibility() {
+    const activeFloor = this.gameState.getActiveFloor();
     this.zoneMeshes.forEach((mesh) => {
+      const zone = mesh.userData.zone;
+      const zoneFloor = zone?.floor ?? 0;
+      // Hide zones that don't match the active floor
+      if (zoneFloor !== activeFloor) {
+        mesh.visible = false;
+        return;
+      }
+      
       const zoneType = mesh.userData.zoneType || 'default';
       const typeVisible = this.zoneTypeVisibility.get(zoneType) ?? true;
       mesh.visible = this.zonesVisible && typeVisible;

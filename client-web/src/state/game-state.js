@@ -24,6 +24,10 @@ export class GameStateManager {
       authenticated: false,
     };
     
+    // Active floor (independent of camera elevation)
+    // This determines which floor's zones/chunks are loaded and where actions occur
+    this.activeFloor = 0;
+    
     // Connection state
     this.connectionState = {
       websocket: {
@@ -47,6 +51,7 @@ export class GameStateManager {
       zoneUpdated: [],
       zoneRemoved: [],
       zonesCleared: [],
+      activeFloorChanged: [],
     };
   }
   
@@ -243,6 +248,15 @@ export class GameStateManager {
   }
   
   /**
+   * Determine whether the user is currently authenticated.
+   * Relies on connectionState.api to be updated by the auth workflow.
+   * @returns {boolean}
+   */
+  isUserAuthenticated() {
+    return !!this.connectionState.api?.authenticated;
+  }
+  
+  /**
    * Register an event listener
    * @param {string} event - Event name ('chunkAdded', 'chunkRemoved', 'playerStateChanged', 'connectionStateChanged')
    * @param {Function} callback - Callback function
@@ -285,6 +299,27 @@ export class GameStateManager {
   }
   
   /**
+   * Get the active floor (independent of camera elevation)
+   * @returns {number} Active floor (-2 to 2 for main ring)
+   */
+  getActiveFloor() {
+    return this.activeFloor;
+  }
+  
+  /**
+   * Set the active floor and emit change event
+   * @param {number} floor - Floor number (-2 to 2 for main ring)
+   */
+  setActiveFloor(floor) {
+    const oldFloor = this.activeFloor;
+    // Clamp to valid range
+    this.activeFloor = Math.max(-2, Math.min(2, Math.round(floor)));
+    if (oldFloor !== this.activeFloor) {
+      this.emit('activeFloorChanged', { oldFloor, newFloor: this.activeFloor });
+    }
+  }
+  
+  /**
    * Reset game state (useful for logout or reset)
    */
   reset() {
@@ -296,6 +331,7 @@ export class GameStateManager {
       position: { x: 0, y: 0, z: 0 },
       authenticated: false,
     };
+    this.activeFloor = 0;
     this.connectionState = {
       websocket: {
         connected: false,

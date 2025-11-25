@@ -168,6 +168,7 @@ Manages local game state and synchronization with server.
 - Chunk cache management (Map-based storage)
 - Player state management (ID, username, position, authentication)
 - Connection state tracking (WebSocket and API status)
+- **Active Floor management** (independent of camera elevation)
 - Event system for state changes
 - State reset functionality
 
@@ -175,14 +176,31 @@ Manages local game state and synchronization with server.
 - Chunk caching with add/remove/get operations
 - Player state updates with event notifications
 - Connection state tracking (WebSocket and API)
-- Event listeners for state changes (chunkAdded, chunkRemoved, playerStateChanged, connectionStateChanged)
+- **Active Floor**: Player-selected floor (-2 to +2) that determines which floor's content is loaded and where actions occur, independent of camera elevation
+- **Authentication signal**: `gameStateManager.isUserAuthenticated()` mirrors `connectionState.api.authenticated`, allowing rendering systems to completely idle chunk/zone streaming until a login succeeds. This prevents the unauthenticated fetch loops we previously saw on cold starts.
+- Event listeners for state changes (chunkAdded, chunkRemoved, playerStateChanged, connectionStateChanged, activeFloorChanged)
 - State reset for logout/cleanup
+
+**Active Floor System**:
+- The active floor is a player-selected floor (-2 to +2) that determines which floor's content is loaded and where actions occur
+- **Independent of camera elevation**: The camera can zoom out for a wider view while keeping actions on the selected floor
+- **System-wide filtering**: All rendering systems (ChunkManager, ZoneManager, GridOverlay) filter content by active floor
+- **Automatic cleanup**: When the active floor changes, all content from the old floor is removed and content for the new floor is loaded
+- **Event-driven**: Systems listen to `activeFloorChanged` events to update automatically
+- **UI Control**: Active floor can be changed using the `+`/`−` buttons in the zones toolbar (click "Z" icon to expand)
 
 **Usage Example**:
 ```javascript
 import { GameStateManager } from './state/game-state.js';
 
 const gameStateManager = new GameStateManager();
+
+// Get current active floor
+const currentFloor = gameStateManager.getActiveFloor(); // Returns 0 (default)
+
+// Change active floor
+gameStateManager.setActiveFloor(1); // Switch to floor +1
+// This triggers 'activeFloorChanged' event, causing all systems to update
 
 // Add chunk to cache
 gameStateManager.addChunk('0_12345', chunkData);
@@ -197,6 +215,12 @@ gameStateManager.updatePlayerState({
 // Listen to state changes
 gameStateManager.on('chunkAdded', ({ chunkID, chunkData }) => {
   console.log('Chunk added:', chunkID);
+});
+
+// Listen to active floor changes
+gameStateManager.on('activeFloorChanged', ({ oldFloor, newFloor }) => {
+  console.log(`Floor changed from ${oldFloor} to ${newFloor}`);
+  // All systems automatically handle the floor change
 });
 ```
 
@@ -357,6 +381,8 @@ Manages chunk loading and unloading based on viewport.
 - Chunk caching integration with game state manager
 - Automatic geometry decompression (transparent to rendering code)
 - Position-based chunk loading
+- **Active Floor filtering**: Only loads and renders chunks matching the active floor
+- **Floor change handling**: Automatically clears chunks from other floors and reloads for new floor when active floor changes
 - Mesh management and cleanup
 - Seam-aware rendering with chunk wrapping
 
@@ -369,11 +395,14 @@ Manages chunk loading and unloading based on viewport.
 **Key Features**:
 - Request chunks via WebSocket (`chunk_request` message)
 - Position-based chunk loading (converts ring position to chunk indices)
-- Automatic chunk rendering when added to game state
+- **Active Floor filtering**: Chunks are requested and rendered only for the active floor (from `gameStateManager.getActiveFloor()`)
+- Automatic chunk rendering when added to game state (only if chunk matches active floor)
 - **Automatic geometry decompression**: Compressed geometry is automatically detected and decompressed (<3ms per chunk)
 - Ring floor geometry rendering with variable width from station flares
+- **Mesh reuse + precision fix**: Each `renderChunk()` call now computes a chunk-local origin, stores the large absolute X coordinate on the mesh transform, and caches meshes keyed by a `chunkVersionToken`. Identical geometry is skipped entirely unless the camera wraps by >5 km. This both eliminated the far-side platform flicker and keeps 264,000 km coordinates numerically stable inside `Float32Array` buffers.
 - Keyboard-relative camera controls (WASD for forward/backward/strafe movement relative to camera view, QE for vertical up/down) integrated with OrbitControls while respecting focused input fields
 - Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam
+- **Floor change handling**: When active floor changes, all chunk meshes from the old floor are removed, chunks are removed from game state, and chunks for the new floor are automatically loaded
 - Mesh cleanup and resource disposal
 - Integration with game state manager for caching
 - Compression ratio logging (2.6-3.1:1 achieved in production)
@@ -414,10 +443,13 @@ Manages chunk loading and unloading based on viewport.
 - Single-row horizontal layout with horizontal scrolling for overflow
 
 **Zones Toolbar** (`client-web/src/ui/zones-toolbar.js`):
-- Left-side vertical expandable toolbar with "Z" icon (legacy, may be deprecated)
+- Left-side vertical expandable toolbar with "Z" icon
+- **Active Floor selector**: `+`/`−` buttons to change the active floor (-2 to +2)
+- Displays current active floor number
 - Controls for grid visibility and all zone types
 - Per-zone-type visibility toggles (Show/Hide buttons)
 - Smooth expand/collapse animation
+- Automatically updates when active floor changes via game state events
 
 **Zone UI** (`client-web/src/ui/zone-ui.js`):
 - Integrated into bottom toolbar "Zones" tab
@@ -427,7 +459,7 @@ Manages chunk loading and unloading based on viewport.
   - Paintbrush radius setting (always visible, default 10m)
   - Brush size keyboard shortcuts (`[` and `]` to decrease/increase)
   - Current tool and zone type display
-- **Floor Handling**: Zones are automatically created on the current camera floor (no manual floor selection)
+- **Active Floor System**: Zones, chunks, and all game content are loaded based on the **active floor** (player-selected floor), not camera elevation. This allows the camera to zoom out for a wider view while keeping actions on the selected floor. The active floor can be changed using the `+`/`−` buttons in the zones toolbar.
 - Zone selection: Click zones to select and view info window with details and "Dezone" button
 - Integrated with ZoneEditor, ZoneManager, and GameStateManager for real-time updates
 - Delete functionality removes zones from scene and game state immediately
@@ -511,17 +543,20 @@ gridOverlay.setVisible(false); // Hide grid
    - Zones are fetched via `GET /api/zones/area` with a bounding box around the camera
    - Default fetch range: 5000m along ring (X), 3000m across width (Y)
    - Fetch throttling: 4 seconds between requests (`fetchThrottleMs = 4000`)
+   - **Active Floor filtering**: Zones are fetched for the active floor (from `gameStateManager.getActiveFloor()`), not camera elevation
    - Zones are cached in `GameStateManager.zones` Map (keyed by zone ID)
    - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
    - `GameStateManager.setZones()` emits `zoneAdded`, `zoneUpdated`, `zoneRemoved` events
    - `ZoneManager` listens to these events and renders/updates meshes accordingly
+   - **Floor change handling**: When active floor changes, all zones from the old floor are removed and zones for the new floor are loaded
    - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization. The `normalizeRelativeToCamera` function handles wrapping internally and expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE)) rather than a pre-wrapped position.
 
 5. **Visibility System:**
    - Two-level visibility control:
      - Global: `zonesVisible` (all zones on/off)
      - Per-type: `zoneTypeVisibility` Map (individual zone types)
-   - Zone visibility = `zonesVisible && zoneTypeVisibility.get(zoneType)`
+   - **Active Floor filtering**: Only zones matching the active floor are rendered, regardless of visibility settings
+   - Zone visibility = `zonesVisible && zoneTypeVisibility.get(zoneType) && (zoneFloor === activeFloor)`
    - When visibility changes, `updateAllZoneVisibility()` updates all existing meshes
    - New zones respect current visibility state when rendered
 

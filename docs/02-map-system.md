@@ -121,7 +121,8 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 #### Vertical Coordinate: Floor/Level (Z)
 - **Range**: Integer values representing different floors
 - **Unit**: Floor number (0 = ground/main floor)
-- **Future**: Multiple floors can be added for vertical expansion
+- **Main Ring Floors**: -2, -1, 0, +1, +2 (5 levels total, 100m height)
+- **Active Floor System**: Players select an active floor independent of camera elevation. All game content (chunks, zones, grid, buildings, NPCs) is loaded and rendered for the selected floor, allowing the camera to zoom out for a wider view while keeping actions on the chosen floor.
 
 ### Coordinate System Convention
 
@@ -779,6 +780,24 @@ The main ring (non-station areas) is **5 levels thick**:
 **Total Main Ring Height**: 100 meters (5 levels × 20 meters per level)
 
 The maglev rail runs through Level 0 (the primary floor) along the entire ring length.
+
+#### Active Floor System
+
+**Client-Side Floor Selection**:
+- Players can select an active floor (-2 to +2) using the floor selector in the zones toolbar
+- The active floor is independent of camera elevation, allowing players to zoom out for a wider view while keeping actions on the selected floor
+- When the active floor changes:
+  - All chunks from the old floor are removed and chunks for the new floor are loaded
+  - All zones from the old floor are removed and zones for the new floor are loaded
+  - The grid overlay updates to the new floor's height
+  - Zone creation/editing uses the active floor
+  - Future systems (buildings, NPCs, structures) will also filter by active floor
+
+**Implementation**:
+- Active floor is managed by `GameStateManager.activeFloor` (defaults to 0)
+- All rendering systems (ChunkManager, ZoneManager, GridOverlay) listen to `activeFloorChanged` events
+- Floor changes trigger automatic cleanup and reload of content for the new floor
+- Camera can move freely in elevation without affecting which floor's content is displayed
 
 #### Station Vertical Flaring
 

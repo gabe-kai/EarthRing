@@ -41,7 +41,7 @@ const cameraController = new CameraController(
 
 // Initialize chunk manager (pass camera controller for position wrapping)
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController);
-const gridOverlay = new GridOverlay(sceneManager, cameraController, {
+const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateManager, {
   radius: 250, // 250m radius circular grid
   majorSpacing: 5,
   minorSpacing: 1,
@@ -49,7 +49,7 @@ const gridOverlay = new GridOverlay(sceneManager, cameraController, {
 });
 const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
-createZonesToolbar(zoneManager, gridOverlay);
+createZonesToolbar(zoneManager, gridOverlay, gameStateManager);
 
 // Initialize debug info panel
 const debugPanel = new DebugInfoPanel(
@@ -144,6 +144,9 @@ const CHUNK_LOAD_DISTANCE_THRESHOLD = 500; // Load new chunks if moved more than
 sceneManager.onRender((deltaTime) => {
   // Update camera controller with deltaTime for smooth movement
   cameraController.update(deltaTime);
+  const userAuthenticated = gameStateManager.isUserAuthenticated
+    ? gameStateManager.isUserAuthenticated()
+    : isAuthenticated();
   
   // Rotate test cube
   cube.rotation.x += 0.01;
@@ -159,7 +162,8 @@ sceneManager.onRender((deltaTime) => {
   // Check if camera has moved enough to load new chunks
   // Throttle chunk loading to avoid excessive requests
   const now = performance.now();
-  if (wsClient.isConnected() && 
+  if (userAuthenticated &&
+      wsClient.isConnected() && 
       !pendingChunkLoad && 
       (now - lastChunkLoadTime) >= CHUNK_LOAD_THROTTLE_MS) {
     const cameraPos = cameraController.getEarthRingPosition();
@@ -185,8 +189,8 @@ sceneManager.onRender((deltaTime) => {
       pendingChunkLoad = true;
       
       // Load chunks around camera position (radius of 4 chunks = 9 total chunks, within limit of 10)
-      // Use floor 0 for now (camera Z coordinate conversion can be inaccurate due to camera offsets)
-      const floor = 0;
+      // Use active floor from game state (independent of camera elevation)
+      const floor = gameStateManager.getActiveFloor();
       // Only log chunk loading in debug mode
       if (window.earthring?.debug) {
         console.log(`[Chunks] Loading around position ${cameraPos.x.toFixed(0)}m (chunk ${currentChunkIndex}, floor ${floor})`);
@@ -204,14 +208,18 @@ sceneManager.onRender((deltaTime) => {
           pendingChunkLoad = false;
         });
     }
+  } else if (!userAuthenticated) {
+    pendingChunkLoad = false;
   }
 
-  // Refresh zone overlays (ZoneManager throttles internally)
-  zoneManager.loadZonesAroundCamera();
-  
-  // Re-render zones if camera moved significantly (for proper wrapping)
-  if (zoneManager.shouldReRenderZones()) {
-    zoneManager.reRenderAllZones();
+  // Only refresh zones when authenticated
+  if (userAuthenticated) {
+    zoneManager.loadZonesAroundCamera();
+    
+    // Re-render zones if camera moved significantly (for proper wrapping)
+    if (zoneManager.shouldReRenderZones()) {
+      zoneManager.reRenderAllZones();
+    }
   }
   
   // Update zone editor floor based on camera position
@@ -349,12 +357,17 @@ wsClient.onOpen(async () => {
     connecting: false 
   });
   
+  if (!gameStateManager.isUserAuthenticated?.() && !isAuthenticated()) {
+    // User is not authenticated yet; skip auto-loading world data
+    return;
+  }
+  
   // Automatically load chunks around the camera position
   try {
     const cameraPos = cameraController.getEarthRingPosition();
-    // Load chunks at camera position (floor 0, radius 4 chunks = 9 total chunks)
-    // Use floor 0 explicitly since camera Z coordinate conversion can be inaccurate
-    await chunkManager.requestChunksAtPosition(cameraPos.x, 0, 4, 'medium');
+    // Load chunks at camera position using active floor from game state
+    const floor = gameStateManager.getActiveFloor();
+    await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium');
     // Only log in debug mode
     if (window.earthring?.debug) {
       console.log('[Chunks] Loaded chunks around camera position');

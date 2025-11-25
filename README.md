@@ -34,6 +34,9 @@ EarthRing is set on a massive orbital ring structure:
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
 - **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Polygon, Paintbrush, Dezone), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted, Dezone). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
+- **Active Floor System**: The player can select an active floor (-2 to +2) independent of camera elevation. All game content (chunks, zones, grid, buildings, NPCs) is loaded and rendered for the selected floor, allowing the camera to zoom out for a wider view while keeping actions on the chosen floor. The active floor can be changed using the `+`/`−` buttons in the zones toolbar (click "Z" icon to expand).
+- **Chunk mesh reuse & precision fixes**: Chunk geometry is now rendered relative to each chunk’s local origin and we cache meshes while the camera is stable. This eliminated the far-side platform flicker and prevents precision loss when working ~132,000 km away from the origin.
+- **Authentication-aware streaming**: The render loop, chunk loader, and zone manager now defer all network calls until the user is logged in. No more “Not authenticated” spam on cold starts—the client just shows the auth UI until tokens are present.
 
 ## Prerequisites
 
@@ -482,6 +485,10 @@ The server includes a complete authentication and security system:
 - **Token Refresh**: Automatic token refresh with rotation for enhanced security
 
 See `server/internal/auth/README.md` and `server/internal/api/README.md` for detailed documentation.
+
+## Known Issues
+
+- **Maglev default zones still invisible**: After a clean reset the five system `restricted` zones (one per floor, spanning the entire ring) are recreated in the database but remain invisible in the client. The mesh caching work removed flicker once the zone renders, but the initial fetch/render path still skips these full-ring zones. Tracking issue: finish render pipeline for system zones that span > 50% of the ring so the maglev stripe shows up immediately after reset.
 
 ## Documentation
 

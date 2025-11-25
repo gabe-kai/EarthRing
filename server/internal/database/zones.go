@@ -1446,8 +1446,9 @@ func (s *ZoneStorage) UpdateZone(id int64, input ZoneUpdateInput) (*Zone, error)
 	}
 
 	if input.Floor != nil {
-		if *input.Floor < 0 {
-			return nil, fmt.Errorf("zone floor must be >= 0")
+		// Allow floors from -2 to +2 (main ring structure)
+		if *input.Floor < -2 || *input.Floor > 2 {
+			return nil, fmt.Errorf("zone floor must be between -2 and 2, got %d", *input.Floor)
 		}
 		setClauses = append(setClauses, fmt.Sprintf("floor = $%d", argIdx))
 		args = append(args, *input.Floor)
@@ -1541,9 +1542,119 @@ func (s *ZoneStorage) CountZones() (int64, error) {
 	return count, nil
 }
 
+// RecreateDefaultZones recreates the default system zones (e.g., maglev transit zones).
+// This should be called after TRUNCATE to restore default zones.
+func (s *ZoneStorage) RecreateDefaultZones() error {
+	query := `
+		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
+		VALUES
+		  -- Floor -2
+		  (
+		    'Maglev Transit Zone (Floor -2)',
+		    'restricted',
+		    ST_MakePolygon(
+		      ST_MakeLine(ARRAY[
+		        ST_MakePoint(0, -10),
+		        ST_MakePoint(264000000, -10),
+		        ST_MakePoint(264000000, 10),
+		        ST_MakePoint(0, 10),
+		        ST_MakePoint(0, -10)
+		      ])
+		    ),
+		    -2,
+		    NULL,
+		    TRUE,
+		    '{"purpose": "maglev_transit", "description": "Reserved space for maglev train and loading/unloading equipment"}'::jsonb,
+		    '{"default_zone": true, "maglev_zone": true}'::jsonb
+		  ),
+		  -- Floor -1
+		  (
+		    'Maglev Transit Zone (Floor -1)',
+		    'restricted',
+		    ST_MakePolygon(
+		      ST_MakeLine(ARRAY[
+		        ST_MakePoint(0, -10),
+		        ST_MakePoint(264000000, -10),
+		        ST_MakePoint(264000000, 10),
+		        ST_MakePoint(0, 10),
+		        ST_MakePoint(0, -10)
+		      ])
+		    ),
+		    -1,
+		    NULL,
+		    TRUE,
+		    '{"purpose": "maglev_transit", "description": "Reserved space for maglev train and loading/unloading equipment"}'::jsonb,
+		    '{"default_zone": true, "maglev_zone": true}'::jsonb
+		  ),
+		  -- Floor 0 (primary floor with maglev rail)
+		  (
+		    'Maglev Transit Zone (Floor 0)',
+		    'restricted',
+		    ST_MakePolygon(
+		      ST_MakeLine(ARRAY[
+		        ST_MakePoint(0, -10),
+		        ST_MakePoint(264000000, -10),
+		        ST_MakePoint(264000000, 10),
+		        ST_MakePoint(0, 10),
+		        ST_MakePoint(0, -10)
+		      ])
+		    ),
+		    0,
+		    NULL,
+		    TRUE,
+		    '{"purpose": "maglev_transit", "description": "Reserved space for maglev train and loading/unloading equipment"}'::jsonb,
+		    '{"default_zone": true, "maglev_zone": true}'::jsonb
+		  ),
+		  -- Floor +1
+		  (
+		    'Maglev Transit Zone (Floor +1)',
+		    'restricted',
+		    ST_MakePolygon(
+		      ST_MakeLine(ARRAY[
+		        ST_MakePoint(0, -10),
+		        ST_MakePoint(264000000, -10),
+		        ST_MakePoint(264000000, 10),
+		        ST_MakePoint(0, 10),
+		        ST_MakePoint(0, -10)
+		      ])
+		    ),
+		    1,
+		    NULL,
+		    TRUE,
+		    '{"purpose": "maglev_transit", "description": "Reserved space for maglev train and loading/unloading equipment"}'::jsonb,
+		    '{"default_zone": true, "maglev_zone": true}'::jsonb
+		  ),
+		  -- Floor +2
+		  (
+		    'Maglev Transit Zone (Floor +2)',
+		    'restricted',
+		    ST_MakePolygon(
+		      ST_MakeLine(ARRAY[
+		        ST_MakePoint(0, -10),
+		        ST_MakePoint(264000000, -10),
+		        ST_MakePoint(264000000, 10),
+		        ST_MakePoint(0, 10),
+		        ST_MakePoint(0, -10)
+		      ])
+		    ),
+		    2,
+		    NULL,
+		    TRUE,
+		    '{"purpose": "maglev_transit", "description": "Reserved space for maglev train and loading/unloading equipment"}'::jsonb,
+		    '{"default_zone": true, "maglev_zone": true}'::jsonb
+		  )
+	`
+	_, err := s.db.Exec(query)
+	if err != nil {
+		return fmt.Errorf("failed to recreate default zones: %w", err)
+	}
+	return nil
+}
+
 // DeleteAllZones removes all zones from the database.
 // If cascade is true, uses TRUNCATE CASCADE (deletes all zones, resets sequence, cascades to related tables).
 // If cascade is false, uses DELETE (preserves related records but clears zone references).
+// After TRUNCATE, default zones are automatically recreated.
 // Returns the number of zones deleted.
 func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 	if cascade {
@@ -1559,6 +1670,12 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 		_, err = s.db.Exec(`TRUNCATE zones RESTART IDENTITY CASCADE`)
 		if err != nil {
 			return 0, fmt.Errorf("failed to truncate all zones: %w", err)
+		}
+
+		// Recreate default zones after TRUNCATE
+		if err := s.RecreateDefaultZones(); err != nil {
+			log.Printf("Warning: Failed to recreate default zones after TRUNCATE: %v", err)
+			// Don't fail the operation, just log the warning
 		}
 
 		return count, nil
@@ -1593,8 +1710,9 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 
 // ListZonesByArea returns all zones whose geometry intersects the provided bounding box on a floor.
 func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64) ([]Zone, error) {
-	if floor < 0 {
-		return nil, fmt.Errorf("floor must be >= 0")
+	// Allow floors from -2 to +2 (main ring structure)
+	if floor < -2 || floor > 2 {
+		return nil, fmt.Errorf("floor must be between -2 and 2, got %d", floor)
 	}
 	if minX >= maxX || minY >= maxY {
 		return nil, fmt.Errorf("invalid bounding box coordinates")
