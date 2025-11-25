@@ -30,6 +30,14 @@ export class ChunkManager {
     this.lastCameraX = null;
     const WRAP_RE_RENDER_THRESHOLD = 5000; // Re-render if camera moved more than 5km (reduce z-fighting)
     
+    // Streaming subscription state
+    this.streamingSubscriptionID = null;
+    this.useStreaming = true; // Enable server-driven streaming by default
+    this.lastSubscriptionPosition = null; // Track last position we subscribed at
+    this.lastSubscriptionFloor = null; // Track last floor we subscribed at
+    this.subscriptionRadiusMeters = 5000; // Store subscription radius
+    this.subscriptionWidthMeters = 5000; // Store subscription width
+    
     // Set up WebSocket message handlers
     this.setupWebSocketHandlers();
     
@@ -42,22 +50,29 @@ export class ChunkManager {
 
   /**
    * Get the current camera X position in EarthRing coordinates.
+   * Returns RAW (unwrapped) position for correct chunk rendering.
    * Falls back to the Three.js camera if the controller isn't available.
-   * @returns {number}
+   * @returns {number} Raw camera X position (may be negative or > RING_CIRCUMFERENCE)
    */
   getCurrentCameraX() {
-    if (this.cameraController?.getEarthRingPosition) {
-      const pos = this.cameraController.getEarthRingPosition();
-      if (pos && typeof pos.x === 'number') {
-        return pos.x;
-      }
-    }
+    // Always get raw position from Three.js camera directly to avoid wrapping
+    // Wrapping breaks chunk rendering when camera is at negative positions
     const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
     if (camera) {
       const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
       const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
       if (cameraEarthRingPos && typeof cameraEarthRingPos.x === 'number') {
+        // Return RAW position (not wrapped) for correct chunk rendering
         return cameraEarthRingPos.x;
+      }
+    }
+    // Fallback: try camera controller but note it wraps the value
+    if (this.cameraController?.getEarthRingPosition) {
+      const pos = this.cameraController.getEarthRingPosition();
+      if (pos && typeof pos.x === 'number') {
+        // This is wrapped, but better than nothing
+        console.warn('[Chunks] Using wrapped camera position from controller (may cause rendering issues)');
+        return pos.x;
       }
     }
     return 0;
@@ -79,9 +94,24 @@ export class ChunkManager {
    * Set up WebSocket message handlers for chunk data
    */
   setupWebSocketHandlers() {
-    // Handle chunk_data messages
+    // Handle chunk_data messages (legacy chunk_request responses)
     wsClient.on('chunk_data', (data) => {
       this.handleChunkData(data);
+    });
+    
+    // Handle stream_delta messages (server-driven streaming)
+    wsClient.on('stream_delta', (data) => {
+      // stream_delta can contain chunks, zones, or both
+      if (data.chunks && Array.isArray(data.chunks)) {
+        this.handleChunkData({ chunks: data.chunks });
+      }
+    });
+    
+    // Handle stream_ack messages (subscription confirmation)
+    wsClient.on('stream_ack', (data) => {
+      if (window.earthring?.debug) {
+        console.log('[Chunks] Streaming subscription confirmed:', data);
+      }
     });
     
     // Handle error messages
@@ -218,7 +248,61 @@ export class ChunkManager {
   }
   
   /**
+   * Subscribe to server-driven streaming for chunks and zones
+   * @param {number} ringPosition - Ring position in meters
+   * @param {number} floor - Floor number (active floor)
+   * @param {number} radiusMeters - Radius in meters to include (default: 5000m = 5km)
+   * @param {number} widthMeters - Width slice in meters (default: 5000m)
+   * @returns {Promise<string>} Promise that resolves with subscription ID
+   */
+  async subscribeToStreaming(ringPosition, floor, radiusMeters = 5000, widthMeters = 5000) {
+    if (!wsClient.isConnected()) {
+      throw new Error('WebSocket is not connected');
+    }
+
+    const cameraPos = this.cameraController?.getEarthRingPosition?.() || { x: ringPosition, y: 0, z: floor };
+    const elevation = cameraPos.y || 0;
+    const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
+
+    // Wrap ring position to valid range [0, RING_CIRCUMFERENCE) before sending to server
+    // The server will also wrap it, but wrapping on client ensures consistent behavior
+    const RING_CIRCUMFERENCE = 264000000;
+    const wrappedRingPosition = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+
+    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedRingPosition.toFixed(0)}, floor=${floor}, radius=${radiusMeters}m`);
+
+    try {
+      const response = await wsClient.request('stream_subscribe', {
+        pose: {
+          ring_position: wrappedRingPosition,
+          width_offset: widthOffset,
+          elevation: elevation,
+          active_floor: floor,
+        },
+        radius_meters: radiusMeters,
+        width_meters: widthMeters,
+        include_chunks: true,
+        include_zones: true, // Include zones for ZoneManager to consume
+      });
+
+      console.log(`[Chunks] stream_subscribe response:`, response);
+
+      this.streamingSubscriptionID = response.subscription_id;
+      // Store wrapped position for consistent distance calculations
+      this.lastSubscriptionPosition = wrappedRingPosition;
+      this.subscriptionRadiusMeters = radiusMeters;
+      this.subscriptionWidthMeters = widthMeters;
+      console.log(`[Chunks] Subscription stored: ID=${this.streamingSubscriptionID}, position=${this.lastSubscriptionPosition.toFixed(0)}`);
+      return response.subscription_id;
+    } catch (error) {
+      console.error('[Chunks] Failed to subscribe to streaming:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Request chunks based on ring position
+   * Uses streaming subscription if available, otherwise falls back to chunk_request
    * @param {number} ringPosition - Ring position in meters
    * @param {number} floor - Floor number
    * @param {number} radius - Number of chunks to load on each side (default: 1)
@@ -226,6 +310,65 @@ export class ChunkManager {
    * @returns {Promise} Promise that resolves when request is sent
    */
   async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium') {
+    // DEBUG: Always log this call to track what's happening
+    console.log(`[Chunks] requestChunksAtPosition called: position=${ringPosition.toFixed(0)}, floor=${floor}, streaming=${this.useStreaming}, hasSubscription=${!!this.streamingSubscriptionID}`);
+    
+    // If streaming is enabled and we have a subscription, update subscription if camera moved significantly
+    if (this.useStreaming && this.streamingSubscriptionID) {
+      // Check if camera has moved significantly (more than 1000m, different chunk, or different floor)
+      const RING_CIRCUMFERENCE = 264000000;
+      let distanceMoved = 0;
+      let chunkChanged = false;
+      
+      if (this.lastSubscriptionPosition !== null) {
+        // Wrap both positions for consistent distance calculation
+        const wrappedCurrent = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+        const wrappedLast = ((Math.round(this.lastSubscriptionPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+        
+        // Calculate wrapped distance (handles both positive and negative movement)
+        const directDistance = Math.abs(wrappedCurrent - wrappedLast);
+        const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+        distanceMoved = Math.min(directDistance, wrappedDistance);
+        
+        // Also check if we've moved to a different chunk (using wrapped positions)
+        const currentChunkIndex = positionToChunkIndex(wrappedCurrent);
+        const lastChunkIndex = positionToChunkIndex(wrappedLast);
+        chunkChanged = currentChunkIndex !== lastChunkIndex;
+        
+        console.log(`[Chunks] Distance calc: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedCurrent.toFixed(0)}, last=${this.lastSubscriptionPosition.toFixed(0)}, lastWrapped=${wrappedLast.toFixed(0)}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged} (${lastChunkIndex}→${currentChunkIndex})`);
+      } else {
+        console.log(`[Chunks] First subscription update (no last position)`);
+      }
+      
+      // Update subscription if:
+      // 1. First time (lastSubscriptionPosition is null)
+      // 2. Moved more than 1000m
+      // 3. Moved to a different chunk
+      // 4. Floor changed
+      const shouldUpdate = this.lastSubscriptionPosition === null || 
+                           distanceMoved > 1000 || 
+                           chunkChanged ||
+                           (this.lastSubscriptionFloor !== undefined && this.lastSubscriptionFloor !== floor);
+      
+      console.log(`[Chunks] Should update subscription: ${shouldUpdate} (lastPos=${this.lastSubscriptionPosition}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged}, floorChanged=${this.lastSubscriptionFloor !== floor})`);
+      
+      if (shouldUpdate) {
+        console.log(`[Chunks] Updating streaming subscription (moved ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged}, from ${this.lastSubscriptionPosition?.toFixed(0)} to ${ringPosition.toFixed(0)})`);
+        // Update subscription with new position
+        try {
+          await this.subscribeToStreaming(ringPosition, floor, this.subscriptionRadiusMeters, this.subscriptionWidthMeters);
+          this.lastSubscriptionFloor = floor;
+          console.log(`[Chunks] Subscription updated successfully`);
+        } catch (error) {
+          console.error('[Chunks] Failed to update streaming subscription:', error);
+          // Fall back to legacy chunk_request if subscription update fails
+          this.useStreaming = false;
+        }
+      } else {
+        console.log(`[Chunks] Subscription NOT updated (distance: ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged})`);
+      }
+      return;
+    }
     const centerChunkIndex = positionToChunkIndex(ringPosition);
     const chunkIDs = [];
     const CHUNK_COUNT = 264000;
@@ -263,11 +406,12 @@ export class ChunkManager {
    */
   async handleChunkData(data) {
     if (!data.chunks || !Array.isArray(data.chunks)) {
-      console.error('Invalid chunk_data format:', data);
+      console.error('[Chunks] Invalid chunk_data format:', data);
       return;
     }
-    
-    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server`);
+
+    const chunkIDs = data.chunks.map(c => c.id).join(', ');
+    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server: [${chunkIDs}]`);
     
     // Track statistics for summary logging
     const stats = {
@@ -557,16 +701,6 @@ export class ChunkManager {
       return null;
     }
     
-    // Only log mesh creation details in debug mode
-    if (window.earthring?.debug) {
-      console.log(`[Chunks] Creating mesh for ${chunkID}:`, {
-        vertexCount: geometry.vertices.length,
-        faceCount: geometry.faces.length,
-        width: geometry.width,
-        length: geometry.length,
-      });
-    }
-    
     // Create Three.js geometry
     const threeGeometry = new THREE.BufferGeometry();
     
@@ -583,6 +717,9 @@ export class ChunkManager {
     const cameraXFromScene = cameraEarthRingPosRaw.x || 0;
     const cameraX = (typeof cameraXOverride === 'number') ? cameraXOverride : cameraXFromScene;
     
+    // DEBUG: Log camera position for rendering
+    console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, cameraXFromScene=${cameraXFromScene.toFixed(0)}, cameraXOverride=${cameraXOverride}`);
+    
     // Determine chunk index and base position
     const chunkIndex = (chunkData.chunk_index ?? parseInt(chunkID.split('_')[1], 10)) || 0;
     const CHUNK_LENGTH = 1000;
@@ -592,6 +729,9 @@ export class ChunkManager {
     const circumferenceOffsetMultiple = Math.round((cameraX - chunkBaseX) / RING_CIRCUMFERENCE);
     const chunkOffset = circumferenceOffsetMultiple * RING_CIRCUMFERENCE;
     const chunkOriginX = chunkBaseX + chunkOffset;
+    
+    // DEBUG: Log chunk positioning
+    console.log(`[Chunks] Chunk ${chunkID} positioning: chunkIndex=${chunkIndex}, chunkBaseX=${chunkBaseX.toFixed(0)}, cameraX=${cameraX.toFixed(0)}, offsetMultiple=${circumferenceOffsetMultiple}, chunkOffset=${chunkOffset.toFixed(0)}, chunkOriginX=${chunkOriginX.toFixed(0)}`);
     
     // Process vertices
     let minX = Infinity, maxX = -Infinity;

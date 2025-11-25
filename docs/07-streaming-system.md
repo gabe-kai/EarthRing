@@ -93,7 +93,59 @@ Each chunk contains:
 
 ## Chunk Loading Strategy
 
-### Client-Side Loading
+### Server-Driven Streaming Contracts (New)
+
+The client no longer decides which chunks/zones to fetch. Instead, it describes the player’s pose once and the server responds with a subscription identifier plus preselected chunks. Future deltas are streamed automatically (implementation in progress).
+
+#### Subscription Request
+
+```json
+{
+  "type": "stream_subscribe",
+  "id": "req-42",
+  "data": {
+    "pose": {
+      "ring_position": 131981833,
+      "width_offset": 12.5,
+      "elevation": 150.0,
+      "active_floor": 0
+    },
+    "radius_meters": 5000,
+    "width_meters": 3000,
+    "include_chunks": true,
+    "include_zones": true
+  }
+}
+```
+
+- `pose`: camera/active floor snapshot.
+- `radius_meters`: longitudinal range server should cover (converted to chunk IDs server-side).
+- `width_meters`: width slice to include zones/procedural objects (future use).
+- `include_chunks` / `include_zones`: opt into whichever streams the client supports.
+
+#### Acknowledgement
+
+```json
+{
+  "type": "stream_ack",
+  "id": "req-42",
+  "data": {
+    "subscription_id": "sub_0_1711138123456",
+    "chunk_ids": ["0_131981", "0_131982", "0_131983"],
+    "message": "Streaming subscription registered. Chunk/zone deltas will be delivered in upcoming revisions."
+  }
+}
+```
+
+- `subscription_id`: server-assigned handle used for future control messages (pause, unsubscribe – TBD).
+- `chunk_ids`: current chunk window (derived using shared coordinate helpers).
+- `message`: human-readable status.
+
+The acknowledgement is available in code today; actual delta streaming reuses this contract once the backend emits update events.
+
+### Client-Side Loading (Legacy – being phased out)
+
+Existing clients still run the viewport-based loader described below until the new streaming feed is fully implemented. Once all server work lands, this section will be removed.
 
 #### Viewport-Based Loading
 
@@ -114,7 +166,7 @@ Clients load chunks based on viewport and movement prediction:
    - **Low Priority**: Chunks in predicted path
    - **Unload**: Chunks beyond threshold distance
 
-#### Loading Algorithm
+#### Loading Algorithm (Legacy)
 
 ```python
 def get_chunks_to_load(player_position, viewport_size, movement_direction):
@@ -192,7 +244,7 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
    - Returns chunks with compressed ring floor geometry and station flares (variable-width chunks)
    - Ring floor geometry is visible in client (gray rectangular planes with variable width)
    - Client automatically decompresses geometry on receipt (<3ms per chunk)
-- Client seam handling: the web client dynamically shifts entire chunk meshes by integer multiples of the ring circumference so that only the copy closest to the camera is rendered. This ensures chunk `263999` sits perfectly beside chunk `0` with no overlapping geometry or visible gaps when the camera crosses the wrap point.
+- Client seam handling: the web client dynamically shifts entire chunk meshes by integer multiples of the ring circumference so that only the copy closest to the camera is rendered. This ensures chunk `263999` sits perfectly beside chunk `0` with no overlapping geometry or visible gaps when the camera crosses the wrap point. The wrapping calculation uses the raw (unwrapped) camera position from the Three.js camera directly, not the wrapped position from `getEarthRingPosition()`, to ensure correct chunk positioning when the camera is at negative positions or positions beyond the ring circumference.
 
 #### Chunk Storage ✅ **IMPLEMENTED**
 

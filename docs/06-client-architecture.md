@@ -385,6 +385,7 @@ Manages chunk loading and unloading based on viewport.
 - **Floor change handling**: Automatically clears chunks from other floors and reloads for new floor when active floor changes
 - Mesh management and cleanup
 - Seam-aware rendering with chunk wrapping
+- **Upcoming change**: The chunk manager is being slimmed into a pure rendering adapter. Once the server-driven `stream_subscribe` contract is fully implemented, the client will stop issuing `chunk_request` messages entirely and simply consume streamed deltas (see `docs/07-streaming-system.md`).
 
 **Chunk UI** (`client-web/src/ui/chunk-ui.js`):
 - Chunk metadata retrieval interface
@@ -401,7 +402,7 @@ Manages chunk loading and unloading based on viewport.
 - Ring floor geometry rendering with variable width from station flares
 - **Mesh reuse + precision fix**: Each `renderChunk()` call now computes a chunk-local origin, stores the large absolute X coordinate on the mesh transform, and caches meshes keyed by a `chunkVersionToken`. Identical geometry is skipped entirely unless the camera wraps by >5 km. This both eliminated the far-side platform flicker and keeps 264,000 km coordinates numerically stable inside `Float32Array` buffers.
 - Keyboard-relative camera controls (WASD for forward/backward/strafe movement relative to camera view, QE for vertical up/down) integrated with OrbitControls while respecting focused input fields
-- Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam
+- Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam. The wrapping calculation uses the raw camera position (which may be negative or > RING_CIRCUMFERENCE) to correctly determine which copy of each chunk to render.
 - **Floor change handling**: When active floor changes, all chunk meshes from the old floor are removed, chunks are removed from game state, and chunks for the new floor are automatically loaded
 - Mesh cleanup and resource disposal
 - Integration with game state manager for caching

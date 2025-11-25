@@ -17,6 +17,7 @@ import (
 	"github.com/earthring/server/internal/database"
 	"github.com/earthring/server/internal/procedural"
 	"github.com/earthring/server/internal/ringmap"
+	"github.com/earthring/server/internal/streaming"
 	"github.com/gorilla/websocket"
 )
 
@@ -144,6 +145,8 @@ type WebSocketHandlers struct {
 	jwtService       *auth.JWTService
 	proceduralClient *procedural.ProceduralClient
 	chunkStorage     *database.ChunkStorage
+	zoneStorage      *database.ZoneStorage
+	streamManager    *streaming.Manager
 	upgrader         websocket.Upgrader
 }
 
@@ -151,6 +154,7 @@ type WebSocketHandlers struct {
 func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 	jwtService := auth.NewJWTService(cfg)
 	proceduralClient := procedural.NewProceduralClient(cfg)
+	chunkStorage := database.NewChunkStorage(db)
 
 	// Get allowed origins from config or use defaults
 	allowedOrigins := []string{
@@ -166,7 +170,9 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 		config:           cfg,
 		jwtService:       jwtService,
 		proceduralClient: proceduralClient,
-		chunkStorage:     database.NewChunkStorage(db),
+		chunkStorage:     chunkStorage,
+		zoneStorage:      database.NewZoneStorage(db),
+		streamManager:    streaming.NewManager(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -430,6 +436,8 @@ func (h *WebSocketHandlers) handleMessage(conn *WebSocketConnection, msg *WebSoc
 		h.handleChunkRequest(conn, msg)
 	case "player_move":
 		h.handlePlayerMove(conn, msg)
+	case "stream_subscribe":
+		h.handleStreamSubscribe(conn, msg)
 	default:
 		conn.sendError(msg.ID, "Unknown message type", "UnknownMessageType")
 	}
@@ -533,43 +541,16 @@ type ChunkDataResponse struct {
 	Chunks []ChunkData `json:"chunks"`
 }
 
-// handleChunkRequest handles chunk request messages
-func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *WebSocketMessage) {
-	// Parse request data
-	var requestData ChunkRequestData
-	if err := json.Unmarshal(msg.Data, &requestData); err != nil {
-		conn.sendError(msg.ID, "Invalid chunk request format", "InvalidMessageFormat")
-		return
-	}
-
-	// Validate chunks array
-	if len(requestData.Chunks) == 0 {
-		conn.sendError(msg.ID, "Chunks array cannot be empty", "InvalidMessageFormat")
-		return
-	}
-
-	// Limit number of chunks per request (prevent abuse)
-	maxChunks := 10
-	if len(requestData.Chunks) > maxChunks {
-		conn.sendError(msg.ID, fmt.Sprintf("Too many chunks requested (max %d)", maxChunks), "InvalidMessageFormat")
-		return
-	}
-
-	// Default LOD level
-	lodLevel := requestData.LODLevel
+// loadChunksForIDs loads chunk data for the given chunk IDs and LOD level.
+// This is the server-side chunk processing pipeline that handles database lookup,
+// generation, compression, and wrapping.
+func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string) []ChunkData {
 	if lodLevel == "" {
 		lodLevel = "medium"
 	}
 
-	// Validate LOD level
-	if lodLevel != "low" && lodLevel != "medium" && lodLevel != "high" {
-		conn.sendError(msg.ID, "Invalid LOD level (must be 'low', 'medium', or 'high')", "InvalidMessageFormat")
-		return
-	}
-
-	// Process each chunk
 	var chunks []ChunkData
-	for _, chunkID := range requestData.Chunks {
+	for _, chunkID := range chunkIDs {
 		// Parse chunk ID format: "floor_chunk_index"
 		chunkParts := strings.Split(chunkID, "_")
 		if len(chunkParts) != 2 {
@@ -622,7 +603,6 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 			}
 		} else if storedMetadata == nil {
 			// Chunk doesn't exist - generate it using procedural service
-			// Pass nil for world seed (procedural service will use default)
 			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
 			if err != nil {
 				log.Printf("Failed to generate chunk %s: %v", chunkID, err)
@@ -645,7 +625,6 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 				// Store the generated chunk in the database
 				if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 					log.Printf("Failed to store chunk %s: %v", chunkID, err)
-					// Continue anyway - we'll return the chunk data even if storage fails
 				}
 
 				// Convert procedural service response to chunk data
@@ -659,7 +638,7 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 						Floor:        floor,
 						ChunkIndex:   chunkIndex,
 						Version:      genResponse.Chunk.Version,
-						LastModified: time.Now(), // Use current time since chunk was just generated
+						LastModified: time.Now(),
 						IsDirty:      false,
 					},
 				}
@@ -696,7 +675,6 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 					// Store the regenerated chunk in the database
 					if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 						log.Printf("Failed to store regenerated chunk %s: %v", chunkID, err)
-						// Continue anyway - we'll return the chunk data even if storage fails
 					}
 					// Convert procedural service response to chunk data
 					chunk = ChunkData{
@@ -716,14 +694,11 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 				}
 			} else {
 				// Chunk version is current - load it from database
-				// Load geometry from terrain_data JSONB field
 				geometry, err := h.chunkStorage.ConvertPostGISToGeometry(storedMetadata.ID)
 				if err != nil {
 					log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
-					// Continue with nil geometry - chunk metadata is still valid
 				}
 
-				// Convert stored metadata to API format
 				metadata := ChunkMetadata{
 					ID:           chunkID,
 					Floor:        storedMetadata.Floor,
@@ -735,9 +710,9 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 
 				chunk = ChunkData{
 					ID:         chunkID,
-					Geometry:   geometry,        // Loaded from database
-					Structures: []interface{}{}, // Empty for Phase 1
-					Zones:      []interface{}{}, // Empty for Phase 1
+					Geometry:   geometry,
+					Structures: []interface{}{},
+					Zones:      []interface{}{},
 					Metadata:   &metadata,
 				}
 			}
@@ -745,9 +720,8 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 
 		// Compress geometry if present
 		if chunk.Geometry != nil {
-			// Check if geometry is already compressed (shouldn't happen, but be safe)
 			if compressedGeom, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
-				// Already compressed, log and continue
+				// Already compressed
 				compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
 				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)",
 					chunkID, compressedGeom.Size, compressionRatio)
@@ -759,7 +733,6 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 					chunkGeometry = geom
 				case map[string]interface{}:
 					// Skip compression for map types (database-loaded geometry)
-					// They'll be sent uncompressed for now
 					log.Printf("Chunk %s geometry is map type, skipping compression", chunkID)
 				default:
 					log.Printf("Chunk %s geometry has unknown type, skipping compression", chunkID)
@@ -770,9 +743,7 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 					compressedGeometry, err := compressChunkGeometry(chunk.Geometry)
 					if err != nil {
 						log.Printf("Failed to compress geometry for chunk %s: %v", chunkID, err)
-						// Continue with uncompressed geometry if compression fails
 					} else {
-						// Log compression success with stats
 						if compressedGeom, ok := compressedGeometry.(*compression.CompressedGeometry); ok {
 							compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
 							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)",
@@ -789,36 +760,23 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 		chunks = append(chunks, chunk)
 	}
 
-	// Send chunk_data response
+	return chunks
+}
+
+// sendChunkData sends chunk data to a WebSocket connection
+func (h *WebSocketHandlers) sendChunkData(conn *WebSocketConnection, chunks []ChunkData, messageType string, messageID string) {
 	response := WebSocketMessage{
-		Type: "chunk_data",
-		ID:   msg.ID,
+		Type: messageType,
+		ID:   messageID,
 	}
 
 	responseData := ChunkDataResponse{
 		Chunks: chunks,
 	}
 
-	// Log chunk data being sent (for debugging)
-	for _, chunk := range chunks {
-		hasGeometry := chunk.Geometry != nil
-		geometryType := ""
-		if hasGeometry {
-			if geomMap, ok := chunk.Geometry.(map[string]interface{}); ok {
-				if gt, ok := geomMap["type"].(string); ok {
-					geometryType = gt
-				}
-			} else if geomPtr, ok := chunk.Geometry.(*procedural.ChunkGeometry); ok && geomPtr != nil {
-				geometryType = geomPtr.Type
-			}
-		}
-		log.Printf("Sending chunk %s: hasGeometry=%v, geometryType=%s", chunk.ID, hasGeometry, geometryType)
-	}
-
 	responseDataBytes, err := json.Marshal(responseData)
 	if err != nil {
 		log.Printf("Failed to marshal chunk data response: %v", err)
-		conn.sendError(msg.ID, "Failed to prepare chunk data", "InternalError")
 		return
 	}
 
@@ -826,15 +784,225 @@ func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *W
 
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("Failed to marshal chunk_data response: %v", err)
-		conn.sendError(msg.ID, "Failed to prepare response", "InternalError")
+		log.Printf("Failed to marshal %s response: %v", messageType, err)
 		return
 	}
 
 	select {
 	case conn.send <- responseBytes:
 	default:
-		log.Printf("Failed to send chunk_data: channel full")
+		log.Printf("Failed to send %s: channel full", messageType)
+	}
+}
+
+// handleChunkRequest handles chunk request messages
+func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *WebSocketMessage) {
+	// Parse request data
+	var requestData ChunkRequestData
+	if err := json.Unmarshal(msg.Data, &requestData); err != nil {
+		conn.sendError(msg.ID, "Invalid chunk request format", "InvalidMessageFormat")
+		return
+	}
+
+	// Validate chunks array
+	if len(requestData.Chunks) == 0 {
+		conn.sendError(msg.ID, "Chunks array cannot be empty", "InvalidMessageFormat")
+		return
+	}
+
+	// Limit number of chunks per request (prevent abuse)
+	maxChunks := 10
+	if len(requestData.Chunks) > maxChunks {
+		conn.sendError(msg.ID, fmt.Sprintf("Too many chunks requested (max %d)", maxChunks), "InvalidMessageFormat")
+		return
+	}
+
+	// Default LOD level
+	lodLevel := requestData.LODLevel
+	if lodLevel == "" {
+		lodLevel = "medium"
+	}
+
+	// Validate LOD level
+	if lodLevel != "low" && lodLevel != "medium" && lodLevel != "high" {
+		conn.sendError(msg.ID, "Invalid LOD level (must be 'low', 'medium', or 'high')", "InvalidMessageFormat")
+		return
+	}
+
+	// Load chunks using server-side pipeline
+	chunks := h.loadChunksForIDs(requestData.Chunks, lodLevel)
+
+	// Send chunk_data response
+	h.sendChunkData(conn, chunks, "chunk_data", msg.ID)
+}
+
+// handleStreamSubscribe registers a server-driven streaming subscription.
+func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg *WebSocketMessage) {
+	if h.streamManager == nil {
+		conn.sendError(msg.ID, "Streaming manager unavailable", "InternalError")
+		return
+	}
+
+	var req streaming.SubscriptionRequest
+	if err := json.Unmarshal(msg.Data, &req); err != nil {
+		conn.sendError(msg.ID, "Invalid stream_subscribe payload", "InvalidMessageFormat")
+		return
+	}
+
+	log.Printf("[Stream] stream_subscribe received: user_id=%d, ring_position=%d, active_floor=%d, radius=%d, include_chunks=%v, include_zones=%v",
+		conn.userID, req.Pose.RingPosition, req.Pose.ActiveFloor, req.RadiusMeters, req.IncludeChunks, req.IncludeZones)
+
+	plan, err := h.streamManager.PlanSubscription(conn.userID, req)
+	if err != nil {
+		log.Printf("[Stream] PlanSubscription failed: %v", err)
+		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
+		return
+	}
+
+	log.Printf("[Stream] PlanSubscription success: subscription_id=%s, chunk_count=%d, chunk_ids=%v",
+		plan.SubscriptionID, len(plan.ChunkIDs), plan.ChunkIDs)
+
+	response := WebSocketMessage{
+		Type: "stream_ack",
+		ID:   msg.ID,
+	}
+
+	ackPayload := struct {
+		SubscriptionID string   `json:"subscription_id"`
+		ChunkIDs       []string `json:"chunk_ids,omitempty"`
+		Message        string   `json:"message"`
+	}{
+		SubscriptionID: plan.SubscriptionID,
+		ChunkIDs:       plan.ChunkIDs,
+		Message:        "Streaming subscription registered. Chunk/zone deltas will be delivered in upcoming revisions.",
+	}
+
+	data, err := json.Marshal(ackPayload)
+	if err != nil {
+		log.Printf("Failed to marshal stream_ack payload: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare stream acknowledgement", "InternalError")
+		return
+	}
+
+	response.Data = data
+	bytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal stream_ack response: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare stream acknowledgement", "InternalError")
+		return
+	}
+
+	select {
+	case conn.send <- bytes:
+	default:
+		log.Printf("Failed to send stream_ack: channel full")
+	}
+
+	// Phase 2: Server-side chunk delivery - send initial chunks asynchronously
+	if req.IncludeChunks && len(plan.ChunkIDs) > 0 {
+		go func() {
+			log.Printf("[Stream] Loading %d chunks for subscription %s: %v", len(plan.ChunkIDs), plan.SubscriptionID, plan.ChunkIDs)
+			// Load chunks using server-side pipeline (database lookup, generation, compression)
+			chunks := h.loadChunksForIDs(plan.ChunkIDs, "medium")
+			log.Printf("[Stream] Loaded %d chunks (requested %d) for subscription %s", len(chunks), len(plan.ChunkIDs), plan.SubscriptionID)
+			if len(chunks) > 0 {
+				// Send chunks as stream_delta message (server-driven format)
+				h.sendChunkData(conn, chunks, "stream_delta", "")
+				log.Printf("[Stream] Sent %d initial chunks for subscription %s", len(chunks), plan.SubscriptionID)
+			} else {
+				log.Printf("[Stream] WARNING: No chunks loaded for subscription %s (requested %d chunk IDs)", plan.SubscriptionID, len(plan.ChunkIDs))
+			}
+		}()
+	} else {
+		log.Printf("[Stream] Skipping chunk delivery: include_chunks=%v, chunk_count=%d", req.IncludeChunks, len(plan.ChunkIDs))
+	}
+
+	// Phase 2: Server-side zone delivery - send initial zones asynchronously
+	if req.IncludeZones {
+		go func() {
+			// Compute bounding box for zone query
+			bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
+			zones := h.loadZonesForArea(bbox)
+			if len(zones) > 0 {
+				// Extract zone IDs and update subscription
+				zoneIDs := make([]int64, len(zones))
+				for i, zone := range zones {
+					zoneIDs[i] = zone.ID
+				}
+				// Update subscription with zone IDs (for delta computation)
+				if delta, err := h.streamManager.ComputeZoneDelta(plan.SubscriptionID, zoneIDs); err != nil {
+					log.Printf("Failed to update zone IDs in subscription: %v", err)
+				} else if len(delta.AddedZoneIDs) > 0 {
+					log.Printf("Initial zone subscription: %d zones added", len(delta.AddedZoneIDs))
+				}
+
+				// Send zones as stream_delta message (server-driven format)
+				h.sendZoneData(conn, zones, "stream_delta", "")
+				log.Printf("Sent %d initial zones for subscription %s", len(zones), plan.SubscriptionID)
+			}
+		}()
+	}
+}
+
+// loadZonesForArea loads zones for the given bounding box.
+// This is the server-side zone processing pipeline that handles database lookup,
+// active-floor filtering, and full-ring/system-zone retention.
+func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox) []database.Zone {
+	if h.zoneStorage == nil {
+		log.Printf("Zone storage unavailable")
+		return nil
+	}
+
+	// Validate bounding box
+	if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
+		log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
+		return nil
+	}
+
+	// Load zones from database using existing storage method
+	zones, err := h.zoneStorage.ListZonesByArea(bbox.Floor, bbox.MinX, bbox.MinY, bbox.MaxX, bbox.MaxY)
+	if err != nil {
+		log.Printf("Failed to load zones for area: %v", err)
+		return nil
+	}
+
+	return zones
+}
+
+// ZoneDataResponse represents the data payload for a zone_data or stream_delta message with zones.
+type ZoneDataResponse struct {
+	Zones []database.Zone `json:"zones"`
+}
+
+// sendZoneData sends zone data to a WebSocket connection.
+func (h *WebSocketHandlers) sendZoneData(conn *WebSocketConnection, zones []database.Zone, messageType string, messageID string) {
+	response := WebSocketMessage{
+		Type: messageType,
+		ID:   messageID,
+	}
+
+	responseData := ZoneDataResponse{
+		Zones: zones,
+	}
+
+	responseDataBytes, err := json.Marshal(responseData)
+	if err != nil {
+		log.Printf("Failed to marshal zone data response: %v", err)
+		return
+	}
+
+	response.Data = responseDataBytes
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal %s response: %v", messageType, err)
+		return
+	}
+
+	select {
+	case conn.send <- responseBytes:
+	default:
+		log.Printf("Failed to send %s: channel full", messageType)
 	}
 }
 
