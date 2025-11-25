@@ -34,7 +34,7 @@ export class ZoneEditor {
     // Editor state
     this.currentTool = TOOLS.NONE;
     this.isDrawing = false;
-    this.currentFloor = 0;
+    this.currentFloor = 0; // Will be synced with gameState.activeFloor
     this.currentZoneType = 'residential';
     
     // Drawing state
@@ -65,8 +65,13 @@ export class ZoneEditor {
     // Set up mouse event listeners
     this.setupMouseListeners();
     
-    // Initialize floor from camera position
-    this.updateFloorFromCamera();
+    // Initialize floor from game state (active floor, not camera)
+    this.currentFloor = this.gameStateManager.getActiveFloor();
+    
+    // Listen for active floor changes
+    this.gameStateManager.on('activeFloorChanged', ({ newFloor }) => {
+      this.setFloor(newFloor);
+    });
   }
   
   /**
@@ -858,19 +863,12 @@ export class ZoneEditor {
   }
   
   /**
-   * Update floor based on current camera position
-   * Should be called periodically (e.g., in render loop)
+   * @deprecated Floor is now managed by gameState.activeFloor, not camera position
+   * This method is kept for backwards compatibility but does nothing
    */
   updateFloorFromCamera() {
-    if (!this.cameraController) {
-      return;
-    }
-    
-    const currentFloor = this.cameraController.getCurrentFloor();
-    if (currentFloor !== this.lastFloor) {
-      this.setFloor(currentFloor);
-      this.lastFloor = currentFloor;
-    }
+    // Floor is now managed by gameState.activeFloor, not camera position
+    // This method is kept for backwards compatibility but does nothing
   }
   
   /**

@@ -59,7 +59,7 @@ export class ChunkManager {
    * Set up game state listeners
    */
   setupStateListeners() {
-    // When a chunk is added to state, render it
+    // When a chunk is added to state, render it (if it matches active floor)
     this.gameStateManager.on('chunkAdded', ({ chunkID, chunkData }) => {
       this.renderChunk(chunkID, chunkData);
     });
@@ -68,6 +68,45 @@ export class ChunkManager {
     this.gameStateManager.on('chunkRemoved', ({ chunkID }) => {
       this.removeChunkMesh(chunkID);
     });
+    
+    // When active floor changes, clear chunks from other floors and reload for new floor
+    this.gameStateManager.on('activeFloorChanged', ({ newFloor }) => {
+      // Remove all chunk meshes that don't match the new floor
+      const chunksToRemove = [];
+      this.chunkMeshes.forEach((mesh, chunkID) => {
+        const chunkFloor = this.getFloorFromChunkID(chunkID);
+        if (chunkFloor !== newFloor) {
+          chunksToRemove.push(chunkID);
+        }
+      });
+      chunksToRemove.forEach(chunkID => {
+        this.removeChunkMesh(chunkID);
+        this.gameStateManager.removeChunk(chunkID);
+      });
+      
+      // Reload chunks for the new floor
+      if (this.cameraController) {
+        const cameraPos = this.cameraController.getEarthRingPosition();
+        this.requestChunksAtPosition(cameraPos.x, newFloor, 4, 'medium')
+          .catch(error => {
+            console.error('[Chunks] Failed to load chunks for new floor:', error);
+          });
+      }
+    });
+  }
+  
+  /**
+   * Extract floor number from chunk ID (format: "floor_chunk_index")
+   * @param {string} chunkID - Chunk ID
+   * @returns {number} Floor number
+   */
+  getFloorFromChunkID(chunkID) {
+    const parts = chunkID.split('_');
+    if (parts.length >= 2) {
+      const floor = parseInt(parts[0], 10);
+      return isNaN(floor) ? 0 : floor;
+    }
+    return 0;
   }
   
   /**
@@ -382,6 +421,15 @@ export class ChunkManager {
    * @param {boolean} forceReRender - Force re-render even if data is the same (for wrapping)
    */
   renderChunk(chunkID, chunkData, forceReRender = false) {
+    // Only render chunks that match the active floor
+    const activeFloor = this.gameStateManager.getActiveFloor();
+    const chunkFloor = this.getFloorFromChunkID(chunkID);
+    if (chunkFloor !== activeFloor) {
+      // Chunk is for a different floor - remove it if it exists
+      this.removeChunkMesh(chunkID);
+      return;
+    }
+    
     // Check if chunk is already rendered and hasn't changed
     // Only skip if we're not forcing a re-render (for wrapping)
     if (!forceReRender) {

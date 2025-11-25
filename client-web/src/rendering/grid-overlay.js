@@ -91,9 +91,10 @@ const pushThickLineVertices = (
 };
 
 export class GridOverlay {
-  constructor(sceneManager, cameraController, options = {}) {
+  constructor(sceneManager, cameraController, gameStateManager = null, options = {}) {
     this.sceneManager = sceneManager;
     this.cameraController = cameraController;
+    this.gameStateManager = gameStateManager;
     // TODO: Platform edge clipping - The grid currently shows over the edge of platforms where they flare.
     //       Previous attempts to implement platform-aware clipping (using raycasting and geometry profiles)
     //       caused severe performance issues (FPS dropped to <1) and were reverted. A future implementation
@@ -108,6 +109,14 @@ export class GridOverlay {
     this.buildGridGroup();
     this.sceneManager.getScene().add(this.group);
     this.updatePosition(true);
+    
+    // Listen for active floor changes and update grid position
+    if (this.gameStateManager) {
+      this.gameStateManager.on('activeFloorChanged', () => {
+        // Force update grid position to new floor
+        this.updatePosition(true);
+      });
+    }
   }
 
   buildGridGroup() {
@@ -219,8 +228,9 @@ export class GridOverlay {
     const anchorEarth =
       this.cameraController.getTargetEarthRingPosition?.() ??
       this.cameraController.getEarthRingPosition();
-    const currentFloor =
-      this.cameraController.getCurrentFloor?.() ?? Math.round(anchorEarth.z);
+    // Use active floor from game state (independent of camera elevation)
+    const currentFloor = this.gameStateManager?.getActiveFloor() ?? 
+      (this.cameraController.getCurrentFloor?.() ?? Math.round(anchorEarth.z));
     const floorHeight = currentFloor * DEFAULT_FLOOR_HEIGHT;
 
     const worldX = anchorEarth.x;

@@ -77,6 +77,17 @@ Migrations are numbered sequentially and follow the pattern:
     - **Preserves**: Interior rings (holes) in polygons
     - **Requires**: Migration 000001 (PostGIS)
 
+17. `000017_create_default_maglev_zones` - Create default maglev restricted zones
+    - Creates: 5 default Restricted zones (one for each floor: -2, -1, 0, 1, 2)
+    - **Purpose**: Reserves space for maglev train and loading/unloading equipment on all floors
+    - **Zone specifications**:
+      - Width: 20m (Y: -10 to +10)
+      - Length: Full ring (X: 0 to 264,000,000)
+      - Type: Restricted (prevents building)
+      - System zone: Yes (protected from player modifications)
+    - **Idempotent**: Deletes existing default maglev zones before creating new ones
+    - **Requires**: Migration 000003 (zones table)
+
 ## Database Objects Created
 
 ### Extensions

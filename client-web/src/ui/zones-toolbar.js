@@ -3,7 +3,7 @@
  * Left-side vertical toolbar with expandable zone controls
  */
 
-export function createZonesToolbar(zoneManager, gridOverlay) {
+export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
   const toolbar = document.createElement('div');
   toolbar.id = 'zones-toolbar';
   toolbar.className = 'zones-toolbar';
@@ -149,6 +149,55 @@ export function createZonesToolbar(zoneManager, gridOverlay) {
       border-color: #ff4444;
       color: #ff4444;
     }
+
+    .zones-toolbar-floor-selector {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(0, 255, 0, 0.1);
+      margin-top: 8px;
+    }
+
+    .zones-toolbar-floor-label {
+      color: #00ff00;
+      font-size: 14px;
+      flex: 1;
+    }
+
+    .zones-toolbar-floor-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .zones-toolbar-floor-button {
+      background: rgba(0, 255, 0, 0.2);
+      border: 1px solid #00ff00;
+      border-radius: 4px;
+      color: #00ff00;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .zones-toolbar-floor-button:hover {
+      background: rgba(0, 255, 0, 0.3);
+    }
+
+    .zones-toolbar-floor-display {
+      color: #00ff00;
+      font-size: 16px;
+      font-weight: bold;
+      min-width: 40px;
+      text-align: center;
+    }
   `;
   document.head.appendChild(style);
 
@@ -197,6 +246,63 @@ export function createZonesToolbar(zoneManager, gridOverlay) {
 
     return item;
   };
+
+  // Floor selector
+  const floorSelector = document.createElement('div');
+  floorSelector.className = 'zones-toolbar-floor-selector';
+  
+  const floorLabel = document.createElement('div');
+  floorLabel.className = 'zones-toolbar-floor-label';
+  floorLabel.textContent = 'Active Floor';
+  floorSelector.appendChild(floorLabel);
+  
+  const floorControls = document.createElement('div');
+  floorControls.className = 'zones-toolbar-floor-controls';
+  
+  const floorDown = document.createElement('button');
+  floorDown.className = 'zones-toolbar-floor-button';
+  floorDown.textContent = '−';
+  floorDown.title = 'Go down one floor';
+  floorDown.onclick = () => {
+    if (gameStateManager) {
+      const current = gameStateManager.getActiveFloor();
+      gameStateManager.setActiveFloor(current - 1);
+      updateFloorDisplay();
+    }
+  };
+  floorControls.appendChild(floorDown);
+  
+  const floorDisplay = document.createElement('div');
+  floorDisplay.className = 'zones-toolbar-floor-display';
+  floorDisplay.textContent = gameStateManager ? gameStateManager.getActiveFloor() : '0';
+  floorControls.appendChild(floorDisplay);
+  
+  const floorUp = document.createElement('button');
+  floorUp.className = 'zones-toolbar-floor-button';
+  floorUp.textContent = '+';
+  floorUp.title = 'Go up one floor';
+  floorUp.onclick = () => {
+    if (gameStateManager) {
+      const current = gameStateManager.getActiveFloor();
+      gameStateManager.setActiveFloor(current + 1);
+      updateFloorDisplay();
+    }
+  };
+  floorControls.appendChild(floorUp);
+  
+  floorSelector.appendChild(floorControls);
+  panel.appendChild(floorSelector);
+  
+  // Update floor display when active floor changes
+  const updateFloorDisplay = () => {
+    if (gameStateManager) {
+      floorDisplay.textContent = gameStateManager.getActiveFloor();
+    }
+  };
+  
+  if (gameStateManager) {
+    gameStateManager.on('activeFloorChanged', updateFloorDisplay);
+  }
 
   // Grid toggle
   panel.appendChild(

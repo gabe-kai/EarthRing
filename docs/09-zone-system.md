@@ -726,14 +726,18 @@ Dezone operations handle wrapped coordinates (zones crossing the X-axis boundary
   - Shape is then rotated -90° around X-axis to lie flat on the ring floor
   - **Y Coordinate Handling**: The shape's Y coordinate (`worldPos.z`) is always negated before creating the fill shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis. The outline (stroke) uses `worldPos.z` directly without negation, as it renders correctly regardless of Y sign.
 
-- **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). Fetching is throttled to once per 4 seconds to prevent excessive API calls.
+- **Active Floor System**: Zones are fetched and rendered only for the **active floor** (player-selected floor from `gameStateManager.getActiveFloor()`), not camera elevation. This allows the camera to zoom out for a wider view while keeping zone actions on the selected floor. When the active floor changes, all zones from the old floor are removed and zones for the new floor are automatically loaded.
+
+- **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). The floor parameter is set to the active floor, not camera elevation. Fetching is throttled to once per 4 seconds to prevent excessive API calls.
   - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
+  - **Floor Filtering**: Only zones matching the active floor are rendered. Zones from other floors are automatically removed when the active floor changes.
   - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization to ensure zones near X=0 remain visible even when the camera is at a different position.
 
-- **Visibility System**: Two-level visibility control:
-  - Global visibility: All zones on/off
-  - Per-type visibility: Individual zone types can be shown/hidden independently
-  - Zones toolbar provides UI controls for both levels
+- **Visibility System**: Three-level visibility control:
+  - **Active Floor filtering**: Only zones matching the active floor are rendered (highest priority)
+  - Global visibility: All zones on/off (for the active floor only)
+  - Per-type visibility: Individual zone types can be shown/hidden independently (for the active floor only)
+  - Zones toolbar provides UI controls for floor selection and visibility levels
 
 - **Grid Overlay Separation**: Grid is rendered separately using circular `THREE.LineSegments` geometry with shader-driven fade and LOD. The overlay renders a bold world Y=0 axis plus thicker 20m multiples, while zones stay separate so they remain fully visible while the grid thins/fades based on camera distance.
 
