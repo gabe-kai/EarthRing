@@ -39,6 +39,9 @@ export class ZoneManager {
     // Track last camera position for re-rendering wrapped zones
     this.lastCameraX = null;
     this.WRAP_RE_RENDER_THRESHOLD = 5000; // Re-render if camera moved more than 5km
+    // Cache for full-ring zones: Map<zoneID, { geometry, lastCameraX }>
+    // Full-ring zones don't need geometry rebuilds, just position updates
+    this.fullRingZoneCache = new Map();
     // Per-type visibility: Map<zoneType, boolean>
     this.zoneTypeVisibility = new Map([
       ['residential', true],
@@ -168,11 +171,20 @@ export class ZoneManager {
       
       // Only remove zones that are far from camera (outside fetch range)
       // Keep zones that are manually added (e.g., newly created) even if outside fetch
+      // Never remove system zones or zones that span a large portion of the ring
       const cameraXWrapped = wrapRingPosition(cameraPos.x);
       
       existingZones.forEach(existingZone => {
         if (fetchedZoneIDs.has(existingZone.id)) {
           return; // Zone is in fetch results, keep it
+        }
+        
+        // Never remove system zones (e.g., default maglev zones)
+        if (existingZone.is_system_zone) {
+          if (window.DEBUG_ZONE_COORDS) {
+            console.log('[ZoneManager] Keeping system zone outside fetch range:', existingZone.id);
+          }
+          return;
         }
         
         // Check if zone is far from camera (should be removed)
@@ -185,6 +197,28 @@ export class ZoneManager {
           const zoneX = firstCoord[0];
           const zoneXWrapped = wrapRingPosition(zoneX);
           
+          // Check if zone spans a large portion of the ring (e.g., full ring zones)
+          // Calculate bounding box of zone
+          let minX = Infinity, maxX = -Infinity;
+          const coords = zoneGeometry.coordinates[0];
+          coords.forEach(coord => {
+            const x = coord[0];
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+          });
+          
+          // If zone spans more than half the ring, never remove it (it's always "near" the camera)
+          const zoneSpan = maxX - minX;
+          if (zoneSpan > RING_CIRCUMFERENCE / 2) {
+            if (window.DEBUG_ZONE_COORDS) {
+              console.log('[ZoneManager] Keeping large-span zone outside fetch range:', {
+                zoneId: existingZone.id,
+                span: zoneSpan,
+              });
+            }
+            return; // Keep large zones (e.g., full ring zones)
+          }
+          
           // Calculate distance accounting for wrap-around
           const directDistance = Math.abs(zoneXWrapped - cameraXWrapped);
           const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
@@ -192,6 +226,15 @@ export class ZoneManager {
           
           // Only remove if zone is clearly outside fetch range (with buffer)
           if (distance > range * 2) {
+            if (window.DEBUG_ZONE_COORDS) {
+              console.warn('[ZoneManager] Removing zone far from camera:', {
+                zoneId: existingZone.id,
+                distance,
+                range,
+                isSystem: existingZone.is_system_zone,
+                span: zoneSpan,
+              });
+            }
             // Zone is far from camera, safe to remove
             this.gameState.removeZone(existingZone.id);
           }
@@ -200,7 +243,7 @@ export class ZoneManager {
       });
       this.lastFetchTime = performance.now();
       // Clear error state on success
-      this.lastError = null;
+      this.lastError = { message: null, timestamp: 0 };
     } catch (error) {
       // Only log authentication errors once, and stop making requests
       if (error.message.includes('Not authenticated') || error.message.includes('Session expired')) {
@@ -232,13 +275,7 @@ export class ZoneManager {
     if (zoneFloor !== activeFloor) {
       // Zone is for a different floor - remove it if it exists
       this.removeZone(zone.id);
-      return;
-    }
-
-    this.removeZone(zone.id);
-
-    const polygons = parseGeometry(zone.geometry);
-    if (polygons.length === 0) {
+      this.fullRingZoneCache.delete(zone.id);
       return;
     }
 
@@ -247,6 +284,68 @@ export class ZoneManager {
     // The function expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE))
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
     const cameraX = cameraPos.x; // Use unwrapped camera position
+
+    // Check if this is a full-ring zone (spans more than half the ring)
+    // For full-ring zones, we can optimize by caching geometry and only updating position
+    const zoneGeometry = zone.geometry ? 
+      (typeof zone.geometry === 'string' ? JSON.parse(zone.geometry) : zone.geometry) : null;
+    
+    let isFullRingZone = false;
+    if (zoneGeometry && zoneGeometry.coordinates && zoneGeometry.coordinates[0]) {
+      const coords = zoneGeometry.coordinates[0];
+      let minX = Infinity, maxX = -Infinity;
+      coords.forEach(coord => {
+        const x = coord[0];
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+      });
+      const zoneSpan = maxX - minX;
+      isFullRingZone = zoneSpan > RING_CIRCUMFERENCE / 2;
+    }
+
+    // For full-ring zones, check if we can reuse existing mesh
+    if (isFullRingZone) {
+      const existingMesh = this.zoneMeshes.get(zone.id);
+      const cached = this.fullRingZoneCache.get(zone.id);
+      
+      if (existingMesh && cached) {
+        // Mesh exists and is cached - check if we need to update position
+        const cameraXWrapped = wrapRingPosition(cameraX);
+        const lastCameraXWrapped = wrapRingPosition(cached.lastCameraX);
+        const cameraDelta = Math.abs(cameraXWrapped - lastCameraXWrapped);
+        const wrappedDelta = Math.min(cameraDelta, RING_CIRCUMFERENCE - cameraDelta);
+        
+        // Only update if camera moved significantly (for wrapping)
+        if (wrappedDelta < this.WRAP_RE_RENDER_THRESHOLD) {
+          // Camera hasn't moved enough to require re-wrapping
+          // Just ensure visibility is correct and return
+          const zoneType = (zone.zone_type?.toLowerCase() || 'default');
+          const typeVisible = this.zoneTypeVisibility.get(zoneType === 'mixed_use' ? 'mixed-use' : zoneType) ?? true;
+          existingMesh.visible = this.zonesVisible && typeVisible;
+          if (window.DEBUG_ZONE_COORDS) {
+            console.log('[ZoneManager] Skipping rebuild for full-ring zone:', zone.id, 'camera delta:', wrappedDelta);
+          }
+          return;
+        }
+        
+        // Camera moved significantly - need to update wrapping
+        // But we can still reuse the geometry, just update positions
+        if (window.DEBUG_ZONE_COORDS) {
+          console.log('[ZoneManager] Updating position for full-ring zone:', zone.id, 'camera delta:', wrappedDelta);
+        }
+        // Update cached camera position
+        cached.lastCameraX = cameraX;
+        // Fall through to rebuild (but we could optimize further by just updating mesh positions)
+      }
+    }
+
+    // Normal path: remove existing mesh and rebuild
+    this.removeZone(zone.id);
+
+    const polygons = parseGeometry(zone.geometry);
+    if (polygons.length === 0) {
+      return;
+    }
 
     // DEBUG: Log rendering
     if (window.DEBUG_ZONE_COORDS) {
@@ -482,11 +581,25 @@ export class ZoneManager {
 
     this.scene.add(zoneGroup);
     this.zoneMeshes.set(zone.id, zoneGroup);
+    
+    // Cache full-ring zones for optimization
+    if (isFullRingZone) {
+      this.fullRingZoneCache.set(zone.id, {
+        lastCameraX: cameraX,
+        geometry: zone.geometry, // Store original geometry for comparison
+      });
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneManager] Cached full-ring zone:', zone.id);
+      }
+    }
   }
 
   removeZone(zoneID) {
     const mesh = this.zoneMeshes.get(zoneID);
     if (!mesh) {
+      if (window.DEBUG_ZONE_COORDS) {
+        console.warn('[ZoneManager] removeZone called for missing mesh:', zoneID);
+      }
       return;
     }
     mesh.traverse(child => {
@@ -501,6 +614,11 @@ export class ZoneManager {
     });
     this.scene.remove(mesh);
     this.zoneMeshes.delete(zoneID);
+    // Clear cache when zone is removed
+    this.fullRingZoneCache.delete(zoneID);
+    if (window.DEBUG_ZONE_COORDS) {
+      console.warn('[ZoneManager] Removed zone mesh:', zoneID);
+    }
   }
 
   showZones() {
@@ -550,6 +668,7 @@ export class ZoneManager {
     Array.from(this.zoneMeshes.keys()).forEach(zoneID => this.removeZone(zoneID));
     this.zoneMeshes.clear();
     this.highlightedZones.clear();
+    this.fullRingZoneCache.clear();
   }
 
   /**
@@ -676,7 +795,11 @@ export class ZoneManager {
   logErrorOnce(error) {
     const message = error?.message || String(error);
     const now = performance.now();
-    if (this.lastError.message === message && now - this.lastError.timestamp < 5000) {
+    if (
+      this.lastError &&
+      this.lastError.message === message &&
+      now - this.lastError.timestamp < 5000
+    ) {
       return;
     }
     this.lastError = { message, timestamp: now };

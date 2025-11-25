@@ -125,6 +125,36 @@ export async function deleteZone(zoneID) {
 }
 
 /**
+ * Get a zone by ID
+ * @param {number} zoneID - Zone ID
+ * @returns {Promise<Object>} Zone object
+ */
+export async function getZone(zoneID) {
+  if (!zoneID) {
+    throw new Error('Zone ID is required');
+  }
+  return authorizedRequest(`/api/zones/${zoneID}`);
+}
+
+/**
+ * Get all zones for a specific floor (using a very large bounding box)
+ * @param {number} floor - Floor number (-2 to +2)
+ * @returns {Promise<Array>} Array of zone objects
+ */
+export async function getZonesByFloor(floor) {
+  // Use a very large bounding box to get all zones on this floor
+  const RING_CIRCUMFERENCE = 264000000;
+  const MAX_WIDTH = 5000; // 5km width should cover all zones
+  return fetchZonesByArea({
+    floor,
+    minX: 0,
+    minY: -MAX_WIDTH,
+    maxX: RING_CIRCUMFERENCE,
+    maxY: MAX_WIDTH,
+  });
+}
+
+/**
  * Get the total count of zones in the database
  * @returns {Promise<Object>} Success response with count
  */

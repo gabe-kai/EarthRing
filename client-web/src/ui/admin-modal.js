@@ -3,9 +3,9 @@
  * Modal with tabs for Player and Chunks management
  */
 
-import { positionToChunkIndex, chunkIndexToPositionRange } from '../utils/coordinates.js';
+import { positionToChunkIndex, chunkIndexToPositionRange, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
 import { getCurrentUser } from '../auth/auth-service.js';
-import { getZoneCount, deleteAllZones } from '../api/zone-service.js';
+import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
 import { deleteAllChunks } from '../api/chunk-service.js';
 
 let adminModal = null;
@@ -304,6 +304,107 @@ export function showAdminModal() {
       border-color: #ff4444;
       color: #ff8888;
     }
+
+    .admin-floor-section {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .admin-floor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .admin-floor-title {
+      color: #00ff00;
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    .admin-floor-count {
+      color: #00ff00;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+
+    .admin-floor-toggle {
+      color: #888;
+      font-size: 1.2rem;
+      transition: transform 0.2s;
+    }
+
+    .admin-floor-section.expanded .admin-floor-toggle {
+      transform: rotate(90deg);
+    }
+
+    .admin-zone-list {
+      display: none;
+      margin-top: 0.75rem;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .admin-floor-section.expanded .admin-zone-list {
+      display: block;
+    }
+
+    .admin-zone-item {
+      padding: 0.5rem;
+      margin-bottom: 0.25rem;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid #333;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .admin-zone-item:hover {
+      background: rgba(0, 255, 0, 0.1);
+      border-color: #00ff00;
+    }
+
+    .admin-zone-item.selected {
+      background: rgba(0, 255, 0, 0.2);
+      border-color: #00ff00;
+    }
+
+    .admin-zone-item-name {
+      color: #00ff00;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .admin-zone-item-meta {
+      color: #888;
+      font-size: 0.85rem;
+    }
+
+    .admin-zone-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .admin-zone-action-btn {
+      padding: 0.5rem 1rem;
+      background: rgba(0, 255, 0, 0.2);
+      border: 1px solid #00ff00;
+      border-radius: 4px;
+      color: #00ff00;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .admin-zone-action-btn:hover {
+      background: rgba(0, 255, 0, 0.3);
+    }
   `;
   document.head.appendChild(style);
   
@@ -568,12 +669,21 @@ function loadZonesTabContent(container) {
   // Create zones panel body content
   zonesContent.innerHTML = `
     <div class="chunk-section">
-      <h3>Zone Statistics</h3>
+      <h3>Zone Statistics by Floor</h3>
       <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
-        <p style="margin: 0; color: #ccc;">Total Zones: <span id="admin-zone-count" style="color: #00ff00; font-weight: 600;">Loading...</span></p>
-        <button id="admin-refresh-zone-count-btn" class="action-button" style="margin: 0; padding: 0.5rem 1rem;">Refresh</button>
+        <button id="admin-refresh-zones-btn" class="action-button" style="margin: 0; padding: 0.5rem 1rem;">Refresh All</button>
+      </div>
+      <div id="admin-zones-by-floor" style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <!-- Floor sections will be dynamically generated -->
       </div>
       <div id="admin-zone-count-result" class="result-display"></div>
+    </div>
+    
+    <div class="chunk-section">
+      <h3>Selected Zone Details</h3>
+      <div id="admin-selected-zone-details" style="min-height: 100px; padding: 1rem; background: rgba(0, 0, 0, 0.3); border: 1px solid #444; border-radius: 6px; color: #ccc;">
+        <p style="margin: 0; color: #888;">No zone selected</p>
+      </div>
     </div>
     
     <div class="chunk-section">
@@ -602,8 +712,8 @@ function loadZonesTabContent(container) {
   // Set up event listeners for zones content
   setupAdminZonesListeners(container);
   
-  // Load initial zone count
-  loadZoneCount(container);
+  // Load initial zones by floor
+  loadZonesByFloor(container);
 }
 
 /**
@@ -745,11 +855,11 @@ function setupAdminChunkListeners(container) {
  * Set up event listeners for zones content in admin modal
  */
 function setupAdminZonesListeners(container) {
-  // Refresh zone count button
-  const refreshBtn = container.querySelector('#admin-refresh-zone-count-btn');
+  // Refresh zones button
+  const refreshBtn = container.querySelector('#admin-refresh-zones-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
-      await loadZoneCount(container);
+      await loadZonesByFloor(container);
     });
   }
 
@@ -771,34 +881,170 @@ function setupAdminZonesListeners(container) {
 }
 
 /**
- * Load and display zone count
+ * Calculate zone center and bounds from geometry
  */
-async function loadZoneCount(container) {
-  const countDisplay = container.querySelector('#admin-zone-count');
-  const resultDisplay = container.querySelector('#admin-zone-count-result');
-  const refreshBtn = container.querySelector('#admin-refresh-zone-count-btn');
+function calculateZoneBounds(geometry) {
+  if (!geometry || !geometry.coordinates) {
+    return null;
+  }
+
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  // Handle Polygon (single ring or multiple rings)
+  const coordinates = geometry.coordinates;
+  const outerRing = Array.isArray(coordinates[0][0]) ? coordinates[0] : coordinates;
   
-  if (countDisplay) {
-    countDisplay.textContent = 'Loading...';
+  outerRing.forEach(([x, y]) => {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  });
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const size = Math.max(width, height);
+
+  return {
+    center: { x: centerX, y: centerY },
+    bounds: { minX, maxX, minY, maxY },
+    width,
+    height,
+    size,
+  };
+}
+
+/**
+ * Navigate camera to zone (directly above, looking down, zoomed to fit)
+ */
+function navigateToZone(zone) {
+  if (!zone || !zone.geometry) {
+    console.error('Invalid zone for navigation');
+    return;
+  }
+
+  const cameraController = window.earthring?.cameraController;
+  const sceneManager = window.earthring?.sceneManager;
+  if (!cameraController || !sceneManager) {
+    console.error('Camera controller or scene manager not available');
+    return;
+  }
+
+  const bounds = calculateZoneBounds(zone.geometry);
+  if (!bounds) {
+    console.error('Could not calculate zone bounds');
+    return;
+  }
+
+  // Set active floor to zone's floor
+  const gameStateManager = window.earthring?.gameStateManager;
+  if (gameStateManager && zone.floor !== undefined) {
+    gameStateManager.setActiveFloor(zone.floor);
+  }
+
+  // Calculate camera position: directly above center, looking straight down
+  // We need to position the camera high enough to see the entire zone
+  const padding = 1.5; // 50% padding around zone
+  const camera = sceneManager.getCamera();
+  const fov = camera.fov * (Math.PI / 180);
+  
+  // Calculate distance needed to fit zone in view
+  // For top-down view, we need to account for the larger dimension
+  const maxDimension = Math.max(bounds.width, bounds.height);
+  const distance = (maxDimension / 2) / Math.tan(fov / 2) * padding;
+  
+  // Position camera above center, at calculated height
+  // The camera controller uses EarthRing coordinates where Z is floor
+  // We need to set the camera's Y position (Three.js up) to be high enough
+  const targetPosition = {
+    x: bounds.center.x,
+    y: bounds.center.y,
+    z: zone.floor ?? 0,
+  };
+
+  // Move camera to position
+  cameraController.moveToPosition(targetPosition, 2);
+
+  // After movement, adjust camera to look straight down and set zoom
+  setTimeout(() => {
+    const camera = sceneManager.getCamera();
+    const controls = cameraController.controls;
+    
+    if (camera && controls) {
+      // Calculate target position in Three.js space
+      // EarthRing: X=ring, Y=width, Z=floor
+      // Three.js: X=ring, Y=up, Z=width
+      const floorHeight = (zone.floor ?? 0) * DEFAULT_FLOOR_HEIGHT;
+      
+      // Set controls target to center of zone (on the floor)
+      controls.target.set(bounds.center.x, floorHeight, bounds.center.y);
+      
+      // Calculate camera position: directly above target, at calculated distance
+      // For top-down view, we want the camera to be directly above the target
+      const cameraHeight = distance + floorHeight;
+      camera.position.set(bounds.center.x, cameraHeight, bounds.center.y);
+      
+      // Update controls to apply the new position and target
+      controls.update();
+      
+      console.log(`Navigated to zone ${zone.id} at floor ${zone.floor ?? 0}, distance: ${distance.toFixed(0)}m`);
+    }
+  }, 2100); // Wait for moveToPosition to complete (2s + 100ms buffer)
+}
+
+/**
+ * Load and display zones by floor
+ */
+async function loadZonesByFloor(container) {
+  const zonesByFloorContainer = container.querySelector('#admin-zones-by-floor');
+  const resultDisplay = container.querySelector('#admin-zone-count-result');
+  const refreshBtn = container.querySelector('#admin-refresh-zones-btn');
+  
+  if (!zonesByFloorContainer) {
+    return;
   }
   
   if (refreshBtn) {
     refreshBtn.disabled = true;
   }
   
+  zonesByFloorContainer.innerHTML = '<p style="color: #888;">Loading zones...</p>';
+  
   try {
-    const result = await getZoneCount();
-    if (countDisplay) {
-      countDisplay.textContent = result.count || 0;
-    }
+    // Load zones for each floor (-2 to +2)
+    const floors = [-2, -1, 0, 1, 2];
+    const zonesByFloor = {};
+    
+    // Load zones for each floor in parallel
+    await Promise.all(floors.map(async (floor) => {
+      try {
+        const zones = await getZonesByFloor(floor);
+        zonesByFloor[floor] = zones || [];
+      } catch (error) {
+        console.error(`Error loading zones for floor ${floor}:`, error);
+        zonesByFloor[floor] = [];
+      }
+    }));
+    
+    // Clear container
+    zonesByFloorContainer.innerHTML = '';
+    
+    // Create floor sections
+    floors.forEach(floor => {
+      const zones = zonesByFloor[floor] || [];
+      const floorSection = createFloorSection(floor, zones, container);
+      zonesByFloorContainer.appendChild(floorSection);
+    });
+    
     if (resultDisplay) {
       resultDisplay.textContent = '';
       resultDisplay.className = 'result-display';
     }
   } catch (error) {
-    if (countDisplay) {
-      countDisplay.textContent = 'Error';
-    }
+    zonesByFloorContainer.innerHTML = `<p style="color: #ff4444;">Error: ${error.message}</p>`;
     if (resultDisplay) {
       resultDisplay.textContent = `Error: ${error.message}`;
       resultDisplay.className = 'result-display show error';
@@ -807,6 +1053,144 @@ async function loadZoneCount(container) {
     if (refreshBtn) {
       refreshBtn.disabled = false;
     }
+  }
+}
+
+/**
+ * Create a floor section with zone list
+ */
+function createFloorSection(floor, zones, container) {
+  const section = document.createElement('div');
+  section.className = 'admin-floor-section';
+  section.dataset.floor = floor;
+  
+  const header = document.createElement('div');
+  header.className = 'admin-floor-header';
+  header.onclick = () => {
+    section.classList.toggle('expanded');
+  };
+  
+  const title = document.createElement('span');
+  title.className = 'admin-floor-title';
+  title.textContent = `Floor ${floor >= 0 ? '+' : ''}${floor}`;
+  
+  const count = document.createElement('span');
+  count.className = 'admin-floor-count';
+  count.textContent = `(${zones.length})`;
+  
+  const toggle = document.createElement('span');
+  toggle.className = 'admin-floor-toggle';
+  toggle.textContent = '▶';
+  
+  header.appendChild(title);
+  header.appendChild(count);
+  header.appendChild(toggle);
+  
+  const zoneList = document.createElement('div');
+  zoneList.className = 'admin-zone-list';
+  
+  if (zones.length === 0) {
+    zoneList.innerHTML = '<p style="color: #888; padding: 0.5rem; margin: 0;">No zones on this floor</p>';
+  } else {
+    zones.forEach(zone => {
+      const zoneItem = createZoneItem(zone, container);
+      zoneList.appendChild(zoneItem);
+    });
+  }
+  
+  section.appendChild(header);
+  section.appendChild(zoneList);
+  
+  return section;
+}
+
+/**
+ * Create a zone list item
+ */
+function createZoneItem(zone, container) {
+  const item = document.createElement('div');
+  item.className = 'admin-zone-item';
+  item.dataset.zoneId = zone.id;
+  
+  const name = document.createElement('div');
+  name.className = 'admin-zone-item-name';
+  name.textContent = zone.name || `Zone ${zone.id}`;
+  
+  const meta = document.createElement('div');
+  meta.className = 'admin-zone-item-meta';
+  const zoneType = zone.zone_type || 'unknown';
+  const owner = zone.owner_id ? `Owner: ${zone.owner_id}` : 'System Zone';
+  const area = zone.area ? `${(zone.area / 1000000).toFixed(2)} km²` : 'N/A';
+  meta.textContent = `${zoneType} • ${owner} • ${area}`;
+  
+  item.appendChild(name);
+  item.appendChild(meta);
+  
+  item.onclick = async () => {
+    // Remove selected class from all items
+    container.querySelectorAll('.admin-zone-item').forEach(el => {
+      el.classList.remove('selected');
+    });
+    
+    // Add selected class to this item
+    item.classList.add('selected');
+    
+    // Load and display zone details
+    await showZoneDetails(zone, container);
+  };
+  
+  return item;
+}
+
+/**
+ * Show zone details and actions
+ */
+async function showZoneDetails(zone, container) {
+  const detailsContainer = container.querySelector('#admin-selected-zone-details');
+  if (!detailsContainer) {
+    return;
+  }
+  
+  try {
+    // Fetch full zone data if we don't have it
+    let fullZone = zone;
+    if (!zone.geometry || !zone.properties) {
+      fullZone = await getZone(zone.id);
+    }
+    
+    // Calculate bounds for navigation
+    const bounds = calculateZoneBounds(fullZone.geometry);
+    
+    detailsContainer.innerHTML = `
+      <div style="margin-bottom: 1rem;">
+        <h4 style="color: #00ff00; margin: 0 0 0.5rem 0;">${fullZone.name || `Zone ${fullZone.id}`}</h4>
+        <div style="color: #ccc; font-size: 0.9rem; margin-bottom: 0.5rem;">
+          <div><strong>ID:</strong> ${fullZone.id}</div>
+          <div><strong>Type:</strong> ${fullZone.zone_type || 'N/A'}</div>
+          <div><strong>Floor:</strong> ${fullZone.floor ?? 0}</div>
+          <div><strong>Owner:</strong> ${fullZone.owner_id ? fullZone.owner_id : 'System'}</div>
+          <div><strong>System Zone:</strong> ${fullZone.is_system_zone ? 'Yes' : 'No'}</div>
+          <div><strong>Area:</strong> ${fullZone.area ? `${(fullZone.area / 1000000).toFixed(2)} km²` : 'N/A'}</div>
+          ${bounds ? `<div><strong>Center:</strong> X: ${bounds.center.x.toFixed(0)}m, Y: ${bounds.center.y.toFixed(0)}m</div>` : ''}
+          ${bounds ? `<div><strong>Size:</strong> ${bounds.width.toFixed(0)}m × ${bounds.height.toFixed(0)}m</div>` : ''}
+        </div>
+        ${fullZone.properties ? `<div style="color: #888; font-size: 0.85rem; margin-top: 0.5rem;"><strong>Properties:</strong><pre style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">${JSON.stringify(fullZone.properties, null, 2)}</pre></div>` : ''}
+        ${fullZone.metadata ? `<div style="color: #888; font-size: 0.85rem; margin-top: 0.5rem;"><strong>Metadata:</strong><pre style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">${JSON.stringify(fullZone.metadata, null, 2)}</pre></div>` : ''}
+      </div>
+      <div class="admin-zone-actions">
+        <button class="admin-zone-action-btn" onclick="window.__adminNavigateToZone(${JSON.stringify(fullZone).replace(/"/g, '&quot;')})">
+          Navigate to Zone
+        </button>
+      </div>
+    `;
+    
+    // Store zone in window for navigation function
+    window.__adminNavigateToZone = (zoneData) => {
+      navigateToZone(zoneData);
+    };
+    
+  } catch (error) {
+    detailsContainer.innerHTML = `<p style="color: #ff4444;">Error loading zone details: ${error.message}</p>`;
   }
 }
 
@@ -859,8 +1243,8 @@ async function handleAdminResetAllZones(container, cascade = false) {
       window.earthring.zoneManager.clearAllZones();
     }
     
-    // Refresh zone count
-    await loadZoneCount(container);
+    // Refresh zones by floor
+    await loadZonesByFloor(container);
   } catch (error) {
     resultDisplay.textContent = `Error: ${error.message}`;
     resultDisplay.className = 'result-display show error';
