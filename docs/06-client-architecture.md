@@ -397,6 +397,7 @@ Manages chunk loading and unloading based on viewport.
 - Base opacity controls so zones stay fully visible
 - Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
 - Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
+- **TODO: Platform edge clipping** - The grid currently shows over the edge of platforms where they flare. Previous attempts to implement platform-aware clipping caused severe performance issues (FPS dropped to <1) and were reverted. A future implementation should clip grid lines to follow the curved edges of platform flares, but must do so without impacting performance.
 - Visibility control via `setVisible()` method
 
 **Zone Service** (`client-web/src/api/zone-service.js`):

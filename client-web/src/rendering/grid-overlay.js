@@ -94,6 +94,12 @@ export class GridOverlay {
   constructor(sceneManager, cameraController, options = {}) {
     this.sceneManager = sceneManager;
     this.cameraController = cameraController;
+    // TODO: Platform edge clipping - The grid currently shows over the edge of platforms where they flare.
+    //       Previous attempts to implement platform-aware clipping (using raycasting and geometry profiles)
+    //       caused severe performance issues (FPS dropped to <1) and were reverted. A future implementation
+    //       should clip grid lines to follow the curved edges of platform flares rather than showing over
+    //       empty space, but must do so without impacting performance. Consider using pre-computed platform
+    //       width profiles or a more efficient geometry-based approach.
     this.settings = { ...DEFAULTS, ...options };
     this.lastUpdatePosition = { x: NaN, y: NaN };
     this.lastUpdateTime = 0; // For throttling
