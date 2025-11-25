@@ -229,6 +229,7 @@ npm run dev
   - `GET /api/zones/owner/{owner_id}` – list zones for the authenticated owner (restricted to self)
 - **Zone Types**: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
 - **Rendering**: Zones are rendered as world-anchored translucent polygons with colored outlines, remaining fully visible regardless of camera position
+- **Conflict Resolution**: Player-created zones always claim their selected space from the player's own zones of different types. Zones of the same type and owner automatically merge. System zones and other players' zones are protected from claims.
 - **Rate limit**: 200 requests per minute per user; authentication required for all zone routes
 - **Database Utilities** (psql commands):
   - Delete all zones from database:

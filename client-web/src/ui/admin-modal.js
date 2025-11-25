@@ -9,7 +9,6 @@ import { getZoneCount, deleteAllZones } from '../api/zone-service.js';
 import { deleteAllChunks } from '../api/chunk-service.js';
 
 let adminModal = null;
-let activeTab = 'player';
 
 /**
  * Show the admin modal
@@ -343,7 +342,6 @@ export function hideAdminModal() {
   if (adminModal) {
     adminModal.remove();
     adminModal = null;
-    activeTab = 'player';
   }
 }
 
@@ -385,8 +383,6 @@ function setupAdminModalListeners() {
  * Switch to a different tab
  */
 function switchTab(tabId) {
-  activeTab = tabId;
-  
   // Update tab buttons
   const tabs = adminModal.querySelectorAll('.admin-modal-tab');
   tabs.forEach(tab => {

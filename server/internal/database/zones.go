@@ -126,6 +126,10 @@ func NewZoneStorage(db *sql.DB) *ZoneStorage {
 // CreateZone inserts a new zone and returns the stored record.
 // If the new zone overlaps with existing zones of the same type and floor,
 // it merges them using PostGIS ST_Union and deletes the old zones.
+//
+// IMPORTANT: Player-created zones always claim the space the player selected,
+// even if that area overlaps with other zones. The newly created zone takes
+// precedence in overlap areas, ensuring player intent is respected.
 func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 	if input == nil {
 		return nil, fmt.Errorf("input cannot be nil")
@@ -136,29 +140,23 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 
 	geometryString := string(input.Geometry)
 
-	// Check for overlapping zones of the same type and floor
-	// Use ST_Intersects to detect any spatial intersection (overlap, touch, or contain)
-	// CRITICAL: Normalize both geometries to the SAME coordinate space before intersection check
-	// Problem: normalize_for_intersection normalizes each geometry independently:
-	//   - Wrapped geometries normalize to negative X coordinates
-	//   - Non-wrapped geometries stay at positive X coordinates
-	//   - They end up in different coordinate spaces and don't intersect!
-	// Solution: Normalize both, then align to a common reference point using the MINIMUM X
-	// of BOTH geometries combined. This ensures they're in the same coordinate space.
-	overlapQuery := `
+	// STEP 1: Find ALL overlapping zones (any type/owner) to implement conflict resolution
+	// Player-created zones always claim their selected space, so we need to subtract
+	// the new zone from any overlapping zones of different type/owner.
+	allOverlapQuery := `
 		WITH 
 		new_geom AS (
-			SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($5), 0)) AS geom
+			SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
 		),
 		existing_zones AS (
 			SELECT 
 				id,
+				zone_type,
+				owner_id,
+				is_system_zone,
 				normalize_for_intersection(geometry) AS normalized_geom
 			FROM zones
-			WHERE floor = $1
-			  AND zone_type = $2
-			  AND owner_id IS NOT DISTINCT FROM $3
-			  AND is_system_zone = $4
+			WHERE floor = $2
 			  AND normalize_for_intersection(geometry) IS NOT NULL
 		),
 		all_bounds AS (
@@ -171,8 +169,9 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		aligned_geoms AS (
 			SELECT 
 				ez.id,
-				-- Shift both geometries to align at the global minimum X
-				-- This ensures wrapped (negative) and non-wrapped (positive) geometries align correctly
+				ez.zone_type,
+				ez.owner_id,
+				ez.is_system_zone,
 				ST_Translate(
 					ez.normalized_geom,
 					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
@@ -187,7 +186,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			CROSS JOIN new_geom
 			CROSS JOIN all_bounds
 		)
-		SELECT id
+		SELECT id, zone_type, owner_id, is_system_zone
 		FROM aligned_geoms
 		WHERE aligned_existing IS NOT NULL
 		  AND aligned_new IS NOT NULL
@@ -199,83 +198,120 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		owner = sql.NullInt64{Int64: *input.OwnerID, Valid: true}
 	}
 
-	// Log overlap detection for debugging
-	log.Printf("[ZoneMerge] Checking overlaps: type=%s, floor=%d, owner=%v, is_system=%v, geometry_length=%d",
-		input.ZoneType, input.Floor, input.OwnerID, input.IsSystemZone, len(geometryString))
-
-	// First, check how many zones exist with matching criteria (before intersection check)
-	countQuery := `
-		SELECT COUNT(*)
-		FROM zones
-		WHERE floor = $1
-		  AND zone_type = $2
-		  AND owner_id IS NOT DISTINCT FROM $3
-		  AND is_system_zone = $4
-	`
-	var totalMatchingZones int
-	if err := s.db.QueryRow(countQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone).Scan(&totalMatchingZones); err == nil {
-		log.Printf("[ZoneMerge] Found %d total zones with matching type/floor/owner/system (before intersection check)", totalMatchingZones)
-	}
-
-	// Debug: Test the normalize function on the new geometry before querying
-	if geometryString != "" && totalMatchingZones > 0 {
-		testNormalizeQuery := `
-			SELECT 
-				ST_AsText(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS normalized_geom,
-				ST_IsValid(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS is_valid,
-				ST_IsEmpty(normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))) AS is_empty
-		`
-		var normalizedText sql.NullString
-		var isValid, isEmpty bool
-		if err := s.db.QueryRow(testNormalizeQuery, geometryString).Scan(&normalizedText, &isValid, &isEmpty); err == nil {
-			if !normalizedText.Valid || normalizedText.String == "" {
-				log.Printf("[ZoneMerge] WARNING: normalize_for_intersection returned NULL/empty for new geometry!")
-				log.Printf("[ZoneMerge]   This will cause overlap detection to fail. Geometry preview: %s", geometryString[:int(math.Min(200, float64(len(geometryString))))])
-			} else if !isValid {
-				log.Printf("[ZoneMerge] WARNING: normalize_for_intersection returned invalid geometry!")
-			} else {
-				log.Printf("[ZoneMerge] New geometry normalized successfully (valid: %v, empty: %v)", isValid, isEmpty)
-			}
-		}
-	}
-
-	rows, err := s.db.Query(overlapQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone, geometryString)
+	// Find all overlapping zones
+	allOverlapRows, err := s.db.Query(allOverlapQuery, geometryString, input.Floor)
 	if err != nil {
-		log.Printf("[ZoneMerge] ERROR: Overlap query failed: %v", err)
+		log.Printf("[ZoneConflict] ERROR: All-overlap query failed: %v", err)
 		// Check if error is due to missing function
 		errStr := err.Error()
 		if strings.Contains(errStr, "normalize_for_intersection") && strings.Contains(errStr, "does not exist") {
-			log.Printf("[ZoneMerge] CRITICAL: normalize_for_intersection function does not exist in database!")
-			log.Printf("[ZoneMerge] This function is required for overlap detection. Run migration 000016.")
+			log.Printf("[ZoneConflict] CRITICAL: normalize_for_intersection function does not exist in database!")
+			log.Printf("[ZoneConflict] This function is required for overlap detection. Run migration 000016.")
 			return nil, fmt.Errorf("database function normalize_for_intersection does not exist - run migrations: %w", err)
 		}
-		return nil, fmt.Errorf("failed to query overlapping zones: %w", err)
+		return nil, fmt.Errorf("failed to query all overlapping zones: %w", err)
 	}
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("Failed to close rows in CreateZone overlap check: %v", closeErr)
+		if closeErr := allOverlapRows.Close(); closeErr != nil {
+			log.Printf("Failed to close all-overlap rows: %v", closeErr)
 		}
 	}()
 
-	var directlyOverlappingIDs []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("failed to scan overlapping zone ID: %w", err)
-		}
-		directlyOverlappingIDs = append(directlyOverlappingIDs, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate overlapping zones: %w", err)
+	type OverlappingZone struct {
+		ID           int64
+		ZoneType     string
+		OwnerID      sql.NullInt64
+		IsSystemZone bool
 	}
 
-	// Find all zones in the connected overlap graph (transitive closure)
-	// If zone A overlaps B and B overlaps C, all three should merge together
-	// We need to recursively find all zones that overlap with any zone in the set
+	var allOverlappingZones []OverlappingZone
+	for allOverlapRows.Next() {
+		var oz OverlappingZone
+		if err := allOverlapRows.Scan(&oz.ID, &oz.ZoneType, &oz.OwnerID, &oz.IsSystemZone); err != nil {
+			return nil, fmt.Errorf("failed to scan overlapping zone: %w", err)
+		}
+		allOverlappingZones = append(allOverlappingZones, oz)
+	}
+	if err := allOverlapRows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate all overlapping zones: %w", err)
+	}
+
+	log.Printf("[ZoneConflict] Found %d total overlapping zones (any type/owner)", len(allOverlappingZones))
+
+	// STEP 2: Separate overlapping zones into merge candidates and conflict zones
+	// Merge candidates: same type AND same owner (will be merged with new zone)
+	// Conflict zones: different type OR different owner (will have new zone subtracted from them)
+	var mergeCandidateIDs []int64
+	var conflictZoneIDs []int64
+
+	for _, oz := range allOverlappingZones {
+		sameType := oz.ZoneType == input.ZoneType
+		sameOwner := (oz.OwnerID.Valid == (input.OwnerID != nil)) &&
+			(!oz.OwnerID.Valid || (input.OwnerID != nil && oz.OwnerID.Int64 == *input.OwnerID))
+		sameSystem := oz.IsSystemZone == input.IsSystemZone
+
+		if sameType && sameOwner && sameSystem {
+			mergeCandidateIDs = append(mergeCandidateIDs, oz.ID)
+		} else {
+			conflictZoneIDs = append(conflictZoneIDs, oz.ID)
+		}
+	}
+
+	log.Printf("[ZoneConflict] Merge candidates (same type/owner): %d zones", len(mergeCandidateIDs))
+	log.Printf("[ZoneConflict] Conflict zones (different type/owner): %d zones", len(conflictZoneIDs))
+
+	// STEP 3: Subtract new zone from conflict zones (different type/owner)
+	// This implements the "player zones always claim their space" rule
+	if len(conflictZoneIDs) > 0 {
+		// Only subtract from zones owned by the same user (players can't claim space from other players' zones)
+		// System zones are protected and cannot be claimed
+		if input.OwnerID != nil {
+			for _, conflictZoneID := range conflictZoneIDs {
+				conflictZone, err := s.GetZoneByID(conflictZoneID)
+				if err != nil {
+					log.Printf("[ZoneConflict] WARNING: Failed to get conflict zone %d: %v", conflictZoneID, err)
+					continue
+				}
+				if conflictZone == nil {
+					log.Printf("[ZoneConflict] WARNING: Conflict zone %d not found", conflictZoneID)
+					continue
+				}
+
+				// Skip system zones - they cannot be claimed
+				if conflictZone.IsSystemZone {
+					log.Printf("[ZoneConflict] Skipping system zone %d - system zones cannot be claimed", conflictZoneID)
+					continue
+				}
+
+				// Only subtract if the conflict zone is owned by the same user
+				// (Players can claim space from their own zones of different types)
+				if conflictZone.OwnerID != nil && *conflictZone.OwnerID == *input.OwnerID {
+					log.Printf("[ZoneConflict] Subtracting new zone from conflict zone %d (same owner, different type)", conflictZoneID)
+					_, err := s.subtractDezoneFromZone(conflictZoneID, input.Geometry)
+					if err != nil {
+						log.Printf("[ZoneConflict] WARNING: Failed to subtract new zone from conflict zone %d: %v", conflictZoneID, err)
+						// Continue with other zones even if one fails
+						continue
+					}
+					log.Printf("[ZoneConflict] Successfully subtracted new zone from conflict zone %d", conflictZoneID)
+				} else {
+					log.Printf("[ZoneConflict] Skipping conflict zone %d - owned by different user (cannot claim space from other players)", conflictZoneID)
+				}
+			}
+		} else {
+			log.Printf("[ZoneConflict] New zone has no owner - skipping conflict resolution (only player zones can claim space)")
+		}
+	}
+
+	// STEP 4: Continue with existing merge logic for same type/owner zones
+	// Start with the merge candidates we found, then find transitive overlaps
+	// (If A overlaps B and B overlaps C, all three should merge together)
 	var overlappingIDs []int64
-	if len(directlyOverlappingIDs) > 0 {
-		overlappingIDs = make([]int64, 0, len(directlyOverlappingIDs)*2) // Pre-allocate with some headroom
-		overlappingIDs = append(overlappingIDs, directlyOverlappingIDs...)
+	if len(mergeCandidateIDs) > 0 {
+		// Start with the merge candidates we already found
+		overlappingIDs = make([]int64, 0, len(mergeCandidateIDs)*2) // Pre-allocate with headroom for transitive overlaps
+		overlappingIDs = append(overlappingIDs, mergeCandidateIDs...)
+		log.Printf("[ZoneMerge] Starting with %d merge candidates, finding transitive overlaps...", len(mergeCandidateIDs))
 
 		// Keep expanding the set until no new overlapping zones are found
 		// This finds the transitive closure: if A overlaps B and B overlaps C, we find C
@@ -377,129 +413,20 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			overlappingIDs = append(overlappingIDs, newOverlappingIDs...)
 		}
 
-		if len(overlappingIDs) > len(directlyOverlappingIDs) {
-			log.Printf("[ZoneMerge] Expanded overlap set: directly overlapping=%v, full connected set=%v",
-				directlyOverlappingIDs, overlappingIDs)
+		if len(overlappingIDs) > len(mergeCandidateIDs) {
+			log.Printf("[ZoneMerge] Expanded overlap set: initial candidates=%d, full connected set=%d",
+				len(mergeCandidateIDs), len(overlappingIDs))
 		}
+	} else {
+		// No merge candidates - new zone will be created without merging
+		overlappingIDs = []int64{}
+		log.Printf("[ZoneMerge] No merge candidates - new zone will be created without merging")
 	}
 
 	if len(overlappingIDs) > 0 {
-		log.Printf("[ZoneMerge] Found %d overlapping zones: %v", len(overlappingIDs), overlappingIDs)
+		log.Printf("[ZoneMerge] Found %d overlapping zones to merge: %v", len(overlappingIDs), overlappingIDs)
 	} else {
-		log.Printf("[ZoneMerge] No overlapping zones found - will create new zone (total matching zones: %d)", totalMatchingZones)
-		// Debug: Check why no overlaps were found
-		if totalMatchingZones > 0 {
-			log.Printf("[ZoneMerge] DEBUG: There are %d zones with matching type/floor/owner, but ST_Intersects returned false", totalMatchingZones)
-			log.Printf("[ZoneMerge] DEBUG: Possible reasons:")
-			log.Printf("[ZoneMerge] DEBUG:   1. Zones don't actually overlap (only touch at edges)")
-			log.Printf("[ZoneMerge] DEBUG:   2. normalize_for_intersection returned NULL for some geometries")
-			log.Printf("[ZoneMerge] DEBUG:   3. ST_Intersects is not detecting the overlap correctly")
-
-			// Try to get one existing zone and test intersection manually with detailed alignment debugging
-			testQuery := `
-				SELECT id, 
-				       ST_AsText(normalize_for_intersection(geometry)) AS normalized_existing,
-				       ST_IsValid(normalize_for_intersection(geometry)) AS existing_valid
-				FROM zones
-				WHERE floor = $1 AND zone_type = $2 AND owner_id IS NOT DISTINCT FROM $3 AND is_system_zone = $4
-				LIMIT 1
-			`
-			var testID int64
-			var normalizedExisting sql.NullString
-			var existingValid bool
-			if err := s.db.QueryRow(testQuery, input.Floor, input.ZoneType, owner, input.IsSystemZone).Scan(&testID, &normalizedExisting, &existingValid); err == nil {
-				if !normalizedExisting.Valid || normalizedExisting.String == "" {
-					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalize_for_intersection returned NULL/empty!", testID)
-				} else if !existingValid {
-					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalize_for_intersection returned invalid geometry!", testID)
-				} else {
-					log.Printf("[ZoneMerge] DEBUG: Existing zone %d: normalized successfully", testID)
-					// Test intersection manually with alignment (matching the overlap query logic)
-					intersectTestQuery := `
-						WITH 
-						new_geom AS (
-							SELECT normalize_for_intersection(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
-						),
-						existing_geom AS (
-							SELECT normalize_for_intersection(geometry) AS geom
-							FROM zones
-							WHERE id = $2
-						),
-						all_bounds AS (
-							SELECT 
-								LEAST(
-									COALESCE((SELECT ST_XMin(geom) FROM new_geom WHERE geom IS NOT NULL), 999999999),
-									COALESCE((SELECT ST_XMin(geom) FROM existing_geom WHERE geom IS NOT NULL), 999999999)
-								) AS global_min_x
-						),
-						aligned AS (
-							SELECT 
-								ST_Translate(
-									(SELECT geom FROM existing_geom),
-									-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
-									0
-								) AS aligned_existing,
-								ST_Translate(
-									(SELECT geom FROM new_geom),
-									-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
-									0
-								) AS aligned_new,
-								(SELECT global_min_x FROM all_bounds) AS ref_x
-							FROM all_bounds
-						)
-						SELECT 
-							ST_Intersects(aligned_existing, aligned_new) AS intersects,
-							ST_XMin(aligned_existing) AS existing_min_x,
-							ST_XMax(aligned_existing) AS existing_max_x,
-							ST_YMin(aligned_existing) AS existing_min_y,
-							ST_YMax(aligned_existing) AS existing_max_y,
-							ST_XMin(aligned_new) AS new_min_x,
-							ST_XMax(aligned_new) AS new_max_x,
-							ST_YMin(aligned_new) AS new_min_y,
-							ST_YMax(aligned_new) AS new_max_y,
-							ref_x
-						FROM aligned
-					`
-					var intersects bool
-					var existingMinX, existingMaxX, existingMinY, existingMaxY sql.NullFloat64
-					var newMinX, newMaxX, newMinY, newMaxY sql.NullFloat64
-					var refX sql.NullFloat64
-					if err := s.db.QueryRow(intersectTestQuery, geometryString, testID).Scan(
-						&intersects,
-						&existingMinX, &existingMaxX, &existingMinY, &existingMaxY,
-						&newMinX, &newMaxX, &newMinY, &newMaxY,
-						&refX); err == nil {
-						log.Printf("[ZoneMerge] DEBUG: Manual intersection test with zone %d:", testID)
-						log.Printf("[ZoneMerge] DEBUG:   Reference X (global_min_x): %v", refX)
-						log.Printf("[ZoneMerge] DEBUG:   Existing aligned: X=[%v, %v], Y=[%v, %v]",
-							existingMinX, existingMaxX, existingMinY, existingMaxY)
-						log.Printf("[ZoneMerge] DEBUG:   New aligned: X=[%v, %v], Y=[%v, %v]",
-							newMinX, newMaxX, newMinY, newMaxY)
-						log.Printf("[ZoneMerge] DEBUG:   Intersects: %v", intersects)
-						if !intersects {
-							// Check if they're close but not overlapping
-							if existingMinX.Valid && existingMaxX.Valid && newMinX.Valid && newMaxX.Valid {
-								overlapX := (existingMaxX.Float64 >= newMinX.Float64 && existingMinX.Float64 <= newMaxX.Float64)
-								overlapY := false
-								if existingMinY.Valid && existingMaxY.Valid && newMinY.Valid && newMaxY.Valid {
-									overlapY = (existingMaxY.Float64 >= newMinY.Float64 && existingMinY.Float64 <= newMaxY.Float64)
-								}
-								log.Printf("[ZoneMerge] DEBUG:   X-axis overlap: %v, Y-axis overlap: %v", overlapX, overlapY)
-								if overlapX && !overlapY {
-									log.Printf("[ZoneMerge] DEBUG:   X ranges overlap but Y ranges don't - zones are at different Y positions")
-								} else if !overlapX && overlapY {
-									log.Printf("[ZoneMerge] DEBUG:   Y ranges overlap but X ranges don't - zones are at different X positions")
-								} else if !overlapX && !overlapY {
-									log.Printf("[ZoneMerge] DEBUG:   Neither X nor Y ranges overlap - zones don't overlap at all")
-								}
-							}
-						}
-					} else {
-						log.Printf("[ZoneMerge] DEBUG: Could not test intersection manually: %v", err)
-					}
-				}
-			}
-		}
+		log.Printf("[ZoneMerge] No overlapping zones found - will create new zone")
 	}
 
 	// If there are overlapping zones, merge them
