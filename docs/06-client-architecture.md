@@ -392,8 +392,11 @@ Manages chunk loading and unloading based on viewport.
 **Grid Overlay** (`client-web/src/rendering/grid-overlay.js`):
 - Circular 250m radius grid overlay centered on camera target
 - 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
-- Soft radial fade-out at edges (grid only, zones remain fully visible)
-- World-aligned grid texture that scrolls based on camera position
+- Sharpened rendering via dynamic `THREE.LineSegments` geometry (no textures, no blurring at zoom)
+- Shader-driven fade at the outer radius (currently directional: horizontal lines fade N-S, vertical fade E-W; TODO: implement true radial fade)
+- Base opacity controls so zones stay fully visible
+- Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
+- Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
 - Visibility control via `setVisible()` method
 
 **Zone Service** (`client-web/src/api/zone-service.js`):
@@ -522,10 +525,11 @@ gridOverlay.setVisible(false); // Hide grid
    - New zones respect current visibility state when rendered
 
 6. **Grid Overlay Separation:**
-   - Grid is rendered separately as a circular canvas texture (`THREE.CanvasTexture`)
-   - Grid texture scrolls based on camera position but fades at edges
-   - Zones are NOT part of the grid texture (they're separate meshes)
-   - This allows zones to remain fully visible while grid fades, and zones stay world-anchored
+   - Grid is rendered separately as a circular `THREE.LineSegments` group with shader fade/LOD
+   - Geometry recenters around the camera target each frame so lines stay sharp regardless of zoom
+   - Bold Y=0 axis and 20m multiples are recomputed world-relative so they remain consistent even when the camera moves
+   - Zones are NOT part of the grid overlay (they're separate meshes)
+   - This allows zones to remain fully visible while the grid fades and thins based on distance
 
 **Troubleshooting:**
 

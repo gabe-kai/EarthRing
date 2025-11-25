@@ -642,6 +642,35 @@ See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
 - Polygon division operation
 - Properties distributed or copied
 
+### Dezone (Zone Subtraction)
+
+**Dezone Tool** (Implemented):
+
+The dezone tool allows players to subtract areas from existing zones, effectively "cutting out" portions of zones:
+
+1. **Dezone Creation**: When a player creates a zone with `zone_type: "dezone"`, it triggers a subtraction operation rather than creating a new zone
+2. **Overlap Detection**: The system finds all zones on the same floor that overlap with the dezone geometry
+3. **Ownership Check**: Only zones owned by the user creating the dezone can be modified
+4. **Subtraction Operation**: PostGIS `ST_Difference` subtracts the dezone geometry from each overlapping zone
+5. **Result Handling**:
+   - **Partial Overlap**: Zone is updated with the remaining geometry (after subtraction)
+   - **Complete Removal**: If the dezone completely covers a zone, the zone is deleted
+   - **Zone Bisection**: If subtraction splits a zone into multiple disconnected pieces, the original zone is updated with the largest piece, and additional zones are created for the remaining pieces
+
+**Wrap-Around Handling**:
+
+Dezone operations handle wrapped coordinates (zones crossing the X-axis boundary) using the same normalization approach as zone merging:
+- Both the target zone and dezone geometry are normalized using `normalize_for_intersection`
+- Geometries are aligned to a common coordinate space
+- Subtraction is performed in aligned space
+- Result is shifted back and wrapped to `[0, 264,000,000)` range
+
+**API Behavior**:
+
+- `POST /api/zones` with `zone_type: "dezone"` returns `{"updated_zones": [...], "count": N}` instead of a single zone
+- The response contains all zones that were modified by the dezone operation
+- If no zones overlap the dezone, an empty array is returned
+
 ## Special Zone Rules
 
 ### Elevator Station Zones
@@ -694,7 +723,7 @@ See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
   - Per-type visibility: Individual zone types can be shown/hidden independently
   - Zones toolbar provides UI controls for both levels
 
-- **Grid Overlay Separation**: Grid is rendered separately as a circular canvas texture that fades at edges. Zones are NOT part of the grid texture, allowing zones to remain fully visible while grid fades.
+- **Grid Overlay Separation**: Grid is rendered separately using circular `THREE.LineSegments` geometry with shader-driven fade and LOD. The overlay renders a bold world Y=0 axis plus thicker 20m multiples, while zones stay separate so they remain fully visible while the grid thins/fades based on camera distance.
 
 ### Zone Type Support
 

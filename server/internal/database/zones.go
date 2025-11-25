@@ -559,9 +559,12 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
+		committed := false
 		defer func() {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Printf("Error rolling back transaction: %v", rollbackErr)
+			if !committed {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					log.Printf("Error rolling back transaction: %v", rollbackErr)
+				}
 			}
 		}()
 
@@ -1045,6 +1048,7 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("failed to commit transaction: %w", err)
 		}
+		committed = true
 
 		return zone, nil
 	}
@@ -1403,8 +1407,13 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 	}
 
 	if len(resultGeometries) == 0 {
-		log.Printf("[Dezone] Subtraction returned no valid geometries for zone %d - zone may be completely removed", targetZoneID)
-		return nil, fmt.Errorf("dezone subtraction resulted in empty or invalid geometry (zone may be completely removed)")
+		log.Printf("[Dezone] Subtraction returned no valid geometries for zone %d - zone completely removed, deleting", targetZoneID)
+		// Zone is completely removed by dezone - delete it
+		if err := s.DeleteZone(targetZoneID); err != nil {
+			return nil, fmt.Errorf("failed to delete completely removed zone: %w", err)
+		}
+		// Return empty slice to indicate zone was deleted
+		return []*Zone{}, nil
 	}
 
 	log.Printf("[Dezone] Zone %d split into %d components", targetZoneID, len(resultGeometries))
