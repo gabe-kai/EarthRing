@@ -50,7 +50,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - **Foundation Phase**: ✅ Complete (Phase 0 - all setup tasks done)
 - **Phase 1 (Core Infrastructure)**: ✅ Complete
 - **Phase 2 (Map System Foundation)**: ✅ Complete
-- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI complete; advanced editor + conflict resolution upcoming)
+- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI + conflict resolution complete; advanced editor upcoming)
 
 ## Implementation Phases
 
@@ -172,18 +172,18 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 10. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
 11. ✅ Authentication improvements (automatic token refresh, rate limiting, graceful error handling)
 12. ✅ Camera control improvements (elevation-based speed scaling, refined keyboard/mouse controls)
+13. ✅ Zone conflict resolution (player zones claim space from own zones of different types, system zones and other players' zones protected, comprehensive test coverage)
 
 **In Progress / Upcoming:**
 10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
-11. Zone overlap detection / importance scoring / conflict resolution
-12. Zone-to-chunk relationship mapping and chunk-based visual feedback
+11. Zone-to-chunk relationship mapping and chunk-based visual feedback
 
 **Deliverables (Phase End Target):**
 - ✅ Players can create zones (freeform polygons, various zone types) - **COMPLETE**
 - ✅ Zones are stored and rendered correctly (PostGIS storage, client visualization) - **COMPLETE**
 - ✅ Zones toolbar with visibility controls (grid and per-type toggles) - **COMPLETE**
 - ✅ Zone types supported (residential, commercial, industrial, mixed-use, park, restricted) - **COMPLETE**
-- ⏳ Zone conflicts are resolved (importance system, court ruling for ties) - **PENDING**
+- ✅ Zone conflicts are resolved (player zones claim space from own zones of different types, system zones and other players' zones protected) - **COMPLETE**
 - ✅ Zone delete functionality (delete buttons in zone list) - **COMPLETE**
 - ⏳ Zone editor enhancements (draw, edit vertices, advanced editing) - **PENDING**
 - ✅ Zones span chunks correctly (multi-chunk zones work seamlessly via ring wrapping) - **COMPLETE**

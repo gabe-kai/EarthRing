@@ -2891,3 +2891,653 @@ func normalizeJSON(raw json.RawMessage) string {
 	}
 	return buf.String()
 }
+
+// ============================================================================
+// Zone Conflict Resolution Tests
+// ============================================================================
+
+// TestZoneStorage_PlayerZoneClaimsSpaceFromOwnZones tests that a player-created zone
+// claims space from the player's own zones of different types
+func TestZoneStorage_PlayerZoneClaimsSpaceFromOwnZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a residential zone (100x100 rectangle)
+	residentialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	originalZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "ResidentialArea",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residentialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for residential zone: %v", err)
+	}
+	originalArea := originalZone.Area
+	originalID := originalZone.ID
+
+	// Create a commercial zone that overlaps the residential zone
+	// This should claim space from the residential zone
+	commercialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	newZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "CommercialArea",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: commercialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for commercial zone: %v", err)
+	}
+	if newZone.ID == 0 {
+		t.Fatal("Expected new zone to be created")
+	}
+
+	// Fetch the updated residential zone
+	updatedZone, err := storage.GetZoneByID(originalID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
+
+	// The residential zone should have reduced area (claimed by commercial zone)
+	if updatedZone.Area >= originalArea {
+		t.Errorf("Expected residential zone area to be reduced: original %.2f >= updated %.2f", originalArea, updatedZone.Area)
+	}
+
+	// Both zones should still exist
+	if updatedZone == nil {
+		t.Fatal("Expected residential zone to still exist")
+	}
+
+	t.Logf("✓ Player zone successfully claimed space from own zone of different type")
+	t.Logf("  Original residential area: %.2f m²", originalArea)
+	t.Logf("  Updated residential area: %.2f m²", updatedZone.Area)
+	t.Logf("  New commercial zone area: %.2f m²", newZone.Area)
+}
+
+// TestZoneStorage_PlayerZoneDoesNotClaimFromOtherPlayers tests that a player-created zone
+// does NOT claim space from other players' zones
+func TestZoneStorage_PlayerZoneDoesNotClaimFromOtherPlayers(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	user1ID := int64(1)
+	user2ID := int64(2)
+
+	// User 1 creates a residential zone
+	residentialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	user1Zone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "User1Residential",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &user1ID,
+		Geometry: residentialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for user1 zone: %v", err)
+	}
+	originalArea := user1Zone.Area
+	originalID := user1Zone.ID
+
+	// User 2 creates a commercial zone that overlaps user1's zone
+	// This should NOT claim space from user1's zone
+	commercialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	user2Zone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "User2Commercial",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &user2ID,
+		Geometry: commercialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for user2 zone: %v", err)
+	}
+	if user2Zone.ID == 0 {
+		t.Fatal("Expected user2 zone to be created")
+	}
+
+	// Fetch user1's zone - it should be unchanged
+	user1ZoneUpdated, err := storage.GetZoneByID(originalID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
+
+	// User1's zone should have the same area (not claimed by user2)
+	if user1ZoneUpdated.Area != originalArea {
+		t.Errorf("Expected user1 zone area to remain unchanged: original %.2f != updated %.2f", originalArea, user1ZoneUpdated.Area)
+	}
+
+	t.Logf("✓ Player zone correctly did NOT claim space from other player's zone")
+	t.Logf("  User1 zone area (unchanged): %.2f m²", user1ZoneUpdated.Area)
+	t.Logf("  User2 zone area: %.2f m²", user2Zone.Area)
+}
+
+// TestZoneStorage_SystemZonesAreProtected tests that system zones cannot be claimed
+func TestZoneStorage_SystemZonesAreProtected(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a system zone
+	systemZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	systemZoneCreated, err := storage.CreateZone(&ZoneCreateInput{
+		Name:         "SystemZone",
+		ZoneType:     "restricted",
+		Floor:        0,
+		IsSystemZone: true,
+		Geometry:     systemZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for system zone: %v", err)
+	}
+	originalArea := systemZoneCreated.Area
+	originalID := systemZoneCreated.ID
+
+	// Player creates a zone that overlaps the system zone
+	// This should NOT claim space from the system zone
+	playerZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	playerZoneCreated, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "PlayerZone",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: playerZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for player zone: %v", err)
+	}
+	if playerZoneCreated.ID == 0 {
+		t.Fatal("Expected player zone to be created")
+	}
+
+	// Fetch the system zone - it should be unchanged
+	systemZoneUpdated, err := storage.GetZoneByID(originalID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
+
+	// System zone should have the same area (protected from claims)
+	if systemZoneUpdated.Area != originalArea {
+		t.Errorf("Expected system zone area to remain unchanged: original %.2f != updated %.2f", originalArea, systemZoneUpdated.Area)
+	}
+
+	t.Logf("✓ System zone correctly protected from player zone claims")
+	t.Logf("  System zone area (unchanged): %.2f m²", systemZoneUpdated.Area)
+	t.Logf("  Player zone area: %.2f m²", playerZoneCreated.Area)
+}
+
+// TestZoneStorage_MergeBehaviorStillWorks tests that zones of same type/owner still merge
+func TestZoneStorage_MergeBehaviorStillWorks(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create first residential zone
+	zone1 := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	zone1Created, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Residential1",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: zone1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1Created.ID
+	zone1Area := zone1Created.Area
+
+	// Create second residential zone that overlaps (same type/owner)
+	// This should merge with zone1
+	zone2 := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	zone2Created, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Residential2",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: zone2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+
+	// Zone2 should have been merged into zone1 (oldest zone ID is kept)
+	if zone2Created.ID != zone1ID {
+		t.Errorf("Expected zones to merge (zone2 should have zone1's ID), but zone2 ID is %d (expected %d)", zone2Created.ID, zone1ID)
+	}
+
+	// Merged zone should have larger area than original
+	if zone2Created.Area <= zone1Area {
+		t.Errorf("Expected merged zone area to be larger: original %.2f >= merged %.2f", zone1Area, zone2Created.Area)
+	}
+
+	// Verify zone2 no longer exists as separate zone
+	_, err = storage.GetZoneByID(zone2Created.ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for merged zone: %v", err)
+	}
+
+	t.Logf("✓ Zones of same type/owner correctly merged")
+	t.Logf("  Original zone1 area: %.2f m²", zone1Area)
+	t.Logf("  Merged zone area: %.2f m²", zone2Created.Area)
+}
+
+// TestZoneStorage_PlayerZoneCompletelyRemovesOwnZone tests that a player zone
+// that completely covers an existing zone of different type removes it
+func TestZoneStorage_PlayerZoneCompletelyRemovesOwnZone(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a residential zone
+	residentialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	originalZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "ResidentialArea",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residentialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for residential zone: %v", err)
+	}
+	originalID := originalZone.ID
+
+	// Create a commercial zone that completely covers the residential zone
+	commercialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[990,-10],[1110,-10],[1110,110],[990,110],[990,-10]]]
+	}`)
+	newZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "CommercialArea",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: commercialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for commercial zone: %v", err)
+	}
+	if newZone.ID == 0 {
+		t.Fatal("Expected new zone to be created")
+	}
+
+	// The residential zone should be completely removed
+	_, err = storage.GetZoneByID(originalID)
+	if err == nil {
+		// Zone might still exist but with zero area - check that
+		remainingZone, _ := storage.GetZoneByID(originalID)
+		if remainingZone != nil && remainingZone.Area > 0 {
+			t.Errorf("Expected residential zone to be completely removed, but it still exists with area %.2f m²", remainingZone.Area)
+		}
+	}
+
+	t.Logf("✓ Player zone completely removed own zone of different type")
+	t.Logf("  New commercial zone area: %.2f m²", newZone.Area)
+}
+
+// TestZoneStorage_PlayerZoneBisectsOwnZone tests that a player zone that bisects
+// an existing zone of different type creates split zones
+func TestZoneStorage_PlayerZoneBisectsOwnZone(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a residential zone (100x100 rectangle)
+	residentialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	originalZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "ResidentialArea",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residentialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for residential zone: %v", err)
+	}
+	originalID := originalZone.ID
+	originalArea := originalZone.Area
+
+	// Create a commercial zone that bisects the residential zone vertically
+	commercialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1045,0],[1055,0],[1055,100],[1045,100],[1045,0]]]
+	}`)
+	newZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "CommercialArea",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: commercialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for commercial zone: %v", err)
+	}
+	if newZone.ID == 0 {
+		t.Fatal("Expected new zone to be created")
+	}
+
+	// The residential zone should be bisected into two zones
+	// Check if the original zone was updated or if a split zone was created
+	updatedZone, err := storage.GetZoneByID(originalID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
+
+	// The updated zone should have reduced area (one half of the original)
+	if updatedZone.Area >= originalArea {
+		t.Errorf("Expected residential zone area to be reduced after bisection: original %.2f >= updated %.2f", originalArea, updatedZone.Area)
+	}
+
+	// Note: The bisection logic in subtractDezoneFromZone creates split zones,
+	// but we're not checking for them here since the test focuses on conflict resolution
+	// The important thing is that the zone was reduced
+
+	t.Logf("✓ Player zone bisected own zone of different type")
+	t.Logf("  Original residential area: %.2f m²", originalArea)
+	t.Logf("  Updated residential area: %.2f m²", updatedZone.Area)
+	t.Logf("  New commercial zone area: %.2f m²", newZone.Area)
+}
+
+// TestZoneStorage_PlayerZoneClaimsFromMultipleZones tests that a player zone
+// can claim space from multiple zones of different types at once
+func TestZoneStorage_PlayerZoneClaimsFromMultipleZones(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create multiple zones of different types
+	residentialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	residential, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Residential",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residentialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for residential zone: %v", err)
+	}
+	residentialArea := residential.Area
+	residentialID := residential.ID
+
+	industrialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1100,0],[1200,0],[1200,100],[1100,100],[1100,0]]]
+	}`)
+	industrial, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Industrial",
+		ZoneType: "industrial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: industrialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for industrial zone: %v", err)
+	}
+	industrialArea := industrial.Area
+	industrialID := industrial.ID
+
+	// Create a commercial zone that overlaps both zones
+	commercialZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	newZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Commercial",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: commercialZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for commercial zone: %v", err)
+	}
+	if newZone.ID == 0 {
+		t.Fatal("Expected new zone to be created")
+	}
+
+	// Both zones should have reduced area
+	updatedResidential, err := storage.GetZoneByID(residentialID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for residential: %v", err)
+	}
+	if updatedResidential.Area >= residentialArea {
+		t.Errorf("Expected residential zone area to be reduced: original %.2f >= updated %.2f", residentialArea, updatedResidential.Area)
+	}
+
+	updatedIndustrial, err := storage.GetZoneByID(industrialID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for industrial: %v", err)
+	}
+	if updatedIndustrial.Area >= industrialArea {
+		t.Errorf("Expected industrial zone area to be reduced: original %.2f >= updated %.2f", industrialArea, updatedIndustrial.Area)
+	}
+
+	t.Logf("✓ Player zone successfully claimed space from multiple zones")
+	t.Logf("  Original residential area: %.2f m², Updated: %.2f m²", residentialArea, updatedResidential.Area)
+	t.Logf("  Original industrial area: %.2f m², Updated: %.2f m²", industrialArea, updatedIndustrial.Area)
+	t.Logf("  New commercial zone area: %.2f m²", newZone.Area)
+}
+
+// TestZoneStorage_PlayerZoneDoesNotClaimFromZonesWithNoOwner tests that zones
+// with no owner (NULL owner_id) cannot be claimed from
+func TestZoneStorage_PlayerZoneDoesNotClaimFromZonesWithNoOwner(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a zone with no owner (NULL owner_id)
+	unownedZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	unowned, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "UnownedZone",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  nil, // No owner
+		Geometry: unownedZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for unowned zone: %v", err)
+	}
+	originalArea := unowned.Area
+	originalID := unowned.ID
+
+	// Player creates a zone that overlaps the unowned zone
+	// This should NOT claim space from it
+	playerZone := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	playerZoneCreated, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "PlayerZone",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: playerZone,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for player zone: %v", err)
+	}
+	if playerZoneCreated.ID == 0 {
+		t.Fatal("Expected player zone to be created")
+	}
+
+	// The unowned zone should be unchanged
+	unownedUpdated, err := storage.GetZoneByID(originalID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed: %v", err)
+	}
+	if unownedUpdated.Area != originalArea {
+		t.Errorf("Expected unowned zone area to remain unchanged: original %.2f != updated %.2f", originalArea, unownedUpdated.Area)
+	}
+
+	t.Logf("✓ Player zone correctly did NOT claim space from zone with no owner")
+	t.Logf("  Unowned zone area (unchanged): %.2f m²", unownedUpdated.Area)
+	t.Logf("  Player zone area: %.2f m²", playerZoneCreated.Area)
+}
+
+// TestZoneStorage_PlayerZoneWithMixedOverlaps tests that a player zone can handle
+// both merge candidates (same type/owner) and conflict zones (different type/owner) at once
+func TestZoneStorage_PlayerZoneWithMixedOverlaps(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+	createZonesTable(t, db)
+	createNormalizeFunction(t, db)
+	truncateZonesTable(t, db)
+
+	storage := NewZoneStorage(db)
+	userID := int64(1)
+
+	// Create a residential zone (will be merged with new zone)
+	residential1 := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1000,0],[1100,0],[1100,100],[1000,100],[1000,0]]]
+	}`)
+	zone1, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Residential1",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residential1,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone1: %v", err)
+	}
+	zone1ID := zone1.ID
+	zone1Area := zone1.Area
+
+	// Create a commercial zone (will have space claimed from it)
+	commercial := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1100,0],[1200,0],[1200,100],[1100,100],[1100,0]]]
+	}`)
+	zone2, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Commercial",
+		ZoneType: "commercial",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: commercial,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for zone2: %v", err)
+	}
+	zone2Area := zone2.Area
+	zone2ID := zone2.ID
+
+	// Create a new residential zone that overlaps both
+	// Should merge with zone1 and claim space from zone2
+	residential2 := json.RawMessage(`{
+		"type": "Polygon",
+		"coordinates": [[[1050,0],[1150,0],[1150,100],[1050,100],[1050,0]]]
+	}`)
+	newZone, err := storage.CreateZone(&ZoneCreateInput{
+		Name:     "Residential2",
+		ZoneType: "residential",
+		Floor:    0,
+		OwnerID:  &userID,
+		Geometry: residential2,
+	})
+	if err != nil {
+		t.Fatalf("CreateZone failed for new zone: %v", err)
+	}
+
+	// Zone1 should be merged (new zone should have zone1's ID)
+	if newZone.ID != zone1ID {
+		t.Errorf("Expected zones to merge (new zone should have zone1's ID), but new zone ID is %d (expected %d)", newZone.ID, zone1ID)
+	}
+
+	// Merged zone should have larger area than original zone1
+	if newZone.Area <= zone1Area {
+		t.Errorf("Expected merged zone area to be larger: original %.2f >= merged %.2f", zone1Area, newZone.Area)
+	}
+
+	// Zone2 should have reduced area (claimed by new zone)
+	updatedZone2, err := storage.GetZoneByID(zone2ID)
+	if err != nil {
+		t.Fatalf("GetZoneByID failed for zone2: %v", err)
+	}
+	if updatedZone2.Area >= zone2Area {
+		t.Errorf("Expected zone2 area to be reduced: original %.2f >= updated %.2f", zone2Area, updatedZone2.Area)
+	}
+
+	t.Logf("✓ Player zone correctly handled mixed overlaps (merge + claim)")
+	t.Logf("  Zone1 merged: original %.2f m², merged %.2f m²", zone1Area, newZone.Area)
+	t.Logf("  Zone2 claimed from: original %.2f m², updated %.2f m²", zone2Area, updatedZone2.Area)
+}

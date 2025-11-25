@@ -1737,8 +1737,8 @@ export class ZoneEditor {
     
     // Expand path to create a thick stroke polygon
     // We'll create points on both sides of the path and connect them
-    let leftSide = [];  // One side of the stroke
-    let rightSide = []; // Other side of the stroke
+    const leftSide = [];  // One side of the stroke
+    const rightSide = []; // Other side of the stroke
     
     // For closed loops, calculate first point's perpendicular direction first
     // and reuse it for the last point to ensure smooth connection

@@ -544,32 +544,44 @@ Zones affect various game systems:
 
 ### Zone Overlap Policy
 
-**Decision**: Zones are allowed to overlap with other player zones. Conflicts are resolved using an importance system.
+**Decision**: Zones are allowed to overlap with other player zones. Conflicts are resolved automatically based on zone ownership and type.
 
-### Importance System
+**Player Zone Priority**: When a player creates a zone, it always claims the space the player selected, even if that area is already claimed by other zones. The newly created zone takes precedence in the overlap area, effectively "claiming" that space from existing zones. This ensures that player intent is respected - if a player draws a zone in a specific location, that zone will control that area regardless of existing overlaps.
 
-Each zone has an **importance level** that determines conflict resolution:
-- **System Zones**: Highest importance (elevator stations, maglev, Atlas Pillars)
-- **High Importance**: Critical infrastructure, major zones
-- **Medium Importance**: Standard player zones (default)
-- **Low Importance**: Temporary or experimental zones
+**Note**: The conflict resolution system prioritizes player intent and ownership. System zones and other players' zones are protected from claims, ensuring fair gameplay and preventing unauthorized zone modifications.
 
-### Conflict Resolution
+### Conflict Resolution (Implemented)
 
-When two zones overlap and have conflicting rules:
+When a player creates a zone that overlaps with existing zones, the system handles conflicts as follows:
 
-1. **Different Importance Levels**: Higher importance zone takes precedence in overlap area
-2. **Same Importance Level**: 
-   - System randomly determines winner (simulated "court ruling")
-   - Result is deterministic (same seed = same result)
-   - Both zones remain, but one's rules apply in overlap area
-   - Players can see which zone "won" the conflict
+1. **Same Type and Owner**: Zones of the same type and owner automatically merge into a single zone
+   - The oldest zone's ID is preserved
+   - All overlapping zones of matching type/owner are combined using PostGIS `ST_Union`
+   - Transitive overlaps are handled (if A overlaps B and B overlaps C, all merge together)
 
-**Implementation**:
-- Conflict detection on zone creation/modification
-- Importance comparison
-- Random determination if same importance
-- Visual indication of conflict resolution in UI
+2. **Different Type, Same Owner**: The newly created zone claims space from the player's own zones of different types
+   - The new zone's geometry is subtracted from overlapping zones using PostGIS `ST_Difference`
+   - Overlapping zones are reduced in area (or deleted if completely covered)
+   - If a zone is bisected, split zones are created for the disconnected pieces
+
+3. **Different Owner**: Player zones cannot claim space from other players' zones
+   - Other players' zones remain unchanged
+   - Both zones can coexist with overlapping areas
+
+4. **System Zones**: System zones are protected and cannot be claimed
+   - System zones (elevator stations, maglev, Atlas Pillars) remain unchanged
+   - Player zones can overlap system zones but do not claim space from them
+
+5. **Zones with No Owner**: Zones with NULL owner_id cannot be claimed from
+   - Unowned zones remain unchanged when overlapped by player zones
+
+**Implementation Details**:
+- Conflict detection occurs automatically on zone creation
+- All overlapping zones are identified using PostGIS spatial queries with proper coordinate normalization
+- Merge operations use `ST_Union` for same type/owner zones
+- Claim operations use `ST_Difference` for different type/owner zones (same owner only)
+- System zones and other players' zones are protected from claims
+- Wrap-around coordinates are handled correctly using normalization functions
 
 ### Overlap Benefits
 
