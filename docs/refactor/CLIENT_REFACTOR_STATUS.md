@@ -23,7 +23,7 @@ This document summarizes the current status of the client-server responsibility 
 #### Phase 3: Client Slim-Down ✅
 - Client uses `stream_subscribe` and `stream_update_pose`
 - ChunkManager and ZoneManager consume streaming deltas
-- Legacy `chunk_request` kept for backward compatibility
+- Legacy `chunk_request` handler removed (server-driven streaming is now required)
 - Documentation updated
 
 ### Testing Status ✅
@@ -46,10 +46,12 @@ This document summarizes the current status of the client-server responsibility 
 
 ### Remaining Tasks (Optional/Cleanup)
 
-1. **Legacy Code Removal** (Future, after validation period):
-   - Remove `chunk_request` handler (kept for backward compatibility)
-   - Remove client-side chunk selection logic (already using server-driven)
-   - Remove client-side coordinate math (utilities kept for compatibility)
+1. **Legacy Code Removal** ✅ **COMPLETE**
+   - ✅ Removed `chunk_request` handler from server
+   - ✅ Removed `chunk_request` fallback code from client
+   - ✅ Removed `chunk_data` message handler (legacy responses)
+   - ✅ Client-side chunk selection logic already using server-driven
+   - ⏳ Client-side coordinate math (utilities kept for compatibility - still in use)
 
 2. **Additional Integration Tests** (Optional):
    - Ring wrapping edge cases
@@ -140,9 +142,9 @@ The coordinate system migration can proceed independently of the client-server r
 4. ✅ Update rendering pipeline for ER0 → Three.js - **COMPLETE**
 5. ⏳ Remove legacy coordinate code after validation - **DEFERRED** (maintained for backward compatibility)
 
-### Cleanup (After Validation Period)
-1. Remove legacy `chunk_request` handler
-2. Remove client-side chunk selection logic
-3. Remove legacy coordinate conversion code
-4. Update all documentation to remove legacy references
+### Cleanup ✅ **COMPLETE**
+1. ✅ Removed legacy `chunk_request` handler
+2. ✅ Client-side chunk selection logic already using server-driven
+3. ⏳ Legacy coordinate conversion code (utilities kept - still in use as compatibility shims)
+4. ✅ Updated documentation to remove legacy references
 

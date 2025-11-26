@@ -378,15 +378,8 @@ wsClient.onOpen(async () => {
       console.log('[Chunks] Subscribed to server-driven streaming');
     }
   } catch (error) {
-    console.error('[Chunks] Failed to subscribe to streaming, falling back to legacy requests:', error);
-    // Fallback to legacy chunk_request if streaming fails
-    try {
-      const cameraPos = cameraController.getEarthRingPosition();
-      const floor = gameStateManager.getActiveFloor();
-      await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium');
-    } catch (fallbackError) {
-      console.error('[Chunks] Failed to load initial chunks:', fallbackError);
-    }
+    console.error('[Chunks] Failed to subscribe to streaming:', error);
+    throw error;
   }
 
   // Zones are now delivered via stream_delta messages when include_zones is true in subscription

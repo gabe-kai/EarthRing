@@ -142,12 +142,13 @@ class NetworkLayer {
     }
   }
   
-  requestChunks(chunkIds, lodLevel) {
-    return this.sendWebSocketMessage('chunk_request', {
-      chunks: chunkIds,
-      lod_level: lodLevel
-    });
-  }
+  // Legacy chunk_request removed - use stream_subscribe instead
+  // requestChunks(chunkIds, lodLevel) {
+  //   return this.sendWebSocketMessage('chunk_request', {
+  //     chunks: chunkIds,
+  //     lod_level: lodLevel
+  //   });
+  // }
 }
 ```
 
@@ -385,7 +386,7 @@ Manages chunk loading and unloading based on viewport.
 - **Floor change handling**: Automatically clears chunks from other floors and reloads for new floor when active floor changes
 - Mesh management and cleanup
 - Seam-aware rendering with chunk wrapping
-- **Legacy support**: Still supports `chunk_request` for backward compatibility, but streaming is the primary method
+- **Server-driven streaming required**: Uses `stream_subscribe` and `stream_update_pose` exclusively (legacy `chunk_request` removed)
 
 **Chunk UI** (`client-web/src/ui/chunk-ui.js`):
 - Chunk metadata retrieval interface
@@ -397,7 +398,7 @@ Manages chunk loading and unloading based on viewport.
 - **Server-driven streaming**: Subscribes to chunk/zone streams via `stream_subscribe` on initial connection
 - **Pose updates**: Sends `stream_update_pose` messages when camera moves (instead of re-subscribing)
 - **Delta consumption**: Receives and processes chunk/zone deltas via `stream_delta` messages
-- **Legacy support**: Falls back to `chunk_request` if streaming is unavailable
+- **Server-driven streaming required**: Streaming is required (legacy `chunk_request` removed)
 - Position-based chunk loading (converts ring position to chunk indices)
 - **Active Floor filtering**: Chunks are requested and rendered only for the active floor (from `gameStateManager.getActiveFloor()`)
 - Automatic chunk rendering when added to game state (only if chunk matches active floor)

@@ -44,14 +44,14 @@
    - ✅ `ChunkManager` updated to use `stream_subscribe` instead of `chunk_request`
    - ✅ `ZoneManager` updated to consume `stream_delta` messages with zones
    - ✅ Client subscribes automatically on WebSocket connection
-   - ✅ Legacy `chunk_request` still supported for backward compatibility
+   - ✅ Legacy `chunk_request` handler removed (server-driven streaming is now required)
    - ⏳ **Remaining**: Remove client-side decompression/coordinate math (kept for now for compatibility)
 2. **Documentation & Cleanup** ✅ COMPLETE
    - ✅ Integration testing plan created (`docs/refactor/INTEGRATION_TESTING.md`)
    - ✅ Updated `docs/06-client-architecture.md` to reflect server-driven streaming
    - ✅ Updated `docs/07-streaming-system.md` with completed delta streaming implementation
    - ✅ Updated README with server-driven pipeline description
-   - ⏳ Remove obsolete code paths (legacy chunk_request can be removed after full migration - kept for backward compatibility)
+   - ✅ Removed obsolete code paths (legacy chunk_request handler removed - server-driven streaming is now required)
 
 ### Working Agreement
 - ✅ All work happens on `feature/client-refactor`, with incremental commits per phase.
@@ -75,7 +75,7 @@
 - ✅ Pose update handler (`stream_update_pose` message type) - **COMPLETED**
 - ✅ Zone delta delivery on pose updates - **COMPLETED**
 - ✅ Documentation updates (`docs/06-client-architecture.md`, `docs/07-streaming-system.md`, `README.md`) - **COMPLETED**
-- ⏳ Remove legacy client-side processing (after full migration verified - kept for backward compatibility)
+- ✅ Legacy code removal (`chunk_request` handler removed) - **COMPLETED**
 
 ### Testing
 

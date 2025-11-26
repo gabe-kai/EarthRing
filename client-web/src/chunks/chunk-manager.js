@@ -118,11 +118,6 @@ export class ChunkManager {
    * Set up WebSocket message handlers for chunk data
    */
   setupWebSocketHandlers() {
-    // Handle chunk_data messages (legacy chunk_request responses)
-    wsClient.on('chunk_data', (data) => {
-      this.handleChunkData(data);
-    });
-    
     // Handle stream_delta messages (server-driven streaming)
     wsClient.on('stream_delta', (data) => {
       // stream_delta can contain chunks, zones, or both
@@ -231,79 +226,6 @@ export class ChunkManager {
       return isNaN(floor) ? 0 : floor;
     }
     return 0;
-  }
-  
-  /**
-   * Request chunks via WebSocket
-   * @param {Array<string>} chunkIDs - Array of chunk IDs (format: "floor_chunk_index")
-   * @param {string|number} lodLevel - Level of detail: "low", "medium", "high" or 0-3 (converted to string)
-   * @returns {Promise} Promise that resolves when request is sent
-   */
-  async requestChunks(chunkIDs, lodLevel = 'medium') {
-    if (!wsClient.isConnected()) {
-      throw new Error('WebSocket is not connected');
-    }
-    
-    // Validate chunk IDs
-    if (!Array.isArray(chunkIDs) || chunkIDs.length === 0) {
-      throw new Error('chunkIDs must be a non-empty array');
-    }
-    
-    if (chunkIDs.length > 10) {
-      throw new Error('Cannot request more than 10 chunks at once');
-    }
-    
-    // Filter out chunks that are already loaded or pending
-    // But allow re-requesting if we need to update their wrapped positions
-    const chunksToRequest = chunkIDs.filter(chunkID => {
-      // Skip if already pending (don't duplicate requests)
-      if (this.pendingChunkRequests.has(chunkID)) {
-        return false;
-      }
-      // Always request chunks, even if loaded - this ensures we get updates
-      // and can re-render them with correct wrapping as camera moves
-      return true;
-    });
-    
-    // If all chunks are already pending, return early
-    if (chunksToRequest.length === 0) {
-      return;
-    }
-    
-    // Mark chunks as pending
-    chunksToRequest.forEach(chunkID => {
-      this.pendingChunkRequests.add(chunkID);
-    });
-    
-    // Convert numeric LOD level to string if needed
-    let lodLevelStr = lodLevel;
-    if (typeof lodLevel === 'number') {
-      const lodMap = { 0: 'low', 1: 'medium', 2: 'high', 3: 'high' };
-      lodLevelStr = lodMap[lodLevel] || 'medium';
-    }
-    
-    // Validate LOD level string
-    if (lodLevelStr !== 'low' && lodLevelStr !== 'medium' && lodLevelStr !== 'high') {
-      lodLevelStr = 'medium'; // Default to medium if invalid
-    }
-    
-    try {
-      // Send chunk request via WebSocket
-      await wsClient.request('chunk_request', {
-        chunks: chunksToRequest,
-        lod_level: lodLevelStr,
-      });
-      
-      // Note: We don't remove from pending here - we'll remove when we receive the data
-      // This prevents duplicate requests if the response is slow
-    } catch (error) {
-      // Remove from pending on error so we can retry later
-      chunksToRequest.forEach(chunkID => {
-        this.pendingChunkRequests.delete(chunkID);
-      });
-      console.error('Failed to request chunks:', error);
-      throw error;
-    }
   }
   
   /**
@@ -447,7 +369,7 @@ export class ChunkManager {
 
   /**
    * Request chunks based on ring position
-   * Uses streaming subscription if available, otherwise falls back to chunk_request
+   * Uses streaming subscription (server-driven streaming is required)
    * @param {number} ringPosition - Ring position in meters
    * @param {number} floor - Floor number
    * @param {number} radius - Number of chunks to load on each side (default: 1)
@@ -513,47 +435,23 @@ export class ChunkManager {
           console.log(`[Chunks] Pose updated successfully`);
         } catch (error) {
           console.error('[Chunks] Failed to update streaming pose:', error);
-          // Fall back to legacy chunk_request if pose update fails
-          this.useStreaming = false;
+          throw error;
         }
       } else {
         console.log(`[Chunks] Pose NOT updated (distance: ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged})`);
       }
       return;
     }
-    // Convert legacy position to RingArc and compute chunk index
-    // Use RAW position (not wrapped) to preserve sign information for negative positions
-    const polar = legacyPositionToRingPolar(ringPosition, 0, floor);
-    const arc = ringPolarToRingArc(polar);
-    const centerChunkIndex = ringArcToChunkIndex(arc);
     
-    const chunkIDs = [];
-    
-    // Generate chunk IDs for the requested range, handling ring wrapping
-    for (let i = -radius; i <= radius; i++) {
-      // Calculate chunk index with proper wrapping
-      // Add CHUNK_COUNT before modulo to handle negative values correctly
-      let chunkIndex = (centerChunkIndex + i) % CHUNK_COUNT;
-      if (chunkIndex < 0) {
-        chunkIndex += CHUNK_COUNT;
-      }
-      
-      // Ensure we don't add duplicates (can happen if radius is large)
-      const chunkID = `${floor}_${chunkIndex}`;
-      if (!chunkIDs.includes(chunkID)) {
-        chunkIDs.push(chunkID);
-      }
+    // If we don't have a subscription, create one
+    if (!this.streamingSubscriptionID) {
+      console.log('[Chunks] No streaming subscription found, creating one...');
+      await this.subscribeToStreaming(ringPosition, floor, radius * 1000, radius * 1000);
+      return;
     }
     
-    // Sort chunk IDs for consistent ordering (helps with debugging)
-    chunkIDs.sort();
-    
-    // Debug logging for chunk requests (especially useful at boundaries)
-    if (window.earthring?.debug || centerChunkIndex < radius || centerChunkIndex >= CHUNK_COUNT - radius) {
-      console.log(`[Chunks] Requesting ${chunkIDs.length} chunk(s) around position ${ringPosition.toFixed(0)}m (chunk ${centerChunkIndex})`);
-    }
-    
-    return this.requestChunks(chunkIDs, lodLevel);
+    // If streaming is disabled, throw an error (legacy chunk_request removed)
+    throw new Error('Streaming is disabled. Server-driven streaming is required.');
   }
   
   /**

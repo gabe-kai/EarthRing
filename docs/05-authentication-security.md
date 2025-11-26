@@ -712,15 +712,17 @@ func WebSocketAuthMiddleware() gin.HandlerFunc {
 ```go
 func ValidateWebSocketMessage(msg WebSocketMessage) error {
     // Validate message type
-    allowedTypes := []string{"chunk_request", "player_move", "zone_create"}
+    allowedTypes := []string{"stream_subscribe", "stream_update_pose", "player_move", "zone_create"}
     if !contains(allowedTypes, msg.Type) {
         return errors.New("invalid message type")
     }
     
     // Validate based on type
     switch msg.Type {
-    case "chunk_request":
-        return validateChunkRequest(msg.Data)
+    case "stream_subscribe":
+        return validateStreamSubscribe(msg.Data)
+    case "stream_update_pose":
+        return validateStreamUpdatePose(msg.Data)
     case "player_move":
         return validatePlayerMove(msg.Data)
     // ... etc

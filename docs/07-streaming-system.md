@@ -250,53 +250,11 @@ def get_chunks_to_load(player_position, viewport_size, movement_direction):
 
 ### Server-Side Management
 
-#### Chunk Request Handling ✅ **IMPLEMENTED** (Phase 2: Handler with database persistence)
+#### Chunk Request Handling ❌ **REMOVED** (Legacy handler replaced by server-driven streaming)
 
-**Status**: ✅ **IMPLEMENTED** - WebSocket chunk request handler is functional with full database persistence. Chunks are automatically stored in database after generation and loaded from database when they exist. Returns chunks with ring floor geometry and station flares (variable-width chunks). Ring floor geometry is visible in client. Full generation with buildings and structures will be added in Phase 2.
+**Status**: ❌ **REMOVED** - The legacy `chunk_request` handler has been removed. All chunk loading now uses server-driven streaming via `stream_subscribe` and `stream_update_pose` messages. See "Server-Driven Streaming Contracts" section below for the current implementation.
 
-1. **Request Format** (via WebSocket)
-   ```json
-   {
-     "type": "chunk_request",
-     "id": "req_123",
-     "data": {
-       "chunks": ["0_12345", "0_12346", "0_12347"],
-       "lod_level": "high"
-     }
-   }
-   ```
-   - Maximum 10 chunks per request
-   - Validates chunk ID format ("floor_chunk_index")
-   - Validates chunk index range (0-263,999)
-   - Validates LOD level ("low", "medium", "high")
-
-2. **Response Format** (via WebSocket)
-   ```json
-   {
-     "type": "chunk_data",
-     "id": "req_123",
-     "data": {
-       "chunks": [
-         {
-           "id": "0_12345",
-           "geometry": {
-             "type": "ring_floor",
-             "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
-             "faces": [[v1, v2, v3], ...],
-             "normals": [[nx1, ny1, nz1], ...],
-             "width": 400.0,
-             "length": 1000.0
-           },
-           "structures": [], // Empty for Phase 1
-           "zones": [], // Empty for Phase 1
-           "metadata": {
-             "id": "0_12345",
-             "floor": 0,
-             "chunk_index": 12345,
-             "version": 2,
-             "last_modified": "2024-01-01T00:00:00Z",
-             "is_dirty": false
-           }
+**Note**: The old `chunk_request` message type and `chunk_data` response type are no longer supported. Clients must use the streaming subscription system.
          }
        ]
      }
