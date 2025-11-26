@@ -83,10 +83,13 @@ This document summarizes the current status of the client-server responsibility 
   - Uses `ringArcToChunkIndex()` from new coordinate system
   - Converts legacy positions to RingArc for chunk requests
   - Sends both legacy and new coordinates in streaming messages (backward compatible)
+  - Correctly handles streaming and wrapping when moving in both +X and −X directions
 - ✅ **Zone Manager**: Migrated to RingArc coordinates
   - Converts camera position to RingArc internally
   - Calculates zone bounds using RingArc coordinates
   - Maintains backward compatibility with REST API
+  - Handles RingArc → legacy bounding box conversion robustly at wrap boundaries
+  - Uses the same camera-relative wrapping as chunks so zone meshes stay visually aligned
 - ✅ **Camera Controller**: Supports new coordinate systems
   - `getRingArcPosition()` and `getRingPolarPosition()` methods added
   - `getER0Position()` method added
@@ -97,6 +100,9 @@ This document summarizes the current status of the client-server responsibility 
   - `setCameraPositionFromER0()` and `getER0PositionFromCamera()` added
   - `createMeshAtER0Position()` added
   - Full conversion chain: ER0 → RingPolar → Legacy → Three.js
+- ✅ **Zone Editor**: Updated to use camera-relative EarthRing coordinates and centralized wrapping helpers
+  - Rectangle/circle/paintbrush previews now match final zone geometry
+  - Zones can be drawn correctly across the X=0 wrap point without mirroring or displacement
 
 ### Migration Strategy
 

@@ -1791,7 +1791,16 @@ func (s *ZoneStorage) ListZonesByRingArc(floor int, minS, minR, minZ, maxS, maxR
 	maxY := maxR
 	
 	// Z is not used in 2D geometry queries (it's the vertical offset, handled by floor)
-	
+
+	// Validate converted bounding box. If it's degenerate or inverted, log and return no zones
+	// instead of propagating an error. This can happen near boundaries or with very small widths.
+	if minX >= maxX || minY >= maxY {
+		log.Printf("ListZonesByRingArc: invalid converted bounding box for floor=%d "+
+			"(minS=%.0f, maxS=%.0f, minR=%.0f, maxR=%.0f) -> (minX=%.0f, maxX=%.0f, minY=%.0f, maxY=%.0f); returning no zones",
+			floor, minS, maxS, minR, maxR, minX, maxX, minY, maxY)
+		return []Zone{}, nil
+	}
+
 	return s.ListZonesByArea(floor, minX, minY, maxX, maxY)
 }
 

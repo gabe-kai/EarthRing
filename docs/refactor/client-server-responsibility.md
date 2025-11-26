@@ -33,6 +33,7 @@
    - ✅ Zones delivered asynchronously via `stream_delta` messages
    - ✅ Unit tests for zone bounding box and delta computation
    - ✅ Zone delta delivery on pose updates via `stream_update_pose` handler
+   - ✅ RingArc-based zone bounding boxes hardened for wrap-around and degenerate-window cases (invalid boxes now return no zones instead of errors)
 3. **Authentication-Aware Streaming** ✅
    - ✅ WebSocket handshake enforces JWT validation (`conn.userID` set on connection)
    - ✅ Subscriptions tracked per user ID with ownership validation

@@ -105,16 +105,14 @@ func RingArcToRingPolar(arc RingArc) RingPolar {
 
 // RingPolarToRingArc converts RingPolar coordinates to RingArc coordinates
 // s = theta * R_ring, wrapped to [0, RingCircumference)
+// Preserves sign of theta to handle negative positions correctly
 func RingPolarToRingArc(polar RingPolar) RingArc {
-	// Normalize theta to [0, 2π) for arc length calculation
-	theta := polar.Theta
-	if theta < 0 {
-		theta += 2 * math.Pi
-	}
 	// Convert to arc length: s = (theta / 2π) * RingCircumference
-	s := (theta / (2 * math.Pi)) * float64(RingCircumference)
-	// Wrap s to [0, RingCircumference)
-	s = math.Mod(s+float64(RingCircumference), float64(RingCircumference))
+	// Preserve sign of theta to handle negative positions correctly
+	// Negative theta maps to negative arc length, which wraps correctly
+	s := (polar.Theta / (2 * math.Pi)) * float64(RingCircumference)
+	// Wrap s to [0, RingCircumference) - this handles negative values correctly
+	s = WrapArcLength(s)
 	return RingArc{
 		S: s,
 		R: polar.R,
@@ -138,12 +136,12 @@ func WrapArcLength(s float64) float64 {
 // Legacy X increases eastward, so theta = (X / RingCircumference) * 2π
 // Legacy Y (width position) maps to R (radial offset)
 // Legacy Z (floor/level) maps to Z (vertical offset)
+// Preserves sign information for negative positions
 func LegacyPositionToRingPolar(legacyX float64, legacyY float64, legacyZ float64) RingPolar {
-	// Wrap legacy X to [0, RingCircumference)
-	wrappedX := math.Mod(legacyX+float64(RingCircumference), float64(RingCircumference))
-	
-	// Convert to theta: theta = (X / C) * 2π, then shift to [-π, π)
-	theta := (wrappedX / float64(RingCircumference)) * 2 * math.Pi
+	// Convert to theta directly from legacy X, preserving sign information
+	// theta = (X / C) * 2π, then normalize to [-π, π)
+	// This handles negative positions correctly (e.g., -1000 maps to negative theta)
+	theta := (legacyX / float64(RingCircumference)) * 2 * math.Pi
 	theta = WrapTheta(theta)
 	
 	return RingPolar{

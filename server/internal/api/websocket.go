@@ -988,8 +988,8 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		return
 	}
 
-	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, active_floor=%d",
-		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ActiveFloor)
+	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, arc_length=%.0f, theta=%.6f, r=%.2f, z=%.2f, active_floor=%d",
+		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ArcLength, req.Pose.Theta, req.Pose.R, req.Pose.Z, req.Pose.ActiveFloor)
 
 	// Update pose and get chunk deltas
 	op := h.profiler.Start("stream_update_pose")

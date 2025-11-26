@@ -10,6 +10,8 @@ import {
   ringPolarToRingArc, 
   ringArcToChunkIndex,
   ringPolarToChunkIndex,
+  ringArcToRingPolar,
+  threeJSToRingArc,
   RING_CIRCUMFERENCE as NEW_RING_CIRCUMFERENCE,
   CHUNK_LENGTH,
   CHUNK_COUNT
@@ -68,12 +70,26 @@ export class ChunkManager {
     // Wrapping breaks chunk rendering when camera is at negative positions
     const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
     if (camera) {
-      const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
-      const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
-      if (cameraEarthRingPos && typeof cameraEarthRingPos.x === 'number') {
-        // Return RAW position (not wrapped) for correct chunk rendering
-        return cameraEarthRingPos.x;
-      }
+      // Get Three.js position directly (preserves negative values)
+      const threeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+      
+      // Convert Three.js to RingArc (preserves sign)
+      const ringArc = threeJSToRingArc(threeJSPos);
+      
+      // Convert RingArc to legacy position WITHOUT wrapping
+      // We need to preserve the sign of the arc length to handle negative positions correctly
+      const polar = ringArcToRingPolar(ringArc);
+      
+      // Convert to legacy X: X = (theta / 2π) * RingCircumference
+      // Preserve sign by NOT wrapping theta first
+      let theta = polar.theta;
+      // If theta is negative, we want negative X
+      // If theta is positive, we want positive X
+      // Convert directly: X = (theta / 2π) * RingCircumference
+      let legacyX = (theta / (2 * Math.PI)) * NEW_RING_CIRCUMFERENCE;
+      
+      // Return RAW position (not wrapped) for correct chunk rendering
+      return legacyX;
     }
     // Fallback: try camera controller but note it wraps the value
     if (this.cameraController?.getEarthRingPosition) {
@@ -111,7 +127,20 @@ export class ChunkManager {
     wsClient.on('stream_delta', (data) => {
       // stream_delta can contain chunks, zones, or both
       if (data.chunks && Array.isArray(data.chunks)) {
+        console.log(`[Chunks] stream_delta received: ${data.chunks.length} chunks`);
         this.handleChunkData({ chunks: data.chunks });
+      }
+      // Also check for chunk_delta structure (for removed chunks)
+      if (data.chunk_delta) {
+        const delta = data.chunk_delta;
+        const removed = delta.RemovedChunks || [];
+        if (removed.length > 0) {
+          console.log(`[Chunks] stream_delta: Removing ${removed.length} chunks:`, removed);
+          removed.forEach(chunkID => {
+            this.removeChunkMesh(chunkID);
+            this.gameStateManager.removeChunk(chunkID);
+          });
+        }
       }
     });
     
@@ -297,9 +326,13 @@ export class ChunkManager {
     const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
 
     // Convert legacy position to RingArc coordinates
-    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
-    const polar = legacyPositionToRingPolar(wrappedRingPosition, widthOffset, 0); // z=0 for pose, floor is separate
+    // Use RAW position (not wrapped) to preserve sign information for negative positions
+    // This ensures correct chunk calculation at ring boundaries
+    const polar = legacyPositionToRingPolar(ringPosition, widthOffset, 0); // z=0 for pose, floor is separate
     const arc = ringPolarToRingArc(polar);
+    
+    // Wrap for legacy coordinate (backward compatibility)
+    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
 
     console.log(`[Chunks] updateStreamingPose: subscription_id=${this.streamingSubscriptionID}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(4)}, floor=${floor}`);
 
@@ -307,8 +340,13 @@ export class ChunkManager {
       const response = await wsClient.request('stream_update_pose', {
         subscription_id: this.streamingSubscriptionID,
         pose: {
-          ring_position: wrappedRingPosition,
-          width_offset: widthOffset,
+          // Send both legacy and new coordinates for backward compatibility
+          ring_position: wrappedRingPosition, // Legacy (for backward compatibility)
+          arc_length: arc.s, // New coordinate system (preferred)
+          theta: polar.theta, // New coordinate system (alternative)
+          r: polar.r, // Radial offset
+          z: polar.z, // Vertical offset
+          width_offset: widthOffset, // Legacy (for backward compatibility)
           elevation: elevation,
           active_floor: floor,
         },
@@ -362,11 +400,16 @@ export class ChunkManager {
     const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
 
     // Convert legacy position to RingArc coordinates
-    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
-    const polar = legacyPositionToRingPolar(wrappedRingPosition, widthOffset, 0); // z=0 for pose, floor is separate
+    // Use RAW position (not wrapped) to preserve sign information for negative positions
+    // This ensures correct chunk calculation at ring boundaries
+    const polar = legacyPositionToRingPolar(ringPosition, widthOffset, 0); // z=0 for pose, floor is separate
     const arc = ringPolarToRingArc(polar);
+    
+    // Wrap for legacy coordinate (backward compatibility)
+    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
 
-    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(4)}, floor=${floor}, radius=${radiusMeters}m`);
+    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedRingPosition.toFixed(0)}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(6)}, r=${polar.r.toFixed(2)}, z=${polar.z.toFixed(2)}, floor=${floor}, radius=${radiusMeters}m`);
+    console.log(`[Chunks] subscribeToStreaming: conversion chain: raw=${ringPosition.toFixed(0)} → theta=${polar.theta.toFixed(6)} → arc=${arc.s.toFixed(0)}`);
 
     try {
       const response = await wsClient.request('stream_subscribe', {
@@ -433,11 +476,12 @@ export class ChunkManager {
         
         // Also check if we've moved to a different chunk (using new coordinate system)
         // Convert legacy positions to RingArc and compute chunk indices
-        const currentPolar = legacyPositionToRingPolar(wrappedCurrent, 0, floor);
+        // Use raw positions (not wrapped) to preserve sign information
+        const currentPolar = legacyPositionToRingPolar(ringPosition, 0, floor);
         const currentArc = ringPolarToRingArc(currentPolar);
         const currentChunkIndex = ringArcToChunkIndex(currentArc);
         
-        const lastPolar = legacyPositionToRingPolar(wrappedLast, 0, floor);
+        const lastPolar = legacyPositionToRingPolar(this.lastSubscriptionPosition, 0, floor);
         const lastArc = ringPolarToRingArc(lastPolar);
         const lastChunkIndex = ringArcToChunkIndex(lastArc);
         
@@ -478,8 +522,8 @@ export class ChunkManager {
       return;
     }
     // Convert legacy position to RingArc and compute chunk index
-    const wrappedPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
-    const polar = legacyPositionToRingPolar(wrappedPosition, 0, floor);
+    // Use RAW position (not wrapped) to preserve sign information for negative positions
+    const polar = legacyPositionToRingPolar(ringPosition, 0, floor);
     const arc = ringPolarToRingArc(polar);
     const centerChunkIndex = ringArcToChunkIndex(arc);
     

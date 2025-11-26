@@ -131,14 +131,11 @@ export function ringArcToRingPolar(arc) {
  * @returns {RingArc} RingArc coordinates
  */
 export function ringPolarToRingArc(polar) {
-  // Normalize theta to [0, 2Ï€) for arc length calculation
-  let theta = polar.theta;
-  if (theta < 0) {
-    theta += 2 * Math.PI;
-  }
-  // Convert to arc length: s = (theta / 2Ï€) * RingCircumference
-  let s = (theta / (2 * Math.PI)) * RING_CIRCUMFERENCE;
-  // Wrap s to [0, RingCircumference)
+  // Convert to arc length: s = (theta / 2π) * RingCircumference
+  // Preserve sign of theta to handle negative positions correctly
+  // Negative theta maps to negative arc length, which wraps correctly
+  let s = (polar.theta / (2 * Math.PI)) * RING_CIRCUMFERENCE;
+  // Wrap s to [0, RingCircumference) - this handles negative values correctly
   s = wrapArcLength(s);
   return {
     s: s,
@@ -180,11 +177,10 @@ export function wrapArcLength(s) {
  * @returns {RingPolar} RingPolar coordinates
  */
 export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
-  // Wrap legacy X to [0, RingCircumference)
-  const wrappedX = ((legacyX % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
-  
-  // Convert to theta: theta = (X / C) * 2Ï€, then shift to [-Ï€, Ï€)
-  let theta = (wrappedX / RING_CIRCUMFERENCE) * 2 * Math.PI;
+  // Convert to theta directly from legacy X, preserving sign information
+  // theta = (X / C) * 2π, then normalize to [-π, π)
+  // This handles negative positions correctly (e.g., -1000 maps to negative theta)
+  let theta = (legacyX / RING_CIRCUMFERENCE) * 2 * Math.PI;
   theta = wrapTheta(theta);
   
   return {
@@ -421,29 +417,45 @@ export function threeJSToRingPolar(threeJSPoint, floorHeight = DEFAULT_FLOOR_HEI
 }
 
 /**
- * Legacy wrapper: Convert legacy EarthRing coordinates to Three.js coordinates
+ * Legacy wrapper: Convert legacy EarthRing coordinates to Three.js coordinates.
  * 
- * @deprecated Use ringArcToThreeJS or ringPolarToThreeJS instead
+ * IMPORTANT: This function is intentionally a **direct linear mapping**
+ * between legacy EarthRing and Three.js coordinates. It does NOT wrap
+ * or convert through RingArc/RingPolar so that negative and large X values
+ * are preserved. Higher-level helpers (normalizeRelativeToCamera, etc.)
+ * handle wrapping where needed.
+ * 
+ * @deprecated Use ringArcToThreeJS or ringPolarToThreeJS for new code.
  * @param {Object} earthringPoint - Legacy EarthRing position {x, y, z}
  * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
  * @returns {ThreeJSPoint} Three.js coordinate point
  */
 export function toThreeJS(earthringPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
-  const polar = legacyPositionToRingPolar(earthringPoint.x, earthringPoint.y, earthringPoint.z);
-  return ringPolarToThreeJS(polar, floorHeight);
+  return {
+    x: earthringPoint.x,
+    y: earthringPoint.z * floorHeight,
+    z: earthringPoint.y,
+  };
 }
 
 /**
- * Legacy wrapper: Convert Three.js coordinates to legacy EarthRing coordinates
+ * Legacy wrapper: Convert Three.js coordinates to legacy EarthRing coordinates.
  * 
- * @deprecated Use threeJSToRingArc or threeJSToRingPolar instead
+ * This is the inverse of toThreeJS and likewise avoids any wrapping or
+ * RingArc/RingPolar conversions so that raw positions (including negatives)
+ * are preserved for camera-relative logic.
+ * 
+ * @deprecated Use threeJSToRingArc or threeJSToRingPolar for new code.
  * @param {ThreeJSPoint} threeJSPoint - Three.js coordinate point
  * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
  * @returns {Object} Legacy EarthRing position {x, y, z}
  */
 export function fromThreeJS(threeJSPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
-  const polar = threeJSToRingPolar(threeJSPoint, floorHeight);
-  return ringPolarToLegacyPosition(polar);
+  return {
+    x: threeJSPoint.x,
+    y: threeJSPoint.z,
+    z: Math.round(threeJSPoint.y / floorHeight),
+  };
 }
 
 /**

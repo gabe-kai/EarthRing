@@ -361,8 +361,26 @@ export class ZoneManager {
         minX = Math.min(minX, x);
         maxX = Math.max(maxX, x);
       });
-      const zoneSpan = maxX - minX;
-      isFullRingZone = zoneSpan > NEW_RING_CIRCUMFERENCE / 2;
+      const directSpan = maxX - minX;
+      const wrappedSpan = NEW_RING_CIRCUMFERENCE - directSpan;
+      const effectiveSpan = Math.min(directSpan, wrappedSpan);
+      
+      // Treat as full-ring only if the EFFECTIVE span (shortest arc on the ring)
+      // exceeds half the ring circumference. This avoids misclassifying small
+      // cross-boundary zones (e.g., [-60, +60] around 0) as full-ring zones.
+      isFullRingZone = effectiveSpan > NEW_RING_CIRCUMFERENCE / 2;
+      
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneManager] Zone span analysis:', {
+          zoneId: zone.id,
+          minX,
+          maxX,
+          directSpan,
+          wrappedSpan,
+          effectiveSpan,
+          isFullRingZone,
+        });
+      }
     }
 
     // For full-ring zones, check if we can reuse existing mesh

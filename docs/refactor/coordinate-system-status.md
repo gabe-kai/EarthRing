@@ -40,6 +40,8 @@ This document tracks the current status of the coordinate system migration from 
 - [x] Added `ListZonesByRingArc` function for new coordinate queries
 - [x] Updated `loadZonesForArea` in websocket handler to use new coordinates when available
 - [x] Backward compatibility maintained
+- [x] Hardened RingArc → legacy bounding box conversion to avoid invalid boxes near wrap boundaries
+- [x] Updated zone streaming to return empty results (instead of errors) when degenerate boxes occur
 
 ### ✅ Phase 6: Kongo Station Positioning - COMPLETED
 
@@ -80,6 +82,9 @@ The system maintains full backward compatibility:
 - Station utilities: Updated to use RingArc coordinates
 - Debug Info panel: Displays RingArc coordinates (s, θ, r, z)
 - Admin Player pane: Uses RingArc coordinates for position updates
+- ChunkManager: Uses RingArc internally and server-driven streaming for chunk windows (including wrapping across X=0)
+- ZoneManager: Uses RingArc-derived windows for streaming/REST and wraps zone geometry relative to the camera, matching chunk behavior
+- ZoneEditor: Uses camera-relative EarthRing coordinates and the same wrapping helpers as ZoneManager, so previews and final zones align even across the wrap point
 - Legacy coordinates: Still supported for backward compatibility
 
 **Database:**
@@ -125,9 +130,7 @@ The system maintains full backward compatibility:
 
 1. **Geometry Conversion**: PostGIS geometry conversion function is a placeholder. Full implementation needed for zone and chunk geometry migration.
 
-2. **Wrapping Logic**: Zone bounding box wrapping logic for new coordinates needs refinement for edge cases.
-
-3. **Performance**: Need to benchmark new coordinate system operations for performance impact.
+2. **Performance**: Need to benchmark new coordinate system operations for performance impact.
 
 ## Migration Timeline
 
