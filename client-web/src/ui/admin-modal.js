@@ -8,6 +8,7 @@ import { getCurrentUser } from '../auth/auth-service.js';
 import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
 import { deleteAllChunks, getChunkMetadata, deleteChunk } from '../api/chunk-service.js';
 import { getCurrentPlayerProfile, updatePlayerPosition } from '../api/player-service.js';
+import { legacyPositionToRingPolar, ringPolarToRingArc, ringPolarToLegacyPosition, ringArcToRingPolar } from '../utils/coordinates-new.js';
 
 let adminModal = null;
 
@@ -561,18 +562,24 @@ function loadPlayerTabContent(container) {
     
     <div class="player-section">
       <h3>Update Position</h3>
+      <p class="help-text">RingArc coordinates: s (arc length), r (radial offset), z (vertical offset)</p>
       <form id="admin-position-form" class="position-form">
         <div class="form-group">
-          <label>X Position (0-264000000)</label>
-          <input type="number" id="admin-position-x" value="12345" min="0" max="264000000" step="1" required />
+          <label>Arc Length (s) in km (0-264000)</label>
+          <input type="number" id="admin-position-s" value="0.012" min="0" max="264000" step="0.001" required />
         </div>
         <div class="form-group">
-          <label>Y Position</label>
-          <input type="number" id="admin-position-y" value="0" step="0.1" required />
+          <label>Radial Offset (r) in meters</label>
+          <input type="number" id="admin-position-r" value="0" step="0.1" required />
         </div>
         <div class="form-group">
-          <label>Floor (-2 to 15)</label>
-          <input type="number" id="admin-position-floor" value="0" min="-2" max="15" step="1" required />
+          <label>Vertical Offset (z) in meters</label>
+          <input type="number" id="admin-position-z" value="0" step="0.1" required />
+        </div>
+        <div class="form-group">
+          <label>Theta (θ) in degrees (alternative to arc length)</label>
+          <input type="number" id="admin-position-theta" value="0" min="-180" max="180" step="0.1" />
+          <small style="color: #888;">Leave empty to use arc length, or enter to calculate arc length</small>
         </div>
         <button type="submit" class="action-button">Update Position</button>
       </form>
@@ -736,7 +743,45 @@ function setupAdminPlayerListeners(container, playerID) {
         }
         
         const profile = await getCurrentPlayerProfile();
-        display.textContent = JSON.stringify(profile, null, 2);
+        
+        // Convert and display position in new coordinate system
+        let positionInfo = '';
+        if (profile.current_position) {
+          const pos = profile.current_position;
+          const x = pos.x || pos[0] || 0;
+          const y = pos.y || pos[1] || 0;
+          const floor = profile.current_floor || 0;
+          // In legacy system, z is the floor number, but legacyPositionToRingPolar expects z in meters
+          // So we convert floor to meters: z = floor * DEFAULT_FLOOR_HEIGHT
+          const zMeters = floor * DEFAULT_FLOOR_HEIGHT;
+          
+          try {
+            // Convert legacy to RingArc
+            const polar = legacyPositionToRingPolar(x, y, zMeters);
+            const arc = ringPolarToRingArc(polar);
+            const sKm = arc.s / 1000;
+            const thetaDeg = polar.theta * 180 / Math.PI;
+            
+            positionInfo = `\n\nCurrent Position (RingArc):\n  s: ${sKm.toFixed(3)} km\n  θ: ${thetaDeg.toFixed(2)}°\n  r: ${arc.r.toFixed(2)} m\n  z: ${arc.z.toFixed(2)} m\n\nLegacy (for reference):\n  X: ${x.toFixed(1)} m\n  Y: ${y.toFixed(1)} m\n  Floor: ${floor}`;
+            
+            // Populate form fields with current position
+            const sInput = container.querySelector('#admin-position-s');
+            const rInput = container.querySelector('#admin-position-r');
+            const zInput = container.querySelector('#admin-position-z');
+            const thetaInput = container.querySelector('#admin-position-theta');
+            
+            if (sInput) sInput.value = sKm.toFixed(3);
+            if (rInput) rInput.value = arc.r.toFixed(2);
+            // z in RingArc is vertical offset in meters, but we display it as-is
+            if (zInput) zInput.value = arc.z.toFixed(2);
+            if (thetaInput) thetaInput.value = thetaDeg.toFixed(2);
+          } catch (error) {
+            positionInfo = `\n\nCurrent Position (Legacy):\n  X: ${x.toFixed(1)} m\n  Y: ${y.toFixed(1)} m\n  Floor: ${floor}`;
+            console.error('Error converting position:', error);
+          }
+        }
+        
+        display.textContent = JSON.stringify(profile, null, 2) + positionInfo;
         display.className = 'result-display show success';
         
         if (profile.current_position) {
@@ -759,28 +804,56 @@ function setupAdminPlayerListeners(container, playerID) {
       const resultDisplay = container.querySelector('#admin-position-result');
       const submitButton = e.target.querySelector('button[type="submit"]');
       
-      const x = container.querySelector('#admin-position-x').value;
-      const y = container.querySelector('#admin-position-y').value;
-      const floor = container.querySelector('#admin-position-floor').value;
+      // Get RingArc coordinates from form
+      const sInput = container.querySelector('#admin-position-s');
+      const rInput = container.querySelector('#admin-position-r');
+      const zInput = container.querySelector('#admin-position-z');
+      const thetaInput = container.querySelector('#admin-position-theta');
       
-      resultDisplay.textContent = 'Updating position...';
-      resultDisplay.className = 'result-display show';
-      submitButton.disabled = true;
-      
+      let arc;
       try {
+        // If theta is provided, use it; otherwise use arc length
+        if (thetaInput.value && thetaInput.value !== '') {
+          const theta = parseFloat(thetaInput.value) * Math.PI / 180; // Convert degrees to radians
+          const polar = { theta, r: parseFloat(rInput.value), z: parseFloat(zInput.value) };
+          arc = ringPolarToRingArc(polar);
+        } else {
+          const s = parseFloat(sInput.value) * 1000; // Convert km to meters
+          arc = {
+            s: s,
+            r: parseFloat(rInput.value),
+            z: parseFloat(zInput.value)
+          };
+        }
+        
+        // Convert RingArc to legacy coordinates for API
+        const polar = ringArcToRingPolar(arc);
+        const legacy = ringPolarToLegacyPosition(polar);
+        
+        // API still expects legacy format: {x, y} and floor (z)
+        // In legacy system, z is the floor number, not vertical offset
+        const x = legacy.x;
+        const y = legacy.y;
+        // Convert z offset (meters) to floor number
+        const floor = Math.round(arc.z / DEFAULT_FLOOR_HEIGHT);
+        
+        resultDisplay.textContent = `Updating position...\nRingArc: s=${(arc.s/1000).toFixed(3)}km, r=${arc.r.toFixed(2)}m, z=${arc.z.toFixed(2)}m\nLegacy: X=${x.toFixed(1)}m, Y=${y.toFixed(1)}m, Floor=${floor}`;
+        resultDisplay.className = 'result-display show';
+        submitButton.disabled = true;
+        
         const result = await updatePlayerPosition(playerID, { x, y }, floor);
-        resultDisplay.textContent = JSON.stringify(result, null, 2);
+        resultDisplay.textContent = `Position updated successfully!\n\n${JSON.stringify(result, null, 2)}\n\nRingArc: s=${(arc.s/1000).toFixed(3)}km, θ=${(polar.theta * 180 / Math.PI).toFixed(2)}°, r=${arc.r.toFixed(2)}m, z=${arc.z.toFixed(2)}m`;
         resultDisplay.className = 'result-display show success';
         
-        // Update camera position
+        // Update camera position (using legacy format for now)
         if (window.earthring && window.earthring.cameraController) {
           const cameraController = window.earthring.cameraController;
           cameraController.moveToPosition({
-            x: parseFloat(x),
-            y: parseFloat(y),
-            z: parseInt(floor),
+            x: x,
+            y: y,
+            z: floor,
           }, 2);
-          console.log(`Camera moved to player position: (${x}, ${y}, ${floor})`);
+          console.log(`Camera moved to player position: RingArc(s=${(arc.s/1000).toFixed(3)}km, r=${arc.r.toFixed(2)}m, z=${arc.z.toFixed(2)}m) Legacy(X=${x.toFixed(1)}, Y=${y.toFixed(1)}, Floor=${floor})`);
         }
         
         // Reload profile
@@ -791,10 +864,24 @@ function setupAdminPlayerListeners(container, playerID) {
       } catch (error) {
         resultDisplay.textContent = `Error: ${error.message}`;
         resultDisplay.className = 'result-display show error';
+        console.error('Position update error:', error);
       } finally {
         submitButton.disabled = false;
       }
     });
+    
+    // Auto-calculate arc length from theta when theta changes
+    const thetaInput = container.querySelector('#admin-position-theta');
+    const sInput = container.querySelector('#admin-position-s');
+    if (thetaInput && sInput) {
+      thetaInput.addEventListener('input', () => {
+        if (thetaInput.value && thetaInput.value !== '') {
+          const theta = parseFloat(thetaInput.value) * Math.PI / 180;
+          const s = theta * (264000000 / (2 * Math.PI)); // Convert theta to arc length
+          sInput.value = (s / 1000).toFixed(3); // Update s input in km
+        }
+      });
+    }
   }
 }
 
