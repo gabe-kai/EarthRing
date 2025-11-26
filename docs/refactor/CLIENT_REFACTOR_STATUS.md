@@ -84,6 +84,7 @@ This document summarizes the current status of the client-server responsibility 
   - Converts legacy positions to RingArc for chunk requests
   - Sends both legacy and new coordinates in streaming messages (backward compatible)
   - Correctly handles streaming and wrapping when moving in both +X and −X directions
+  - Fixed chunk rendering at theta ≈ ±π: `createRingFloorMesh` now uses actual Three.js world-space camera position for wrapping calculations, ensuring chunks are positioned correctly near the wrap boundary
 - ✅ **Zone Manager**: Migrated to RingArc coordinates
   - Converts camera position to RingArc internally
   - Calculates zone bounds using RingArc coordinates

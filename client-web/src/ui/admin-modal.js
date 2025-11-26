@@ -873,12 +873,27 @@ function setupAdminPlayerListeners(container, playerID) {
     // Auto-calculate arc length from theta when theta changes
     const thetaInput = container.querySelector('#admin-position-theta');
     const sInput = container.querySelector('#admin-position-s');
+    const rInput = container.querySelector('#admin-position-r');
+    const zInput = container.querySelector('#admin-position-z');
     if (thetaInput && sInput) {
       thetaInput.addEventListener('input', () => {
         if (thetaInput.value && thetaInput.value !== '') {
-          const theta = parseFloat(thetaInput.value) * Math.PI / 180;
-          const s = theta * (264000000 / (2 * Math.PI)); // Convert theta to arc length
-          sInput.value = (s / 1000).toFixed(3); // Update s input in km
+          const thetaDeg = parseFloat(thetaInput.value);
+          if (Number.isNaN(thetaDeg)) {
+            return;
+          }
+          // Convert degrees to radians (can be negative)
+          const theta = thetaDeg * Math.PI / 180;
+          // Build a RingPolar value using current r/z (or 0 if empty)
+          const polar = {
+            theta,
+            r: rInput && rInput.value !== '' ? parseFloat(rInput.value) : 0,
+            z: zInput && zInput.value !== '' ? parseFloat(zInput.value) : 0,
+          };
+          // Use shared helper to convert to RingArc and wrap s into [0, C)
+          const arc = ringPolarToRingArc(polar);
+          // Display s in km (always non-negative, wrapped arc length)
+          sInput.value = (arc.s / 1000).toFixed(3);
         }
       });
     }

@@ -82,7 +82,7 @@ The system maintains full backward compatibility:
 - Station utilities: Updated to use RingArc coordinates
 - Debug Info panel: Displays RingArc coordinates (s, θ, r, z)
 - Admin Player pane: Uses RingArc coordinates for position updates
-- ChunkManager: Uses RingArc internally and server-driven streaming for chunk windows (including wrapping across X=0)
+- ChunkManager: Uses RingArc internally and server-driven streaming for chunk windows (including wrapping across X=0). Fixed chunk rendering at theta ≈ ±π to use actual Three.js world-space camera position for wrapping calculations, ensuring continuous platform visibility across the wrap boundary.
 - ZoneManager: Uses RingArc-derived windows for streaming/REST and wraps zone geometry relative to the camera, matching chunk behavior
 - ZoneEditor: Uses camera-relative EarthRing coordinates and the same wrapping helpers as ZoneManager, so previews and final zones align even across the wrap point
 - Legacy coordinates: Still supported for backward compatibility

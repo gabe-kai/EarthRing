@@ -861,17 +861,17 @@ export class ChunkManager {
     // Convert vertices to Three.js coordinates
     const positions = [];
     
-    // Get camera position to wrap chunks relative to camera
-    // We need the raw camera position (before wrapping) for correct wrapping calculations
+    // Get camera position to wrap chunks relative to camera in world space
     const camera = this.sceneManager.getCamera();
     const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
-    const cameraEarthRingPosRaw = fromThreeJS(cameraThreeJSPos);
-    // Use raw camera X (may be negative or very large) for wrapping calculation
-    const cameraXFromScene = cameraEarthRingPosRaw.x || 0;
-    const cameraX = (typeof cameraXOverride === 'number') ? cameraXOverride : cameraXFromScene;
+    const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
+    // Use the actual world-space X position of the camera for wrapping geometry.
+    // This keeps chunk meshes positioned near the camera even when the camera
+    // has moved to large positive or negative X (e.g., near the far side of the ring).
+    const cameraX = cameraEarthRingPos.x || 0;
     
     // DEBUG: Log camera position for rendering
-    console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, cameraXFromScene=${cameraXFromScene.toFixed(0)}, cameraXOverride=${cameraXOverride}`);
+    console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, cameraXFromScene=${cameraX.toFixed(0)}, cameraXOverride=${cameraXOverride}`);
     
     // Determine chunk index and base position
     const chunkIndex = (chunkData.chunk_index ?? parseInt(chunkID.split('_')[1], 10)) || 0;
