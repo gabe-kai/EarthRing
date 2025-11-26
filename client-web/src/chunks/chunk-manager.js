@@ -5,6 +5,15 @@
 
 import { wsClient } from '../network/websocket-client.js';
 import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS } from '../utils/coordinates.js';
+import { 
+  legacyPositionToRingPolar, 
+  ringPolarToRingArc, 
+  ringArcToChunkIndex,
+  ringPolarToChunkIndex,
+  RING_CIRCUMFERENCE as NEW_RING_CIRCUMFERENCE,
+  CHUNK_LENGTH,
+  CHUNK_COUNT
+} from '../utils/coordinates-new.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
 import { decompressChunkGeometry, isCompressedGeometry } from '../utils/decompression.js';
 import * as THREE from 'three';
@@ -85,9 +94,8 @@ export class ChunkManager {
    * @returns {number}
    */
   getWrappedRingDistance(a, b) {
-    const RING_CIRCUMFERENCE = 264000000;
     const direct = Math.abs(a - b);
-    return Math.min(direct, RING_CIRCUMFERENCE - direct);
+    return Math.min(direct, NEW_RING_CIRCUMFERENCE - direct);
   }
   
   /**
@@ -288,11 +296,12 @@ export class ChunkManager {
     const elevation = cameraPos.y || 0;
     const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
 
-    // Wrap ring position to valid range [0, RING_CIRCUMFERENCE)
-    const RING_CIRCUMFERENCE = 264000000;
-    const wrappedRingPosition = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+    // Convert legacy position to RingArc coordinates
+    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
+    const polar = legacyPositionToRingPolar(wrappedRingPosition, widthOffset, 0); // z=0 for pose, floor is separate
+    const arc = ringPolarToRingArc(polar);
 
-    console.log(`[Chunks] updateStreamingPose: subscription_id=${this.streamingSubscriptionID}, position=${wrappedRingPosition.toFixed(0)}, floor=${floor}`);
+    console.log(`[Chunks] updateStreamingPose: subscription_id=${this.streamingSubscriptionID}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(4)}, floor=${floor}`);
 
     try {
       const response = await wsClient.request('stream_update_pose', {
@@ -352,18 +361,23 @@ export class ChunkManager {
     const elevation = cameraPos.y || 0;
     const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
 
-    // Wrap ring position to valid range [0, RING_CIRCUMFERENCE) before sending to server
-    // The server will also wrap it, but wrapping on client ensures consistent behavior
-    const RING_CIRCUMFERENCE = 264000000;
-    const wrappedRingPosition = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+    // Convert legacy position to RingArc coordinates
+    const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
+    const polar = legacyPositionToRingPolar(wrappedRingPosition, widthOffset, 0); // z=0 for pose, floor is separate
+    const arc = ringPolarToRingArc(polar);
 
-    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedRingPosition.toFixed(0)}, floor=${floor}, radius=${radiusMeters}m`);
+    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(4)}, floor=${floor}, radius=${radiusMeters}m`);
 
     try {
       const response = await wsClient.request('stream_subscribe', {
         pose: {
-          ring_position: wrappedRingPosition,
-          width_offset: widthOffset,
+          // Send both legacy and new coordinates for backward compatibility
+          ring_position: wrappedRingPosition, // Legacy (for backward compatibility)
+          arc_length: arc.s, // New coordinate system (preferred)
+          theta: polar.theta, // New coordinate system (alternative)
+          r: polar.r, // Radial offset
+          z: polar.z, // Vertical offset
+          width_offset: widthOffset, // Legacy (for backward compatibility)
           elevation: elevation,
           active_floor: floor,
         },
@@ -404,23 +418,29 @@ export class ChunkManager {
     // If streaming is enabled and we have a subscription, update subscription if camera moved significantly
     if (this.useStreaming && this.streamingSubscriptionID) {
       // Check if camera has moved significantly (more than 1000m, different chunk, or different floor)
-      const RING_CIRCUMFERENCE = 264000000;
       let distanceMoved = 0;
       let chunkChanged = false;
       
       if (this.lastSubscriptionPosition !== null) {
         // Wrap both positions for consistent distance calculation
-        const wrappedCurrent = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
-        const wrappedLast = ((Math.round(this.lastSubscriptionPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+        const wrappedCurrent = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
+        const wrappedLast = ((Math.round(this.lastSubscriptionPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
         
         // Calculate wrapped distance (handles both positive and negative movement)
         const directDistance = Math.abs(wrappedCurrent - wrappedLast);
-        const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+        const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
         distanceMoved = Math.min(directDistance, wrappedDistance);
         
-        // Also check if we've moved to a different chunk (using wrapped positions)
-        const currentChunkIndex = positionToChunkIndex(wrappedCurrent);
-        const lastChunkIndex = positionToChunkIndex(wrappedLast);
+        // Also check if we've moved to a different chunk (using new coordinate system)
+        // Convert legacy positions to RingArc and compute chunk indices
+        const currentPolar = legacyPositionToRingPolar(wrappedCurrent, 0, floor);
+        const currentArc = ringPolarToRingArc(currentPolar);
+        const currentChunkIndex = ringArcToChunkIndex(currentArc);
+        
+        const lastPolar = legacyPositionToRingPolar(wrappedLast, 0, floor);
+        const lastArc = ringPolarToRingArc(lastPolar);
+        const lastChunkIndex = ringArcToChunkIndex(lastArc);
+        
         chunkChanged = currentChunkIndex !== lastChunkIndex;
         
         console.log(`[Chunks] Distance calc: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedCurrent.toFixed(0)}, last=${this.lastSubscriptionPosition.toFixed(0)}, lastWrapped=${wrappedLast.toFixed(0)}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged} (${lastChunkIndex}→${currentChunkIndex})`);
@@ -457,9 +477,13 @@ export class ChunkManager {
       }
       return;
     }
-    const centerChunkIndex = positionToChunkIndex(ringPosition);
+    // Convert legacy position to RingArc and compute chunk index
+    const wrappedPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
+    const polar = legacyPositionToRingPolar(wrappedPosition, 0, floor);
+    const arc = ringPolarToRingArc(polar);
+    const centerChunkIndex = ringArcToChunkIndex(arc);
+    
     const chunkIDs = [];
-    const CHUNK_COUNT = 264000;
     
     // Generate chunk IDs for the requested range, handling ring wrapping
     for (let i = -radius; i <= radius; i++) {
@@ -614,9 +638,8 @@ export class ChunkManager {
     }
     
     // Calculate distance moved (accounting for wrapping)
-    const RING_CIRCUMFERENCE = 264000000;
     const directDistance = Math.abs(currentCameraX - this.lastCameraX);
-    const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+    const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
     const distanceMoved = Math.min(directDistance, wrappedDistance);
     
     if (distanceMoved > this.WRAP_RE_RENDER_THRESHOLD) {
@@ -639,7 +662,6 @@ export class ChunkManager {
     const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
     const cameraEarthRingPosRaw = fromThreeJS(cameraThreeJSPos);
     const cameraX = cameraEarthRingPosRaw.x || 0;
-    const RING_CIRCUMFERENCE = 264000000;
     
     // Track which chunks we're rendering to avoid duplicates
     const renderedChunks = new Set();
@@ -651,23 +673,23 @@ export class ChunkManager {
       
       // Get chunk's original position
       const chunkIndex = parseInt(chunkID.split('_')[1]) || 0;
-      const chunkStartX = chunkIndex * 1000; // Each chunk is 1000m
+      const chunkStartX = chunkIndex * CHUNK_LENGTH; // Each chunk is CHUNK_LENGTH meters
       
       // Calculate wrapped position
       let wrappedX = chunkStartX;
       const forwardDistance = wrappedX - cameraX;
       const backwardDistance = cameraX - wrappedX;
-      const forwardDistNormalized = ((forwardDistance % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
-      const backwardDistNormalized = ((backwardDistance % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+      const forwardDistNormalized = ((forwardDistance % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
+      const backwardDistNormalized = ((backwardDistance % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
       
-      if (backwardDistNormalized < forwardDistNormalized && backwardDistNormalized < RING_CIRCUMFERENCE / 2) {
-        wrappedX -= RING_CIRCUMFERENCE;
-      } else if (forwardDistNormalized > RING_CIRCUMFERENCE / 2) {
-        wrappedX -= RING_CIRCUMFERENCE;
+      if (backwardDistNormalized < forwardDistNormalized && backwardDistNormalized < NEW_RING_CIRCUMFERENCE / 2) {
+        wrappedX -= NEW_RING_CIRCUMFERENCE;
+      } else if (forwardDistNormalized > NEW_RING_CIRCUMFERENCE / 2) {
+        wrappedX -= NEW_RING_CIRCUMFERENCE;
       }
       
       // Create a unique key for this wrapped position to avoid duplicates
-      const wrappedKey = `${Math.round(wrappedX / 1000)}_${chunkID.split('_')[0]}`;
+      const wrappedKey = `${Math.round(wrappedX / CHUNK_LENGTH)}_${chunkID.split('_')[0]}`;
       
       // Only render if we haven't already rendered a chunk at this wrapped position
       if (!renderedChunks.has(wrappedKey)) {
@@ -800,7 +822,6 @@ export class ChunkManager {
     const camera = this.sceneManager.getCamera();
     const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
     const cameraEarthRingPosRaw = fromThreeJS(cameraThreeJSPos);
-    const RING_CIRCUMFERENCE = 264000000;
     // Use raw camera X (may be negative or very large) for wrapping calculation
     const cameraXFromScene = cameraEarthRingPosRaw.x || 0;
     const cameraX = (typeof cameraXOverride === 'number') ? cameraXOverride : cameraXFromScene;
@@ -814,8 +835,8 @@ export class ChunkManager {
     const chunkBaseX = chunkIndex * CHUNK_LENGTH;
     
     // Calculate an offset (multiple of ring circumference) that moves this chunk closest to the camera.
-    const circumferenceOffsetMultiple = Math.round((cameraX - chunkBaseX) / RING_CIRCUMFERENCE);
-    const chunkOffset = circumferenceOffsetMultiple * RING_CIRCUMFERENCE;
+    const circumferenceOffsetMultiple = Math.round((cameraX - chunkBaseX) / NEW_RING_CIRCUMFERENCE);
+    const chunkOffset = circumferenceOffsetMultiple * NEW_RING_CIRCUMFERENCE;
     const chunkOriginX = chunkBaseX + chunkOffset;
     
     // DEBUG: Log chunk positioning

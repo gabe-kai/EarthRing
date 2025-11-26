@@ -27,6 +27,8 @@ export const RING_ORBITAL_RADIUS = 42164000.0; // Geostationary orbit radius in 
 export const KONGO_HUB_ALTITUDE = 500000.0; // Kongo Hub altitude above Earth's surface in meters
 export const KONGO_HUB_RADIUS = EARTH_RADIUS + KONGO_HUB_ALTITUDE;
 export const RING_CIRCUMFERENCE = 264000000; // Ring circumference in meters
+export const CHUNK_LENGTH = 1000; // Chunk length in meters (1 km)
+export const CHUNK_COUNT = 264000; // Total number of chunks around the ring
 
 // Kongo Hub ER0 coordinates
 export const KONGO_HUB_ER0 = {
@@ -266,6 +268,63 @@ export function validateRingArc(arc) {
     valid: errors.length === 0,
     errors: errors,
   };
+}
+
+/**
+ * Convert RingArc arc length (s) to chunk index
+ * Chunk index = s / CHUNK_LENGTH, wrapped to [0, CHUNK_COUNT)
+ * 
+ * @param {RingArc} arc - RingArc coordinates
+ * @returns {number} Chunk index (0 to CHUNK_COUNT - 1)
+ */
+export function ringArcToChunkIndex(arc) {
+  const wrappedS = wrapArcLength(arc.s);
+  let chunkIndex = Math.floor(wrappedS / CHUNK_LENGTH);
+  if (chunkIndex >= CHUNK_COUNT) {
+    chunkIndex = chunkIndex % CHUNK_COUNT;
+  }
+  return chunkIndex;
+}
+
+/**
+ * Convert RingPolar to chunk index via RingArc
+ * 
+ * @param {RingPolar} polar - RingPolar coordinates
+ * @returns {number} Chunk index (0 to CHUNK_COUNT - 1)
+ */
+export function ringPolarToChunkIndex(polar) {
+  const arc = ringPolarToRingArc(polar);
+  return ringArcToChunkIndex(arc);
+}
+
+/**
+ * Convert chunk index to RingArc coordinates
+ * Returns the center arc length of the chunk
+ * 
+ * @param {number} chunkIndex - Chunk index (0 to CHUNK_COUNT - 1)
+ * @returns {RingArc} RingArc coordinates at chunk center
+ */
+export function chunkIndexToRingArc(chunkIndex) {
+  // Wrap chunk index to valid range
+  const wrappedIndex = ((chunkIndex % CHUNK_COUNT) + CHUNK_COUNT) % CHUNK_COUNT;
+  // Center of chunk: s = (chunkIndex + 0.5) * CHUNK_LENGTH
+  const s = (wrappedIndex + 0.5) * CHUNK_LENGTH;
+  return {
+    s: wrapArcLength(s),
+    r: 0, // Default to centerline
+    z: 0, // Default to equatorial plane
+  };
+}
+
+/**
+ * Convert chunk index to RingPolar coordinates via RingArc
+ * 
+ * @param {number} chunkIndex - Chunk index (0 to CHUNK_COUNT - 1)
+ * @returns {RingPolar} RingPolar coordinates at chunk center
+ */
+export function chunkIndexToRingPolar(chunkIndex) {
+  const arc = chunkIndexToRingArc(chunkIndex);
+  return ringArcToRingPolar(arc);
 }
 
 /**

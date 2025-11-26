@@ -142,25 +142,41 @@ s = theta * R_ring
 - `server/internal/streaming/manager.go`
 - `server/internal/ringmap/spatial.go`
 
-### Phase 5: Client-Side Migration - ⏳ PARTIAL
+### Phase 5: Client-Side Migration - ✅ COMPLETED
 
-**Status:** ⏳ Partial (utilities ready, integration pending)
+**Status:** ✅ Completed
 
 **Tasks:**
 - [x] Create coordinate utilities (`coordinates-new.js`)
 - [x] Update station utilities to use RingArc coordinates
-- [ ] Update chunk manager to use RingPolar/RingArc (utilities ready, integration pending)
-- [ ] Update zone manager to use new coordinates (utilities ready, integration pending)
-- [ ] Update camera controller to use new coordinates (utilities ready, integration pending)
-- [ ] Update rendering utilities to convert from ER0 to Three.js (utilities ready)
-- [ ] Update UI components to display new coordinates
+- [x] Update chunk manager to use RingArc coordinates
+  - Converts legacy positions to RingArc internally
+  - Uses `ringArcToChunkIndex()` for chunk indexing
+  - Sends both legacy and new coordinates in streaming messages (backward compatible)
+- [x] Update zone manager to use RingArc coordinates
+  - Converts camera position to RingArc internally
+  - Calculates zone bounds using RingArc coordinates
+  - Maintains backward compatibility with REST API
+- [x] Update camera controller to use new coordinates
+  - Added `getRingArcPosition()`, `getRingPolarPosition()`, `getER0Position()` methods
+  - Added `setPositionFromRingArc()`, `setPositionFromRingPolar()`, `setPositionFromER0()` methods
+  - Legacy `getEarthRingPosition()` maintained for backward compatibility
+- [x] Update rendering utilities to convert from ER0 to Three.js
+  - Added `setObjectPositionFromER0()`, `getER0PositionFromObject()`
+  - Added `setCameraPositionFromER0()`, `getER0PositionFromCamera()`
+  - Added `createMeshAtER0Position()`
+  - Full conversion chain: ER0 → RingPolar → Legacy → Three.js
+- [x] Update UI components to display new coordinates
+  - Debug Info panel displays RingArc coordinates
+  - Admin Player pane uses RingArc coordinates
 
 **Files:**
-- `client-web/src/chunks/chunk-manager.js`
-- `client-web/src/zones/zone-manager.js`
-- `client-web/src/input/camera-controller.js`
-- `client-web/src/utils/rendering.js`
-- `client-web/src/ui/*.js`
+- `client-web/src/chunks/chunk-manager.js` - ✅ Updated
+- `client-web/src/zones/zone-manager.js` - ✅ Updated
+- `client-web/src/input/camera-controller.js` - ✅ Updated
+- `client-web/src/utils/rendering.js` - ✅ Updated
+- `client-web/src/ui/debug-info.js` - ✅ Updated
+- `client-web/src/ui/admin-modal.js` - ✅ Updated
 
 ### Phase 6: Kongo Station Migration - ✅ COMPLETED
 
@@ -185,7 +201,8 @@ s = theta * R_ring
 - [x] Update all documentation to reflect new coordinate system
 - [x] Update README with new coordinate system information
 - [x] Create coordinate system reference guide (migration docs)
-- [ ] Remove legacy coordinate system code (deferred - maintaining backward compatibility)
+- [x] Update client-refactor status documentation
+- [ ] Remove legacy coordinate system code (deferred - maintaining backward compatibility for validation period)
 
 **Files:**
 - `docs/02-map-system.md`
