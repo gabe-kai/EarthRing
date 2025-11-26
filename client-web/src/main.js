@@ -362,25 +362,36 @@ wsClient.onOpen(async () => {
     return;
   }
   
-  // Automatically load chunks around the camera position
+  // Subscribe to server-driven streaming for chunks and zones
   try {
     const cameraPos = cameraController.getEarthRingPosition();
-    // Load chunks at camera position using active floor from game state
     const floor = gameStateManager.getActiveFloor();
-    await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium');
-    // Only log in debug mode
+    
+    // Use streaming subscription (server-driven) instead of individual requests
+    // This automatically delivers chunks and zones based on camera pose
+    const radiusMeters = 5000; // 5km radius
+    const widthMeters = 5000;  // 5km width
+    
+    await chunkManager.subscribeToStreaming(cameraPos.x, floor, radiusMeters, widthMeters);
+    
     if (window.earthring?.debug) {
-      console.log('[Chunks] Loaded chunks around camera position');
+      console.log('[Chunks] Subscribed to server-driven streaming');
     }
   } catch (error) {
-    console.error('[Chunks] Failed to load initial chunks:', error);
+    console.error('[Chunks] Failed to subscribe to streaming, falling back to legacy requests:', error);
+    // Fallback to legacy chunk_request if streaming fails
+    try {
+      const cameraPos = cameraController.getEarthRingPosition();
+      const floor = gameStateManager.getActiveFloor();
+      await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium');
+    } catch (fallbackError) {
+      console.error('[Chunks] Failed to load initial chunks:', fallbackError);
+    }
   }
 
-  try {
-    await zoneManager.loadZonesAroundCamera();
-  } catch (error) {
-    console.error('Failed to load initial zones:', error);
-  }
+  // Zones are now delivered via stream_delta messages when include_zones is true in subscription
+  // ZoneManager will automatically handle streamed zones via its WebSocket handlers
+  // Legacy zone loading is kept as fallback (ZoneManager.loadZonesAroundCamera checks streaming state)
 });
 
 wsClient.onClose(() => {

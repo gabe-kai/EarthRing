@@ -1,5 +1,6 @@
 import { fetchZonesByArea } from '../api/zone-service.js';
 import { isAuthenticated } from '../auth/auth-service.js';
+import { wsClient } from '../network/websocket-client.js';
 import * as THREE from 'three';
 import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates.js';
 
@@ -54,7 +55,42 @@ export class ZoneManager {
       ['dezone', true],
     ]);
 
+    // Streaming subscription state
+    this.useStreaming = true; // Enable server-driven streaming by default
+
     this.setupListeners();
+    this.setupWebSocketHandlers();
+  }
+
+  /**
+   * Set up WebSocket message handlers for zone streaming
+   */
+  setupWebSocketHandlers() {
+    // Handle stream_delta messages (server-driven streaming)
+    // Zones are delivered via stream_delta when include_zones is true in subscription
+    wsClient.on('stream_delta', (data) => {
+      if (data.zones && Array.isArray(data.zones)) {
+        this.handleStreamedZones(data.zones);
+      }
+    });
+  }
+
+  /**
+   * Handle zones received from server-driven streaming
+   * @param {Array} zones - Array of zone objects from server
+   */
+  handleStreamedZones(zones) {
+    if (window.earthring?.debug) {
+      console.log(`[Zones] Received ${zones.length} zone(s) from streaming`);
+    }
+
+    // Add zones to game state (which will trigger rendering via listeners)
+    zones.forEach(zone => {
+      // Ensure zone has required fields
+      if (zone.id && zone.geometry) {
+        this.gameState.upsertZone(zone);
+      }
+    });
   }
 
   setupListeners() {
@@ -95,6 +131,15 @@ export class ZoneManager {
 
   async loadZonesAroundCamera(range = DEFAULT_ZONE_RANGE) {
     if (!this.cameraController || this.pendingFetch || !isAuthenticated()) {
+      return;
+    }
+
+    // If streaming is enabled, zones will be delivered automatically via stream_delta
+    // Only use REST API as fallback
+    if (this.useStreaming && wsClient.isConnected()) {
+      if (window.earthring?.debug) {
+        console.log('[Zones] Using streaming subscription, skipping REST API call');
+      }
       return;
     }
 

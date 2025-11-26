@@ -4,6 +4,7 @@
  */
 
 import * as THREE from 'three';
+import { legacyPositionToRingPolar, ringPolarToRingArc } from '../utils/coordinates-new.js';
 
 export class DebugInfoPanel {
   constructor(sceneManager, cameraController, gridOverlay, gameStateManager, chunkManager, zoneManager) {
@@ -50,7 +51,6 @@ export class DebugInfoPanel {
           ${this.createSection('Camera', 'camera', [
             'Position (ER): <span id="debug-cam-pos">-</span>',
             'Position (3JS): <span id="debug-cam-pos-3js">-</span>',
-            'Floor: <span id="debug-cam-floor">-</span>',
             'Target: <span id="debug-cam-target">-</span>',
           ])}
           ${this.createSection('Cursor', 'cursor', [
@@ -302,19 +302,27 @@ export class DebugInfoPanel {
     
     const posEl = this.panel.querySelector('#debug-cam-pos');
     const pos3JSEl = this.panel.querySelector('#debug-cam-pos-3js');
-    const floorEl = this.panel.querySelector('#debug-cam-floor');
     const targetEl = this.panel.querySelector('#debug-cam-target');
     
+    // Convert legacy coordinates to new RingArc coordinates
     if (posEl) {
-      posEl.textContent = `X:${erPos.x.toFixed(1)} Y:${erPos.y.toFixed(1)} Z:${erPos.z.toFixed(1)}`;
+      try {
+        // Convert legacy (x, y, z) to RingPolar, then to RingArc
+        const polar = legacyPositionToRingPolar(erPos.x, erPos.y, erPos.z);
+        const arc = ringPolarToRingArc(polar);
+        
+        // Display as RingArc: s (arc length in km), θ (theta in degrees), r (radial offset in m), z (vertical offset in m)
+        const sKm = arc.s / 1000; // Convert to km
+        const thetaDeg = polar.theta * 180 / Math.PI;
+        posEl.textContent = `s:${sKm.toFixed(1)}km θ:${thetaDeg.toFixed(1)}° r:${arc.r.toFixed(1)}m z:${arc.z.toFixed(1)}m`;
+      } catch (error) {
+        // Fallback to legacy format if conversion fails
+        posEl.textContent = `X:${erPos.x.toFixed(1)} Y:${erPos.y.toFixed(1)} Z:${erPos.z.toFixed(1)}`;
+      }
     }
     
     if (pos3JSEl && camera) {
       pos3JSEl.textContent = `X:${camera.position.x.toFixed(1)} Y:${camera.position.y.toFixed(1)} Z:${camera.position.z.toFixed(1)}`;
-    }
-    
-    if (floorEl) {
-      floorEl.textContent = Math.round(erPos.z);
     }
     
     if (targetEl && this.cameraController.getControls) {

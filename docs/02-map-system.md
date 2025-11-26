@@ -98,7 +98,43 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 
 ### Coordinate System
 
-#### Primary Coordinate: Ring Position (X)
+**Status**: ⚠️ **MIGRATION IN PROGRESS** - The coordinate system is being migrated from legacy X/Y/Z to ER0/EarthRing coordinates. See [Coordinate System Migration](../refactor/coordinate-system-migration.md) for details.
+
+#### New Coordinate Systems
+
+**1. ER0: Earth-Centered, Earth-Fixed Frame**
+- **Origin**: (0,0,0) = center of Earth
+- **+X axis**: intersection of equator and prime meridian (Kongo Pillar vertical line)
+- **+Y axis**: 90°E on the equator
+- **+Z axis**: North Pole
+- **Usage**: All absolute positions in 3D space, physics, rendering, inter-ring distances
+- **Kongo Hub Position**: ER0 = (KongoHubRadius, 0, 0) where KongoHubRadius = 6,878,137 m
+
+**2. EarthRing Coordinate Frame**
+
+**RingPolar (theta, r, z):**
+- **theta**: angle around ring in radians
+  - theta = 0 at Kongo Hub
+  - increases eastward
+  - wraps at ±π (International Date Line, opposite Kongo)
+- **r**: radial offset from ring's centerline in meters
+  - positive = outward from Earth
+  - negative = inward toward Earth
+- **z**: vertical offset from equatorial plane in meters
+  - positive = north
+  - negative = south
+
+**RingArc (s, r, z):**
+- **s**: arc length along ring in meters
+  - s = 0 at Kongo Hub
+  - s = theta * R_ring
+  - wraps at ring circumference (264,000 km)
+- **r**: same as RingPolar
+- **z**: same as RingPolar
+
+#### Legacy Coordinate System (Deprecated)
+
+**Primary Coordinate: Ring Position (X)**
 - **Range**: 0 to 264,000,000 meters (0 to 264,000 km)
 - **Unit**: Meters
 - **Reference Point**: X = 0 is positioned directly above the Prime Meridian (0° longitude) at the equator (Gulf of Guinea)
@@ -106,6 +142,7 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
   - Formula: `wrapped_position = position % 264000000`
   - Example: Position 264,000,100 wraps to 100
 - **Orbital Context**: Ring is in geostationary orbit at ~35,786 km altitude (see Orbital Mechanics section)
+- **Note**: This coordinate system is being phased out in favor of ER0/EarthRing coordinates
 
 #### Secondary Coordinate: Width Position (Y)
 - **Range**: 

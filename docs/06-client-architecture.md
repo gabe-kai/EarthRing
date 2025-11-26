@@ -377,14 +377,15 @@ Manages chunk loading and unloading based on viewport.
 #### Implementation ✅ **IMPLEMENTED**
 
 **Chunk Manager** (`client-web/src/chunks/chunk-manager.js`):
-- WebSocket-based chunk requests
+- **Server-driven streaming**: Uses `stream_subscribe` and `stream_update_pose` for efficient delta-based chunk loading
 - Chunk caching integration with game state manager
 - Automatic geometry decompression (transparent to rendering code)
-- Position-based chunk loading
+- **Delta-based updates**: Receives chunk deltas (added/removed chunks) from server as camera moves
 - **Active Floor filtering**: Only loads and renders chunks matching the active floor
 - **Floor change handling**: Automatically clears chunks from other floors and reloads for new floor when active floor changes
 - Mesh management and cleanup
 - Seam-aware rendering with chunk wrapping
+- **Legacy support**: Still supports `chunk_request` for backward compatibility, but streaming is the primary method
 
 **Chunk UI** (`client-web/src/ui/chunk-ui.js`):
 - Chunk metadata retrieval interface
@@ -393,7 +394,10 @@ Manages chunk loading and unloading based on viewport.
 - Quick example chunk buttons
 
 **Key Features**:
-- Request chunks via WebSocket (`chunk_request` message)
+- **Server-driven streaming**: Subscribes to chunk/zone streams via `stream_subscribe` on initial connection
+- **Pose updates**: Sends `stream_update_pose` messages when camera moves (instead of re-subscribing)
+- **Delta consumption**: Receives and processes chunk/zone deltas via `stream_delta` messages
+- **Legacy support**: Falls back to `chunk_request` if streaming is unavailable
 - Position-based chunk loading (converts ring position to chunk indices)
 - **Active Floor filtering**: Chunks are requested and rendered only for the active floor (from `gameStateManager.getActiveFloor()`)
 - Automatic chunk rendering when added to game state (only if chunk matches active floor)
@@ -401,7 +405,7 @@ Manages chunk loading and unloading based on viewport.
 - Ring floor geometry rendering with variable width from station flares
 - **Mesh reuse + precision fix**: Each `renderChunk()` call now computes a chunk-local origin, stores the large absolute X coordinate on the mesh transform, and caches meshes keyed by a `chunkVersionToken`. Identical geometry is skipped entirely unless the camera wraps by >5 km. This both eliminated the far-side platform flicker and keeps 264,000 km coordinates numerically stable inside `Float32Array` buffers.
 - Keyboard-relative camera controls (WASD for forward/backward/strafe movement relative to camera view, QE for vertical up/down) integrated with OrbitControls while respecting focused input fields
-- Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam
+- Seam-aware rendering: each chunk mesh is shifted by integer multiples of the ring circumference so the copy closest to the camera is rendered, eliminating gaps/overlaps at the 0/263999 seam. The wrapping calculation uses the raw camera position (which may be negative or > RING_CIRCUMFERENCE) to correctly determine which copy of each chunk to render.
 - **Floor change handling**: When active floor changes, all chunk meshes from the old floor are removed, chunks are removed from game state, and chunks for the new floor are automatically loaded
 - Mesh cleanup and resource disposal
 - Integration with game state manager for caching

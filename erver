@@ -1,0 +1,30 @@
+[33mcommit 90d1d0ae3e6f813bf99b9a055a2d6fecbe80cf72[m[33m ([m[1;36mHEAD -> [m[1;32mfeature/client-refactor[m[33m)[m
+Author: gabe-kai <gabe.kai@gmail.com>
+Date:   Tue Nov 25 21:30:54 2025 -0500
+
+    Update UI components to use new coordinate system and fix token refresh
+    
+    UI Updates:
+    - Updated Debug Info panel to display RingArc coordinates (s, θ, r, z)
+    - Removed redundant Floor line from Debug Info (floor is always active floor)
+    - Updated Admin -> Player pane to use RingArc coordinate system
+      - Form now uses: Arc Length (s) in km, Radial Offset (r) in m, Vertical Offset (z) in m
+      - Added optional Theta (θ) field with auto-calculation
+      - Profile display shows both RingArc and legacy coordinates
+      - Form auto-populates with current position when loading profile
+    
+    Authentication Fix:
+    - Added token refresh support to player-service.js
+    - All player API functions now use ensureValidToken() before requests
+    - Added automatic retry logic for 401 errors (matches zone-service pattern)
+    - Fixes 'Session expired' errors when teleporting via Admin panel
+    
+    Documentation:
+    - Updated coordinate-system-status.md with UI component updates
+    - Marked Phase 7 (Documentation) as completed
+
+ client-web/src/api/player-service.js      |  53 [32m++++++++++[m[31m---[m
+ client-web/src/ui/admin-modal.js          | 127 [32m+++++++++++++++++++++++++[m[31m-----[m
+ client-web/src/ui/debug-info.js           |  22 [32m++++[m[31m--[m
+ docs/refactor/coordinate-system-status.md |  20 [32m+++[m[31m--[m
+ 4 files changed, 174 insertions(+), 48 deletions(-)

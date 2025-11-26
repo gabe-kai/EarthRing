@@ -4,12 +4,14 @@
  */
 
 import { getAPIURL } from '../config.js';
-import { getAccessToken } from '../auth/auth-service.js';
+import { getAccessToken, ensureValidToken } from '../auth/auth-service.js';
 
 /**
  * Get current player's profile
  */
 export async function getCurrentPlayerProfile() {
+  // Ensure token is valid (refresh if needed)
+  await ensureValidToken();
   const token = getAccessToken();
   if (!token) {
     throw new Error('Not authenticated. Please log in again.');
@@ -46,6 +48,8 @@ export async function getCurrentPlayerProfile() {
  * Get player profile by ID
  */
 export async function getPlayerProfile(playerID) {
+  // Ensure token is valid (refresh if needed)
+  await ensureValidToken();
   const token = getAccessToken();
   if (!token) {
     throw new Error('Not authenticated. Please log in again.');
@@ -80,25 +84,48 @@ export async function getPlayerProfile(playerID) {
  * Update player position
  */
 export async function updatePlayerPosition(playerID, position, floor) {
+  // Ensure token is valid (refresh if needed)
+  const tokenValid = await ensureValidToken();
+  if (!tokenValid) {
+    throw new Error('Not authenticated. Please log in again.');
+  }
+
   const token = getAccessToken();
   if (!token) {
     throw new Error('Not authenticated. Please log in again.');
   }
 
-  const response = await fetch(getAPIURL(`/api/players/${playerID}/position`), {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
+  const requestBody = {
+    position: {
+      x: parseFloat(position.x),
+      y: parseFloat(position.y),
     },
-    body: JSON.stringify({
-      position: {
-        x: parseFloat(position.x),
-        y: parseFloat(position.y),
+    floor: parseInt(floor),
+  };
+
+  const makeRequest = async (authToken) => {
+    return await fetch(getAPIURL(`/api/players/${playerID}/position`), {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json',
       },
-      floor: parseInt(floor),
-    }),
-  });
+      body: JSON.stringify(requestBody),
+    });
+  };
+
+  let response = await makeRequest(token);
+
+  // If 401, try to refresh token and retry once
+  if (!response.ok && response.status === 401) {
+    const refreshed = await ensureValidToken();
+    if (!refreshed) {
+      throw new Error('Session expired. Please log in again.');
+    }
+    // Retry request with new token
+    const newToken = getAccessToken();
+    response = await makeRequest(newToken);
+  }
 
   if (!response.ok) {
     let errorMessage = 'Failed to update position';
