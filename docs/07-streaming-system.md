@@ -93,9 +93,9 @@ Each chunk contains:
 
 ## Chunk Loading Strategy
 
-### Server-Driven Streaming Contracts (New)
+### Server-Driven Streaming Contracts ✅ **IMPLEMENTED**
 
-The client no longer decides which chunks/zones to fetch. Instead, it describes the player’s pose once and the server responds with a subscription identifier plus preselected chunks. Future deltas are streamed automatically (implementation in progress).
+The client no longer decides which chunks/zones to fetch. Instead, it describes the player's pose once and the server responds with a subscription identifier plus preselected chunks. Future deltas are streamed automatically as the camera moves.
 
 #### Subscription Request
 
@@ -137,11 +137,77 @@ The client no longer decides which chunks/zones to fetch. Instead, it describes 
 }
 ```
 
-- `subscription_id`: server-assigned handle used for future control messages (pause, unsubscribe – TBD).
+- `subscription_id`: server-assigned handle used for future control messages (including `stream_update_pose`).
 - `chunk_ids`: current chunk window (derived using shared coordinate helpers).
 - `message`: human-readable status.
 
-The acknowledgement is available in code today; actual delta streaming reuses this contract once the backend emits update events.
+#### Pose Updates ✅ **IMPLEMENTED**
+
+When the camera moves, the client sends a `stream_update_pose` message instead of re-subscribing:
+
+```json
+{
+  "type": "stream_update_pose",
+  "id": "req-43",
+  "data": {
+    "subscription_id": "sub_0_1711138123456",
+    "pose": {
+      "ring_position": 131982500,
+      "width_offset": 12.5,
+      "elevation": 150.0,
+      "active_floor": 0
+    }
+  }
+}
+```
+
+The server responds with `stream_pose_ack` containing chunk deltas:
+
+```json
+{
+  "type": "stream_pose_ack",
+  "id": "req-43",
+  "data": {
+    "subscription_id": "sub_0_1711138123456",
+    "message": "Pose updated. Chunk/zone deltas sent.",
+    "chunk_delta": {
+      "AddedChunks": ["0_131985", "0_131986"],
+      "RemovedChunks": ["0_131978", "0_131979"]
+    }
+  }
+}
+```
+
+Added chunks are then sent asynchronously via `stream_delta` messages, while removed chunks are immediately available in the ack response for client cleanup.
+
+#### Delta Messages ✅ **IMPLEMENTED**
+
+Chunk and zone deltas are delivered via `stream_delta` messages:
+
+```json
+{
+  "type": "stream_delta",
+  "data": {
+    "subscription_id": "sub_0_1711138123456",
+    "chunks": [
+      {
+        "id": "0_131985",
+        "geometry": { ... },
+        "metadata": { ... }
+      }
+    ],
+    "zones": [
+      {
+        "id": 123,
+        "geometry": { ... },
+        "type": "residential"
+      }
+    ]
+  }
+}
+```
+
+The client processes these deltas automatically, adding new chunks/zones and removing old ones as the camera moves.
 
 ### Client-Side Loading (Legacy – being phased out)
 

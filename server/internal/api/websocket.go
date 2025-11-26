@@ -438,6 +438,8 @@ func (h *WebSocketHandlers) handleMessage(conn *WebSocketConnection, msg *WebSoc
 		h.handlePlayerMove(conn, msg)
 	case "stream_subscribe":
 		h.handleStreamSubscribe(conn, msg)
+	case "stream_update_pose":
+		h.handleStreamUpdatePose(conn, msg)
 	default:
 		conn.sendError(msg.ID, "Unknown message type", "UnknownMessageType")
 	}
@@ -941,6 +943,164 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 				log.Printf("Sent %d initial zones for subscription %s", len(zones), plan.SubscriptionID)
 			}
 		}()
+	}
+}
+
+// StreamUpdatePoseData represents the data payload for a stream_update_pose message
+type StreamUpdatePoseData struct {
+	SubscriptionID string              `json:"subscription_id"`
+	Pose           streaming.CameraPose `json:"pose"`
+}
+
+// handleStreamUpdatePose handles pose update messages and sends zone/chunk deltas.
+func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, msg *WebSocketMessage) {
+	if h.streamManager == nil {
+		conn.sendError(msg.ID, "Streaming manager unavailable", "InternalError")
+		return
+	}
+
+	var req StreamUpdatePoseData
+	if err := json.Unmarshal(msg.Data, &req); err != nil {
+		conn.sendError(msg.ID, "Invalid stream_update_pose payload", "InvalidMessageFormat")
+		return
+	}
+
+	if req.SubscriptionID == "" {
+		conn.sendError(msg.ID, "subscription_id is required", "InvalidMessageFormat")
+		return
+	}
+
+	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, active_floor=%d",
+		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ActiveFloor)
+
+	// Update pose and get chunk deltas
+	chunkDelta, err := h.streamManager.UpdatePose(conn.userID, req.SubscriptionID, req.Pose)
+	if err != nil {
+		log.Printf("[Stream] UpdatePose failed: %v", err)
+		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
+		return
+	}
+
+	// Get subscription to check what's included
+	subscription, err := h.streamManager.GetSubscription(req.SubscriptionID)
+	if err != nil {
+		log.Printf("[Stream] GetSubscription failed: %v", err)
+		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
+		return
+	}
+
+	// Send chunk deltas if chunks are included and there are changes
+	if subscription.Request.IncludeChunks {
+		if len(chunkDelta.AddedChunks) > 0 || len(chunkDelta.RemovedChunks) > 0 {
+			log.Printf("[Stream] Chunk delta: added=%d, removed=%d", len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
+			
+			// Load and send added chunks
+			if len(chunkDelta.AddedChunks) > 0 {
+				go func() {
+					chunks := h.loadChunksForIDs(chunkDelta.AddedChunks, "medium")
+					if len(chunks) > 0 {
+						h.sendChunkData(conn, chunks, "stream_delta", "")
+						log.Printf("[Stream] Sent %d added chunks for subscription %s", len(chunks), req.SubscriptionID)
+					}
+				}()
+			}
+			
+			// Note: Removed chunks are communicated via the delta structure
+			// The client should handle removal based on the delta message
+			if len(chunkDelta.RemovedChunks) > 0 {
+				log.Printf("[Stream] Chunks to remove: %v", chunkDelta.RemovedChunks)
+			}
+		}
+	}
+
+	// Handle zone deltas if zones are included
+	if subscription.Request.IncludeZones && subscription.ZoneBoundingBox != nil {
+		go func() {
+			// Recompute bounding box (already updated in UpdatePose)
+			bbox := *subscription.ZoneBoundingBox
+			
+			// Load zones for new bounding box
+			zones := h.loadZonesForArea(bbox, req.Pose)
+			
+			// Extract zone IDs
+			newZoneIDs := make([]int64, len(zones))
+			for i, zone := range zones {
+				newZoneIDs[i] = zone.ID
+			}
+			
+			// Compute zone delta
+			zoneDelta, err := h.streamManager.ComputeZoneDelta(req.SubscriptionID, newZoneIDs)
+			if err != nil {
+				log.Printf("[Stream] ComputeZoneDelta failed: %v", err)
+				return
+			}
+			
+			// Send zone deltas if there are changes
+			if len(zoneDelta.AddedZoneIDs) > 0 || len(zoneDelta.RemovedZoneIDs) > 0 {
+				log.Printf("[Stream] Zone delta: added=%d, removed=%d", len(zoneDelta.AddedZoneIDs), len(zoneDelta.RemovedZoneIDs))
+				
+				// Load and send added zones
+				if len(zoneDelta.AddedZoneIDs) > 0 {
+					addedZones := make([]database.Zone, 0, len(zoneDelta.AddedZoneIDs))
+					zoneMap := make(map[int64]database.Zone)
+					for _, zone := range zones {
+						zoneMap[zone.ID] = zone
+					}
+					for _, zoneID := range zoneDelta.AddedZoneIDs {
+						if zone, ok := zoneMap[zoneID]; ok {
+							addedZones = append(addedZones, zone)
+						}
+					}
+					if len(addedZones) > 0 {
+						h.sendZoneData(conn, addedZones, "stream_delta", "")
+						log.Printf("[Stream] Sent %d added zones for subscription %s", len(addedZones), req.SubscriptionID)
+					}
+				}
+				
+				// Note: Removed zones are communicated via the delta structure
+				if len(zoneDelta.RemovedZoneIDs) > 0 {
+					log.Printf("[Stream] Zones to remove: %v", zoneDelta.RemovedZoneIDs)
+				}
+			}
+		}()
+	}
+
+	// Send acknowledgment
+	response := WebSocketMessage{
+		Type: "stream_pose_ack",
+		ID:   msg.ID,
+	}
+
+	ackPayload := struct {
+		SubscriptionID string                `json:"subscription_id"`
+		ChunkDelta     *streaming.ChunkDelta `json:"chunk_delta,omitempty"`
+		Message        string                `json:"message"`
+	}{
+		SubscriptionID: req.SubscriptionID,
+		ChunkDelta:     chunkDelta,
+		Message:        "Pose updated. Zone deltas will be delivered asynchronously.",
+	}
+
+	data, err := json.Marshal(ackPayload)
+	if err != nil {
+		log.Printf("Failed to marshal stream_pose_ack payload: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare pose update acknowledgement", "InternalError")
+		return
+	}
+
+	response.Data = data
+	bytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal stream_pose_ack response: %v", err)
+		conn.sendError(msg.ID, "Failed to prepare pose update acknowledgement", "InternalError")
+		return
+	}
+
+	select {
+	case conn.send <- bytes:
+		log.Printf("[Stream] Sent stream_pose_ack for subscription %s", req.SubscriptionID)
+	default:
+		log.Printf("Failed to send stream_pose_ack: channel full")
 	}
 }
 

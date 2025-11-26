@@ -107,6 +107,28 @@ export class ChunkManager {
       }
     });
     
+    // Handle stream_pose_ack messages (pose update acknowledgments)
+    // Note: This is also handled in updateStreamingPose via request/response,
+    // but we keep this handler for any async acknowledgments
+    wsClient.on('stream_pose_ack', (data) => {
+      if (window.earthring?.debug) {
+        console.log('[Chunks] Pose update acknowledged (async):', data);
+      }
+      // Handle chunk delta if provided (removed chunks need to be cleaned up)
+      if (data.chunk_delta) {
+        const delta = data.chunk_delta;
+        // Go struct fields are capitalized (RemovedChunks)
+        const removed = delta.RemovedChunks || [];
+        if (removed.length > 0) {
+          console.log(`[Chunks] Removing ${removed.length} chunks from async pose update:`, removed);
+          removed.forEach(chunkID => {
+            this.removeChunkMesh(chunkID);
+            this.gameStateManager.removeChunk(chunkID);
+          });
+        }
+      }
+    });
+    
     // Handle stream_ack messages (subscription confirmation)
     wsClient.on('stream_ack', (data) => {
       if (window.earthring?.debug) {
@@ -248,6 +270,72 @@ export class ChunkManager {
   }
   
   /**
+   * Update streaming subscription pose (sends stream_update_pose)
+   * @param {number} ringPosition - Ring position in meters
+   * @param {number} floor - Floor number (active floor)
+   * @returns {Promise<void>} Promise that resolves when pose is updated
+   */
+  async updateStreamingPose(ringPosition, floor) {
+    if (!wsClient.isConnected()) {
+      throw new Error('WebSocket is not connected');
+    }
+
+    if (!this.streamingSubscriptionID) {
+      throw new Error('No active subscription to update');
+    }
+
+    const cameraPos = this.cameraController?.getEarthRingPosition?.() || { x: ringPosition, y: 0, z: floor };
+    const elevation = cameraPos.y || 0;
+    const widthOffset = cameraPos.y || 0; // Y offset in EarthRing coordinates
+
+    // Wrap ring position to valid range [0, RING_CIRCUMFERENCE)
+    const RING_CIRCUMFERENCE = 264000000;
+    const wrappedRingPosition = ((Math.round(ringPosition) % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+
+    console.log(`[Chunks] updateStreamingPose: subscription_id=${this.streamingSubscriptionID}, position=${wrappedRingPosition.toFixed(0)}, floor=${floor}`);
+
+    try {
+      const response = await wsClient.request('stream_update_pose', {
+        subscription_id: this.streamingSubscriptionID,
+        pose: {
+          ring_position: wrappedRingPosition,
+          width_offset: widthOffset,
+          elevation: elevation,
+          active_floor: floor,
+        },
+      });
+
+      console.log(`[Chunks] stream_update_pose response:`, response);
+
+      // Update stored position
+      this.lastSubscriptionPosition = wrappedRingPosition;
+      
+      // Handle chunk delta if provided
+      if (response.chunk_delta) {
+        const delta = response.chunk_delta;
+        // Go struct fields are capitalized (AddedChunks, RemovedChunks)
+        const added = delta.AddedChunks || [];
+        const removed = delta.RemovedChunks || [];
+        console.log(`[Chunks] Chunk delta: added=${added.length}, removed=${removed.length}`);
+        
+        // Handle removed chunks immediately
+        if (removed.length > 0) {
+          console.log(`[Chunks] Removing ${removed.length} chunks from pose update:`, removed);
+          removed.forEach(chunkID => {
+            this.removeChunkMesh(chunkID);
+            this.gameStateManager.removeChunk(chunkID);
+          });
+        }
+        
+        // Added chunks will be sent via stream_delta messages asynchronously
+      }
+    } catch (error) {
+      console.error('[Chunks] Failed to update streaming pose:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Subscribe to server-driven streaming for chunks and zones
    * @param {number} ringPosition - Ring position in meters
    * @param {number} floor - Floor number (active floor)
@@ -353,19 +441,19 @@ export class ChunkManager {
       console.log(`[Chunks] Should update subscription: ${shouldUpdate} (lastPos=${this.lastSubscriptionPosition}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged}, floorChanged=${this.lastSubscriptionFloor !== floor})`);
       
       if (shouldUpdate) {
-        console.log(`[Chunks] Updating streaming subscription (moved ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged}, from ${this.lastSubscriptionPosition?.toFixed(0)} to ${ringPosition.toFixed(0)})`);
-        // Update subscription with new position
+        console.log(`[Chunks] Updating streaming pose (moved ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged}, from ${this.lastSubscriptionPosition?.toFixed(0)} to ${ringPosition.toFixed(0)})`);
+        // Update pose using stream_update_pose instead of re-subscribing
         try {
-          await this.subscribeToStreaming(ringPosition, floor, this.subscriptionRadiusMeters, this.subscriptionWidthMeters);
+          await this.updateStreamingPose(ringPosition, floor);
           this.lastSubscriptionFloor = floor;
-          console.log(`[Chunks] Subscription updated successfully`);
+          console.log(`[Chunks] Pose updated successfully`);
         } catch (error) {
-          console.error('[Chunks] Failed to update streaming subscription:', error);
-          // Fall back to legacy chunk_request if subscription update fails
+          console.error('[Chunks] Failed to update streaming pose:', error);
+          // Fall back to legacy chunk_request if pose update fails
           this.useStreaming = false;
         }
       } else {
-        console.log(`[Chunks] Subscription NOT updated (distance: ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged})`);
+        console.log(`[Chunks] Pose NOT updated (distance: ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged})`);
       }
       return;
     }
