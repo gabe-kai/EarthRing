@@ -34,10 +34,15 @@ This document summarizes the current status of the client-server responsibility 
 
 **Integration Tests:**
 - ✅ Integration test framework created
-- ✅ 3 test scenarios implemented and passing:
+- ✅ 8 test scenarios implemented and passing:
   - Streaming subscription flow
   - Pose updates with chunk deltas
   - Zone streaming with test data
+  - Ring wrapping at boundaries
+  - Error handling (invalid requests, missing IDs, unknown types)
+  - Floor changes
+  - WebSocket reconnection
+  - Performance benchmarks
 
 ### Remaining Tasks (Optional/Cleanup)
 

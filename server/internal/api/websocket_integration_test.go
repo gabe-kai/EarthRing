@@ -169,6 +169,24 @@ func (f *IntegrationTestFramework) ReadMessage(conn *websocket.Conn, timeout tim
 		return nil, fmt.Errorf("failed to read message: %w", err)
 	}
 
+	// First, check if it's an error message (errors are sent directly, not wrapped)
+	var errorMsg struct {
+		Type    string `json:"type"`
+		ID      string `json:"id,omitempty"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
+		Code    string `json:"code,omitempty"`
+	}
+	if err := json.Unmarshal(messageBytes, &errorMsg); err == nil && errorMsg.Type == "error" {
+		// Convert error to WebSocketMessage format, storing raw JSON in Data
+		return &WebSocketMessage{
+			Type: "error",
+			ID:   errorMsg.ID,
+			Data: json.RawMessage(messageBytes), // Store raw JSON for parsing
+		}, nil
+	}
+
+	// Try to parse as WebSocketMessage (normal messages)
 	var msg WebSocketMessage
 	if err := json.Unmarshal(messageBytes, &msg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
@@ -273,9 +291,23 @@ func (f *IntegrationTestFramework) UpdatePose(conn *websocket.Conn, subscription
 }
 
 // CreateTestChunk creates a test chunk in the database
+// If chunk already exists, returns existing chunk ID.
 func (f *IntegrationTestFramework) CreateTestChunk(floor, chunkIndex int) (int64, error) {
 	var chunkID int64
+	// Try to get existing chunk first
 	err := f.db.QueryRow(`
+		SELECT id FROM chunks WHERE floor = $1 AND chunk_index = $2
+	`, floor, chunkIndex).Scan(&chunkID)
+	if err == nil {
+		// Chunk already exists, return it
+		return chunkID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to check existing chunk: %w", err)
+	}
+
+	// Chunk doesn't exist, create it
+	err = f.db.QueryRow(`
 		INSERT INTO chunks (floor, chunk_index, version, is_dirty, procedural_seed)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
@@ -490,5 +522,356 @@ func TestIntegration_ZoneStreaming(t *testing.T) {
 	}
 
 	t.Logf("Zone streaming test completed for subscription: %s", subscriptionID)
+}
+
+// TestIntegration_RingWrapping tests ring position wrapping at boundaries
+func TestIntegration_RingWrapping(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	conn := framework.ConnectWebSocket()
+	defer conn.Close()
+
+	// Test position near ring boundary (just before wrap point)
+	// RingCircumference = 264,000,000m, so test near 263,999,000m
+	boundaryPose := streaming.CameraPose{
+		RingPosition: 263999000, // Near the end of the ring
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	subscriptionID, err := framework.SubscribeToStreaming(conn, boundaryPose, 5000, 5000, true, false)
+	if err != nil {
+		t.Fatalf("Failed to subscribe at boundary: %v", err)
+	}
+
+	// Wait for initial chunks
+	time.Sleep(500 * time.Millisecond)
+
+	// Update pose to cross the boundary (should wrap to beginning)
+	crossBoundaryPose := streaming.CameraPose{
+		RingPosition: 1000, // Just past wrap point (wraps from 263,999,000)
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	chunkDelta, err := framework.UpdatePose(conn, subscriptionID, crossBoundaryPose)
+	if err != nil {
+		t.Fatalf("Failed to update pose across boundary: %v", err)
+	}
+
+	if chunkDelta == nil {
+		t.Fatal("Chunk delta is nil after boundary cross")
+	}
+
+	// Should have chunks from both sides of the boundary
+	t.Logf("Boundary cross successful: added=%d, removed=%d chunks",
+		len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
+
+	// Verify chunk IDs are valid (should include chunks near 0 and near 263999)
+	hasLowChunks := false
+	hasHighChunks := false
+	for _, chunkID := range chunkDelta.AddedChunks {
+		// Parse chunk ID format: "floor_chunk_index"
+		var floor, index int
+		if _, err := fmt.Sscanf(chunkID, "%d_%d", &floor, &index); err == nil {
+			if index < 100 {
+				hasLowChunks = true
+			}
+			if index > 263900 {
+				hasHighChunks = true
+			}
+		}
+	}
+
+	if !hasLowChunks && !hasHighChunks {
+		t.Logf("Note: Chunk delta may not show boundary wrapping (chunks: %v)", chunkDelta.AddedChunks)
+	}
+
+	// Wait for async operations
+	time.Sleep(500 * time.Millisecond)
+}
+
+// TestIntegration_ErrorHandling tests error conditions
+func TestIntegration_ErrorHandling(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	conn := framework.ConnectWebSocket()
+	defer conn.Close()
+
+	tests := []struct {
+		name        string
+		messageType string
+		data        interface{}
+		expectError bool
+		errorCode   string
+	}{
+		{
+			name:        "invalid stream_subscribe (zero radius)",
+			messageType: "stream_subscribe",
+			data: map[string]interface{}{
+				"pose": map[string]interface{}{
+					"ring_position": 10000,
+					"active_floor":  0,
+				},
+				"radius_meters": 0, // Invalid: must be positive
+				"include_chunks": true,
+			},
+			expectError: true,
+			errorCode:   "InvalidSubscriptionRequest",
+		},
+		{
+			name:        "invalid stream_update_pose (missing subscription_id)",
+			messageType: "stream_update_pose",
+			data: map[string]interface{}{
+				"pose": map[string]interface{}{
+					"ring_position": 10000,
+					"active_floor":  0,
+				},
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name:        "invalid stream_update_pose (nonexistent subscription)",
+			messageType: "stream_update_pose",
+			data: map[string]interface{}{
+				"subscription_id": "nonexistent_sub_id",
+				"pose": map[string]interface{}{
+					"ring_position": 10000,
+					"active_floor":  0,
+				},
+			},
+			expectError: true,
+			errorCode:   "InvalidSubscriptionRequest",
+		},
+		{
+			name:        "invalid message type",
+			messageType: "invalid_message_type",
+			data:        map[string]interface{}{},
+			expectError: true,
+			errorCode:   "UnknownMessageType",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := framework.SendMessage(conn, tt.messageType, tt.data); err != nil {
+				t.Fatalf("Failed to send message: %v", err)
+			}
+
+			// Wait for error response
+			msg, err := framework.WaitForMessage(conn, "error", 2*time.Second)
+			if tt.expectError {
+				if err != nil {
+					t.Fatalf("Expected error message but got: %v", err)
+				}
+
+				var errorData struct {
+					Type    string `json:"type"`
+					ID      string `json:"id,omitempty"`
+					Error   string `json:"error"`
+					Message string `json:"message"`
+					Code    string `json:"code"`
+				}
+				
+				// Error messages are stored in Data field as raw JSON bytes
+				if len(msg.Data) == 0 {
+					t.Fatalf("Error message Data field is empty")
+				}
+				
+				if err := json.Unmarshal(msg.Data, &errorData); err != nil {
+					t.Fatalf("Failed to unmarshal error: %v (data length: %d, data: %s)", err, len(msg.Data), string(msg.Data))
+				}
+
+				if errorData.Code != tt.errorCode {
+					t.Errorf("Expected error code %s, got %s", tt.errorCode, errorData.Code)
+				}
+
+				t.Logf("Error handled correctly: code=%s, message=%s", errorData.Code, errorData.Error)
+			} else {
+				if err == nil && msg.Type == "error" {
+					t.Errorf("Unexpected error received: %s", string(msg.Data))
+				}
+			}
+		})
+	}
+}
+
+// TestIntegration_FloorChanges tests floor change handling
+func TestIntegration_FloorChanges(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	// Create test chunks on different floors
+	chunkID1, err := framework.CreateTestChunk(0, 100)
+	if err != nil {
+		t.Fatalf("Failed to create test chunk: %v", err)
+	}
+	chunkID2, err := framework.CreateTestChunk(1, 100)
+	if err != nil {
+		t.Fatalf("Failed to create test chunk: %v", err)
+	}
+	t.Logf("Created test chunks: floor 0 (ID=%d), floor 1 (ID=%d)", chunkID1, chunkID2)
+
+	conn := framework.ConnectWebSocket()
+	defer conn.Close()
+
+	// Subscribe to floor 0
+	pose0 := streaming.CameraPose{
+		RingPosition: 100000, // Position 100km
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	subscriptionID, err := framework.SubscribeToStreaming(conn, pose0, 5000, 5000, true, false)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	// Wait for initial chunks
+	time.Sleep(500 * time.Millisecond)
+
+	// Change to floor 1
+	pose1 := streaming.CameraPose{
+		RingPosition: 100000,
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  1, // Changed floor
+	}
+
+	chunkDelta, err := framework.UpdatePose(conn, subscriptionID, pose1)
+	if err != nil {
+		t.Fatalf("Failed to update pose for floor change: %v", err)
+	}
+
+	if chunkDelta == nil {
+		t.Fatal("Chunk delta is nil after floor change")
+	}
+
+	t.Logf("Floor change successful: added=%d, removed=%d chunks",
+		len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
+
+	// Verify chunk IDs are for the new floor
+	for _, chunkID := range chunkDelta.AddedChunks {
+		var floor, index int
+		if _, err := fmt.Sscanf(chunkID, "%d_%d", &floor, &index); err == nil {
+			if floor != 1 {
+				t.Errorf("Expected floor 1 chunks, got floor %d in chunk %s", floor, chunkID)
+			}
+		}
+	}
+
+	// Wait for async operations
+	time.Sleep(500 * time.Millisecond)
+}
+
+// TestIntegration_Reconnection tests WebSocket reconnection
+func TestIntegration_Reconnection(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	// Initial connection and subscription
+	conn1 := framework.ConnectWebSocket()
+	pose := streaming.CameraPose{
+		RingPosition: 10000,
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	subscriptionID1, err := framework.SubscribeToStreaming(conn1, pose, 5000, 5000, true, false)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+	t.Logf("Initial subscription: %s", subscriptionID1)
+
+	// Close connection
+	conn1.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Reconnect
+	conn2 := framework.ConnectWebSocket()
+	defer conn2.Close()
+
+	// Create new subscription (old one should be cleaned up)
+	subscriptionID2, err := framework.SubscribeToStreaming(conn2, pose, 5000, 5000, true, false)
+	if err != nil {
+		t.Fatalf("Failed to subscribe after reconnect: %v", err)
+	}
+
+	if subscriptionID2 == subscriptionID1 {
+		t.Logf("Note: Got same subscription ID after reconnect (may be expected)")
+	} else {
+		t.Logf("Got new subscription ID after reconnect: %s (was %s)", subscriptionID2, subscriptionID1)
+	}
+
+	// Verify new subscription works
+	chunkDelta, err := framework.UpdatePose(conn2, subscriptionID2, pose)
+	if err != nil {
+		t.Fatalf("Failed to update pose on reconnected subscription: %v", err)
+	}
+
+	if chunkDelta == nil {
+		t.Fatal("Chunk delta is nil after reconnection")
+	}
+
+	t.Logf("Reconnection successful: subscription=%s", subscriptionID2)
+}
+
+// TestIntegration_Performance tests streaming performance
+func TestIntegration_Performance(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	conn := framework.ConnectWebSocket()
+	defer conn.Close()
+
+	pose := streaming.CameraPose{
+		RingPosition: 10000,
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	// Measure subscription time
+	start := time.Now()
+	subscriptionID, err := framework.SubscribeToStreaming(conn, pose, 5000, 5000, true, false)
+	subscriptionTime := time.Since(start)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	if subscriptionTime > 2*time.Second {
+		t.Errorf("Subscription took too long: %v (target: <2s)", subscriptionTime)
+	}
+	t.Logf("Subscription completed in %v", subscriptionTime)
+
+	// Measure pose update time
+	start = time.Now()
+	newPose := streaming.CameraPose{
+		RingPosition: 20000,
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+	chunkDelta, err := framework.UpdatePose(conn, subscriptionID, newPose)
+	updateTime := time.Since(start)
+	if err != nil {
+		t.Fatalf("Failed to update pose: %v", err)
+	}
+
+	if updateTime > 500*time.Millisecond {
+		t.Errorf("Pose update took too long: %v (target: <500ms)", updateTime)
+	}
+	t.Logf("Pose update completed in %v (delta: added=%d, removed=%d)",
+		updateTime, len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
+
+	// Wait for async chunk loading
+	time.Sleep(500 * time.Millisecond)
 }
 

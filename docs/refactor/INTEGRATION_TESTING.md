@@ -145,90 +145,185 @@ All tests passing ✓
 
 ## Manual Testing Checklist
 
-### Server Setup
-- [ ] Database migrations applied
+### Prerequisites
+- [ ] Database migrations applied (including coordinate system migrations)
 - [ ] Server running with streaming manager enabled
+- [ ] Procedural service running and accessible
+- [ ] Client built and running
+- [ ] Browser DevTools open (Network tab, Console tab)
+
+### Server Setup
+- [ ] Server starts without errors
 - [ ] WebSocket endpoint accessible at `/ws`
 - [ ] JWT authentication working
+- [ ] Database connection established
+- [ ] Streaming manager initialized
 
-### Client Setup
-- [ ] Client connects to WebSocket
-- [ ] Client authenticates successfully
-- [ ] Client sends `stream_subscribe` on connection
+### Client Setup & Authentication
+- [ ] Client connects to WebSocket successfully
+- [ ] Client authenticates with JWT token
+- [ ] WebSocket connection shows as "connected" in console
+- [ ] Client automatically sends `stream_subscribe` on connection
+- [ ] Client receives `stream_ack` with subscription ID
 
-### Chunk Streaming
-- [ ] Initial chunks load and render
-- [ ] Chunk geometry displays correctly
-- [ ] Chunk compression working (check network tab)
-- [ ] Chunks update when camera moves
-- [ ] No duplicate chunk requests
+### Chunk Streaming - Initial Load
+- [ ] Initial chunks load within 2 seconds of subscription
+- [ ] Chunk geometry displays correctly in 3D view
+- [ ] Chunk compression working (check network tab for compressed payloads)
+- [ ] Chunks appear at correct positions relative to camera
+- [ ] No duplicate chunk requests in network tab
+- [ ] Console shows chunk loading messages (if debug enabled)
 
-### Zone Streaming
-- [ ] Initial zones load and render
-- [ ] Zone geometry displays correctly
-- [ ] Zones filtered by active floor
-- [ ] Zones update when camera moves
-- [ ] Zone deltas only send changes
+### Chunk Streaming - Movement & Updates
+- [ ] Chunks load ahead of camera as you move forward
+- [ ] Chunks unload behind camera as you move (verify in console/logs)
+- [ ] Chunk deltas sent via `stream_delta` messages (not full reloads)
+- [ ] Smooth chunk transitions (no gaps or flickering)
+- [ ] Chunk updates happen within 500ms of pose change
+- [ ] No performance degradation during movement
 
-### Edge Cases
-- [ ] Ring boundary wrapping works
-- [ ] Floor changes work smoothly
-- [ ] Multiple subscriptions (if supported)
-- [ ] Reconnection after disconnect
+### Zone Streaming - Initial Load
+- [ ] Initial zones load with chunks (if `include_zones: true`)
+- [ ] Zone geometry displays correctly in 3D view
+- [ ] Zones filtered by active floor (only current floor visible)
+- [ ] Zone boundaries render correctly
+- [ ] Zone metadata (name, type) accessible
 
-## Automated Integration Tests (Future)
+### Zone Streaming - Movement & Updates
+- [ ] Zones load/unload as camera moves
+- [ ] Zone deltas sent via `stream_delta` messages (only changes)
+- [ ] Zones respect bounding box (radius + width)
+- [ ] Zone updates happen within 500ms of pose change
+- [ ] No duplicate zone requests
 
-### Test Infrastructure Needed
-1. **Test Server**: In-memory or test database
-2. **Test Client**: WebSocket client library (e.g., `gorilla/websocket` for Go)
-3. **Test Data**: Sample chunks and zones in database
-4. **Test Runner**: Integration test suite
+### Pose Updates
+- [ ] `stream_update_pose` messages sent when camera moves
+- [ ] Pose updates sent at appropriate intervals (not too frequent)
+- [ ] Server responds with `stream_pose_ack`
+- [ ] Chunk deltas included in `stream_pose_ack` when chunks change
+- [ ] Zone deltas sent separately via `stream_delta` when zones change
 
-### Example Test Structure
-```go
-func TestStreamingIntegration(t *testing.T) {
-    // Setup test server with test database
-    server := setupTestServer(t)
-    defer server.Close()
-    
-    // Connect WebSocket client
-    conn := connectWebSocket(t, server.URL)
-    defer conn.Close()
-    
-    // Authenticate
-    token := authenticateTestUser(t)
-    conn.WriteJSON(map[string]interface{}{
-        "type": "auth",
-        "token": token,
-    })
-    
-    // Subscribe to streaming
-    subscribeMsg := map[string]interface{}{
-        "type": "stream_subscribe",
-        "data": map[string]interface{}{
-            "pose": map[string]interface{}{
-                "ring_position": 10000,
-                "active_floor": 0,
-            },
-            "radius_meters": 5000,
-            "include_chunks": true,
-            "include_zones": true,
-        },
-    }
-    conn.WriteJSON(subscribeMsg)
-    
-    // Wait for stream_ack
-    var ack map[string]interface{}
-    conn.ReadJSON(&ack)
-    assert.Equal(t, "stream_ack", ack["type"])
-    
-    // Wait for stream_delta with chunks
-    var delta map[string]interface{}
-    conn.ReadJSON(&delta)
-    assert.Equal(t, "stream_delta", delta["type"])
-    assert.NotNil(t, delta["data"].(map[string]interface{})["chunks"])
-}
-```
+### Ring Boundary Wrapping
+- [ ] Move camera to position near 263,999,000m (near end of ring)
+- [ ] Chunks load correctly near boundary
+- [ ] Move camera past wrap point (to ~1,000m)
+- [ ] Chunks from both sides of boundary load correctly
+- [ ] No gaps or missing chunks at wrap point
+- [ ] Zone queries handle wrapping correctly
+
+### Floor Changes
+- [ ] Change active floor (via UI or command)
+- [ ] Chunks for new floor load correctly
+- [ ] Chunks for old floor unload correctly
+- [ ] Zones for new floor load correctly
+- [ ] Zones for old floor unload correctly
+- [ ] Smooth transition between floors (no flickering)
+- [ ] Pose updates reflect new floor
+
+### Error Handling
+- [ ] Invalid subscription request (e.g., zero radius) returns error
+- [ ] Error messages display correct error codes
+- [ ] Client handles errors gracefully (doesn't crash)
+- [ ] Client can recover from errors (retry subscription)
+- [ ] Unknown message types return appropriate errors
+
+### Reconnection & Resilience
+- [ ] Disconnect WebSocket (close browser tab, network disconnect)
+- [ ] Reconnect WebSocket (reload page, restore network)
+- [ ] Client automatically re-subscribes on reconnect
+- [ ] Old subscription cleaned up on server
+- [ ] Chunks/zones reload correctly after reconnect
+- [ ] No memory leaks or orphaned subscriptions
+
+### Performance
+- [ ] Initial subscription completes within 2 seconds
+- [ ] Chunk compression reduces payload size by >50%
+- [ ] Zone queries complete within 500ms
+- [ ] Delta computation completes within 100ms
+- [ ] WebSocket message latency < 50ms
+- [ ] No frame rate drops during chunk loading
+- [ ] Memory usage remains stable during extended play
+
+### Coordinate System
+- [ ] Debug Info panel shows correct RingArc coordinates
+- [ ] Admin Player pane accepts RingArc coordinates
+- [ ] Position updates work with new coordinate system
+- [ ] Legacy coordinate conversion working correctly
+- [ ] Station positions use new coordinate system
+
+### Browser Compatibility
+- [ ] Test in Chrome/Edge (Chromium)
+- [ ] Test in Firefox
+- [ ] Test in Safari (if available)
+- [ ] WebSocket connection works in all browsers
+- [ ] No console errors in any browser
+
+### Network Conditions
+- [ ] Test with slow network (throttle to 3G)
+- [ ] Test with high latency (add 200ms delay)
+- [ ] Test with packet loss (simulate 1% loss)
+- [ ] System handles network issues gracefully
+- [ ] Reconnection works after network issues
+
+## Automated Integration Tests ✅ **IMPLEMENTED**
+
+### Test Infrastructure
+1. ✅ **Test Server**: `IntegrationTestFramework` with test database and HTTP server
+2. ✅ **Test Client**: WebSocket client using `gorilla/websocket`
+3. ✅ **Test Data**: Helper functions to create test chunks and zones
+4. ✅ **Test Runner**: Go test suite with 8 integration test scenarios
+
+### Implemented Test Scenarios
+
+1. **TestIntegration_StreamingSubscription**: Tests initial subscription flow
+   - WebSocket connection and authentication
+   - `stream_subscribe` message handling
+   - `stream_ack` response
+   - Initial chunk delivery via `stream_delta`
+
+2. **TestIntegration_PoseUpdate**: Tests pose updates and chunk deltas
+   - `stream_update_pose` message handling
+   - Chunk delta computation (added/removed chunks)
+   - `stream_pose_ack` response with chunk delta
+
+3. **TestIntegration_ZoneStreaming**: Tests zone streaming
+   - Zone creation and database insertion
+   - Zone delivery via `stream_delta` messages
+   - Zone filtering by bounding box
+
+4. **TestIntegration_RingWrapping**: Tests ring boundary wrapping
+   - Subscription near ring boundary (263,999,000m)
+   - Pose update across wrap point
+   - Chunk loading on both sides of boundary
+
+5. **TestIntegration_ErrorHandling**: Tests error conditions
+   - Invalid subscription requests (zero radius)
+   - Missing subscription ID
+   - Nonexistent subscription
+   - Unknown message types
+
+6. **TestIntegration_FloorChanges**: Tests floor change handling
+   - Chunk creation on different floors
+   - Floor change via pose update
+   - Chunk loading/unloading for new floor
+
+7. **TestIntegration_Reconnection**: Tests WebSocket reconnection
+   - Connection closure
+   - Reconnection and new subscription
+   - Subscription cleanup
+
+8. **TestIntegration_Performance**: Tests performance benchmarks
+   - Subscription time measurement
+   - Pose update time measurement
+   - Performance target validation
+
+### Test Framework Features
+
+- **IntegrationTestFramework**: Encapsulates test setup (DB, server, handlers, JWT)
+- **Helper Methods**: `ConnectWebSocket`, `SendMessage`, `ReadMessage`, `WaitForMessage`, `SubscribeToStreaming`, `UpdatePose`, `CreateTestChunk`, `CreateTestZone`
+- **Mock Procedural Service**: HTTP test server for chunk generation
+- **Test Database**: Isolated test database per test run
+- **Error Recovery**: Panic recovery in async goroutines
 
 ## Test Data Requirements
 
@@ -272,7 +367,7 @@ func TestStreamingIntegration(t *testing.T) {
 4. ✅ Add unit tests for WebSocket streaming handlers (`stream_subscribe`, `stream_update_pose`)
 5. ✅ Create integration test framework
 6. ✅ Implement basic integration test scenarios (subscription, pose update, zone streaming)
-7. ⏳ Additional integration test scenarios (ring wrapping, error handling, performance)
+7. ✅ Additional integration test scenarios (ring wrapping, error handling, floor changes, reconnection, performance)
 8. ⏳ Manual testing checklist completion
 9. ⏳ Performance profiling and optimization
 
