@@ -269,8 +269,10 @@ func TestStreamingIntegration(t *testing.T) {
 1. ✅ Unit tests for streaming manager
 2. ✅ Add `stream_update_pose` message handler
 3. ✅ Implement zone delta delivery on pose updates
-4. ⏳ Add unit tests for WebSocket streaming handlers (`stream_subscribe`, `stream_update_pose`)
-5. ⏳ Manual testing of WebSocket streaming (in progress - chunks unloading confirmed working)
-6. ⏳ Automated integration test suite
-7. ⏳ Performance profiling and optimization
+4. ✅ Add unit tests for WebSocket streaming handlers (`stream_subscribe`, `stream_update_pose`)
+5. ✅ Create integration test framework
+6. ✅ Implement basic integration test scenarios (subscription, pose update, zone streaming)
+7. ⏳ Additional integration test scenarios (ring wrapping, error handling, performance)
+8. ⏳ Manual testing checklist completion
+9. ⏳ Performance profiling and optimization
 

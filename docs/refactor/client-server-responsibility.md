@@ -19,7 +19,7 @@
    - ✅ Zone bounding box computation in `streaming.ComputeZoneBoundingBox()`
    - ✅ Unit tests for wrapping and coordinate math
 
-#### Phase 2 – Server-Side Processing ✅ MOSTLY COMPLETE
+#### Phase 2 – Server-Side Processing ✅ COMPLETE
 1. **Chunk Pipeline Migration** ✅
    - ✅ Server performs chunk selection based on camera pose and radius
    - ✅ Server handles database lookup, procedural generation, and compression
@@ -79,7 +79,13 @@
 ### Testing
 
 - ✅ Unit tests: `server/internal/streaming/manager_test.go` (7 tests, all passing)
+- ✅ Unit tests: `server/internal/api/websocket_test.go` (stream_subscribe, stream_update_pose handlers)
+- ✅ Integration test framework: `server/internal/api/websocket_integration_test.go`
+- ✅ Integration test scenarios: 3 scenarios implemented and passing
+  - Streaming subscription flow
+  - Pose updates with chunk deltas
+  - Zone streaming with test data
 - ✅ Integration test plan: `docs/refactor/INTEGRATION_TESTING.md`
+- ⏳ Additional integration test scenarios (ring wrapping, error handling, performance)
 - ⏳ Manual testing checklist (see integration testing doc)
-- ⏳ Automated integration tests (future work)
 
