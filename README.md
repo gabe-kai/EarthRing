@@ -96,6 +96,7 @@ See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) 
    # - DB_PASSWORD (your PostgreSQL password)
    # - JWT_SECRET (generate with: openssl rand -hex 32)
    # - REFRESH_SECRET (generate with: openssl rand -hex 32)
+   # - ENABLE_PERFORMANCE_PROFILING (optional, set to "true" to enable performance profiling)
    ```
    
    **Client configuration (optional):**
@@ -143,9 +144,14 @@ See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) 
 cd server
 # Make sure .env file exists with required configuration
 # Required: DB_PASSWORD, JWT_SECRET, REFRESH_SECRET
+# Optional: ENABLE_PERFORMANCE_PROFILING=true (enables performance profiling)
 go run cmd/earthring-server/main.go
 # Runs on http://localhost:8080 (or port specified in SERVER_PORT)
 # Provides REST API endpoints and WebSocket connections
+# Performance profiling: Set ENABLE_PERFORMANCE_PROFILING=true to enable
+#   - Tracks timing for streaming operations (subscriptions, pose updates, chunk loading, zone queries)
+#   - Logs performance reports every 5 minutes
+#   - See docs/PERFORMANCE_PROFILING.md for details
 
 # Terminal 2: Python procedural generation service (required for chunk generation)
 cd server
