@@ -15,6 +15,7 @@ import (
 	"github.com/earthring/server/internal/compression"
 	"github.com/earthring/server/internal/config"
 	"github.com/earthring/server/internal/database"
+	"github.com/earthring/server/internal/performance"
 	"github.com/earthring/server/internal/procedural"
 	"github.com/earthring/server/internal/ringmap"
 	"github.com/earthring/server/internal/streaming"
@@ -147,11 +148,12 @@ type WebSocketHandlers struct {
 	chunkStorage     *database.ChunkStorage
 	zoneStorage      *database.ZoneStorage
 	streamManager    *streaming.Manager
+	profiler         *performance.Profiler
 	upgrader         websocket.Upgrader
 }
 
 // NewWebSocketHandlers creates a new WebSocket handlers instance
-func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
+func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.Profiler) *WebSocketHandlers {
 	jwtService := auth.NewJWTService(cfg)
 	proceduralClient := procedural.NewProceduralClient(cfg)
 	chunkStorage := database.NewChunkStorage(db)
@@ -173,6 +175,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config) *WebSocketHandlers {
 		chunkStorage:     chunkStorage,
 		zoneStorage:      database.NewZoneStorage(db),
 		streamManager:    streaming.NewManager(),
+		profiler:         profiler,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -551,6 +554,9 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 		lodLevel = "medium"
 	}
 
+	op := h.profiler.Start("chunk_loading")
+	defer op.End()
+
 	var chunks []ChunkData
 	for _, chunkID := range chunkIDs {
 		// Parse chunk ID format: "floor_chunk_index"
@@ -854,7 +860,9 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 	log.Printf("[Stream] stream_subscribe received: user_id=%d, ring_position=%d, active_floor=%d, radius=%d, include_chunks=%v, include_zones=%v",
 		conn.userID, req.Pose.RingPosition, req.Pose.ActiveFloor, req.RadiusMeters, req.IncludeChunks, req.IncludeZones)
 
+	op := h.profiler.Start("stream_subscribe")
 	plan, err := h.streamManager.PlanSubscription(conn.userID, req)
+	op.End()
 	if err != nil {
 		log.Printf("[Stream] PlanSubscription failed: %v", err)
 		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
@@ -984,7 +992,9 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ActiveFloor)
 
 	// Update pose and get chunk deltas
+	op := h.profiler.Start("stream_update_pose")
 	chunkDelta, err := h.streamManager.UpdatePose(conn.userID, req.SubscriptionID, req.Pose)
+	op.End()
 	if err != nil {
 		log.Printf("[Stream] UpdatePose failed: %v", err)
 		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
@@ -1040,7 +1050,9 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 			bbox := *subscription.ZoneBoundingBox
 			
 			// Load zones for new bounding box
+			op := h.profiler.Start("zone_query")
 			zones := h.loadZonesForArea(bbox, req.Pose)
+			op.End()
 			
 			// Extract zone IDs
 			newZoneIDs := make([]int64, len(zones))
@@ -1049,7 +1061,9 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 			}
 			
 			// Compute zone delta
+			op = h.profiler.Start("delta_computation")
 			zoneDelta, err := h.streamManager.ComputeZoneDelta(req.SubscriptionID, newZoneIDs)
+			op.End()
 			if err != nil {
 				log.Printf("[Stream] ComputeZoneDelta failed: %v", err)
 				return

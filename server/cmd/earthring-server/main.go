@@ -9,6 +9,7 @@ import (
 
 	"github.com/earthring/server/internal/api"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/performance"
 	_ "github.com/lib/pq"
 )
 
@@ -41,8 +42,22 @@ func main() {
 		}
 	}()
 
+	// Set up performance profiler
+	profiler := performance.NewProfiler(cfg.Performance.Enabled)
+	if cfg.Performance.Enabled {
+		log.Printf("Performance profiling enabled")
+		// Log periodic reports every 5 minutes
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				profiler.LogReport()
+			}
+		}()
+	}
+
 	// Set up WebSocket handlers
-	wsHandlers := api.NewWebSocketHandlers(db, cfg)
+	wsHandlers := api.NewWebSocketHandlers(db, cfg, profiler)
 	go wsHandlers.GetHub().Run()
 
 	// Set up routes

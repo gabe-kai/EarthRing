@@ -12,11 +12,12 @@ import (
 
 // Config holds all configuration for the EarthRing server
 type Config struct {
-	Server     ServerConfig
-	Database   DatabaseConfig
-	Auth       AuthConfig
-	Procedural ProceduralConfig
-	Logging    LoggingConfig
+	Server      ServerConfig
+	Database    DatabaseConfig
+	Auth        AuthConfig
+	Procedural  ProceduralConfig
+	Logging     LoggingConfig
+	Performance PerformanceConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -63,6 +64,11 @@ type LoggingConfig struct {
 	Level      string
 	Format     string
 	OutputPath string
+}
+
+// PerformanceConfig holds performance profiling configuration
+type PerformanceConfig struct {
+	Enabled bool
 }
 
 // Load reads configuration from environment variables and .env file
@@ -114,6 +120,9 @@ func Load() (*Config, error) {
 			Level:      getEnv("LOG_LEVEL", "info"),
 			Format:     getEnv("LOG_FORMAT", "json"),
 			OutputPath: getEnv("LOG_OUTPUT_PATH", ""),
+		},
+		Performance: PerformanceConfig{
+			Enabled: getBoolEnv("ENABLE_PERFORMANCE_PROFILING", false),
 		},
 	}
 
@@ -183,6 +192,19 @@ func getIntEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return intValue
+}
+
+func getBoolEnv(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	boolValue, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("Warning: invalid boolean value for %s: %s, using default: %v", key, value, defaultValue)
+		return defaultValue
+	}
+	return boolValue
 }
 
 func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
