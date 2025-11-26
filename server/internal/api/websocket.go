@@ -921,8 +921,8 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 	if req.IncludeZones {
 		go func() {
 			// Compute bounding box for zone query
-			bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
-			zones := h.loadZonesForArea(bbox)
+		bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
+		zones := h.loadZonesForArea(bbox, req.Pose)
 			if len(zones) > 0 {
 				// Extract zone IDs and update subscription
 				zoneIDs := make([]int64, len(zones))
@@ -947,23 +947,54 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 // loadZonesForArea loads zones for the given bounding box.
 // This is the server-side zone processing pipeline that handles database lookup,
 // active-floor filtering, and full-ring/system-zone retention.
-func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox) []database.Zone {
+// Supports both legacy and new coordinate systems.
+func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pose streaming.CameraPose) []database.Zone {
 	if h.zoneStorage == nil {
 		log.Printf("Zone storage unavailable")
 		return nil
 	}
 
-	// Validate bounding box
-	if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
-		log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
-		return nil
-	}
+	var zones []database.Zone
+	var err error
 
-	// Load zones from database using existing storage method
-	zones, err := h.zoneStorage.ListZonesByArea(bbox.Floor, bbox.MinX, bbox.MinY, bbox.MaxX, bbox.MaxY)
-	if err != nil {
-		log.Printf("Failed to load zones for area: %v", err)
-		return nil
+	// Use new coordinate system if available (preferred)
+	if bbox.MinS != 0 || bbox.MaxS != 0 || pose.ArcLength != 0 || pose.Theta != 0 {
+		// Use RingArc coordinates
+		if bbox.MinS != 0 || bbox.MaxS != 0 {
+			zones, err = h.zoneStorage.ListZonesByRingArc(bbox.Floor, bbox.MinS, bbox.MinR, bbox.MinZ, bbox.MaxS, bbox.MaxR, bbox.MaxZ)
+			if err != nil {
+				log.Printf("Failed to load zones for RingArc area: %v", err)
+				return nil
+			}
+			log.Printf("[Stream] Loaded %d zones for floor %d using RingArc coordinates (s: %.0f-%.0f, r: %.0f-%.0f)",
+				len(zones), bbox.Floor, bbox.MinS, bbox.MaxS, bbox.MinR, bbox.MaxR)
+		} else {
+			// Convert RingPolar to RingArc for query
+			// This is a fallback - should use RingArc directly when available
+			log.Printf("[Stream] Warning: Using RingPolar coordinates, should use RingArc directly")
+			// For now, fall back to legacy coordinates
+			if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
+				log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
+				return nil
+			}
+			zones, err = h.zoneStorage.ListZonesByArea(bbox.Floor, bbox.MinX, bbox.MinY, bbox.MaxX, bbox.MaxY)
+		}
+	} else {
+		// Use legacy coordinate system
+		// Validate bounding box
+		if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
+			log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
+			return nil
+		}
+
+		// Load zones from database using existing storage method
+		zones, err = h.zoneStorage.ListZonesByArea(bbox.Floor, bbox.MinX, bbox.MinY, bbox.MaxX, bbox.MaxY)
+		if err != nil {
+			log.Printf("Failed to load zones for area: %v", err)
+			return nil
+		}
+		log.Printf("[Stream] Loaded %d zones for floor %d using legacy coordinates (x: %.0f-%.0f, y: %.0f-%.0f)",
+			len(zones), bbox.Floor, bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
 	}
 
 	return zones

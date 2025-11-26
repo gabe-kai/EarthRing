@@ -6,7 +6,8 @@
 import { positionToChunkIndex, chunkIndexToPositionRange, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
 import { getCurrentUser } from '../auth/auth-service.js';
 import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
-import { deleteAllChunks } from '../api/chunk-service.js';
+import { deleteAllChunks, getChunkMetadata, deleteChunk } from '../api/chunk-service.js';
+import { getCurrentPlayerProfile, updatePlayerPosition } from '../api/player-service.js';
 
 let adminModal = null;
 
@@ -734,7 +735,6 @@ function setupAdminPlayerListeners(container, playerID) {
           throw new Error('No access token found. Please log in again.');
         }
         
-        const { getCurrentPlayerProfile } = await import('../api/player-service.js');
         const profile = await getCurrentPlayerProfile();
         display.textContent = JSON.stringify(profile, null, 2);
         display.className = 'result-display show success';
@@ -768,7 +768,6 @@ function setupAdminPlayerListeners(container, playerID) {
       submitButton.disabled = true;
       
       try {
-        const { updatePlayerPosition } = await import('../api/player-service.js');
         const result = await updatePlayerPosition(playerID, { x, y }, floor);
         resultDisplay.textContent = JSON.stringify(result, null, 2);
         resultDisplay.className = 'result-display show success';
@@ -1317,7 +1316,6 @@ async function handleAdminChunkRequest(container) {
       throw new Error('No access token found. Please log in again.');
     }
     
-    const { getChunkMetadata } = await import('../api/chunk-service.js');
     const metadata = await getChunkMetadata(chunkID);
     resultDisplay.textContent = JSON.stringify(metadata, null, 2);
     resultDisplay.className = 'result-display show success';
@@ -1350,7 +1348,6 @@ async function handleAdminChunkDelete(container) {
   deleteButton.disabled = true;
   
   try {
-    const { deleteChunk } = await import('../api/chunk-service.js');
     const result = await deleteChunk(chunkID);
     resultDisplay.textContent = JSON.stringify(result, null, 2);
     resultDisplay.className = 'result-display show success';

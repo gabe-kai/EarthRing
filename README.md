@@ -14,6 +14,17 @@ EarthRing is set on a massive orbital ring structure:
   - Smooth cosine-based transitions for the remainder of each flare zone
 - **Gameplay**: City building, NPC simulation, and racing through player-built cities
 
+### Coordinate System
+
+**Status**: ⚠️ **MIGRATION IN PROGRESS** - The coordinate system is being migrated to ER0/EarthRing coordinates.
+
+- **ER0**: Earth-Centered, Earth-Fixed frame (origin at Earth's center)
+- **RingPolar**: (theta, r, z) - angle around ring, radial offset, vertical offset
+- **RingArc**: (s, r, z) - arc length along ring, radial offset, vertical offset
+- **Kongo Hub**: Anchored to ER0 at (KongoHubRadius, 0, 0) = (6,878,137 m, 0, 0)
+
+See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) for details.
+
 ## Current Client Features
 
 - **Camera controls**: 

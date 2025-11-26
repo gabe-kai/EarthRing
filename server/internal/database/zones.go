@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/earthring/server/internal/ringmap"
 	"github.com/lib/pq"
 )
 
@@ -1709,6 +1710,8 @@ func (s *ZoneStorage) DeleteAllZones(cascade bool) (int64, error) {
 }
 
 // ListZonesByArea returns all zones whose geometry intersects the provided bounding box on a floor.
+// Supports both legacy (X/Y) and new (RingPolar/RingArc) coordinate systems.
+// For new coordinates, converts RingArc bounds to legacy X/Y for database query (temporary during transition).
 func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64) ([]Zone, error) {
 	// Allow floors from -2 to +2 (main ring structure)
 	if floor < -2 || floor > 2 {
@@ -1750,6 +1753,46 @@ func (s *ZoneStorage) ListZonesByArea(floor int, minX, minY, maxX, maxY float64)
 		return nil, fmt.Errorf("failed to iterate zones: %w", err)
 	}
 	return zones, nil
+}
+
+// ListZonesByRingArc returns all zones whose geometry intersects the provided RingArc bounding box on a floor.
+// Converts RingArc bounds to legacy X/Y coordinates for database query (temporary during transition).
+// TODO: Once geometry_polar column is populated, query that column directly instead of converting.
+func (s *ZoneStorage) ListZonesByRingArc(floor int, minS, minR, minZ, maxS, maxR, maxZ float64) ([]Zone, error) {
+	// Convert RingArc bounds to legacy X/Y for database query
+	// For now, we convert to legacy coordinates since geometry_polar may not be populated yet
+	// minS/maxS -> minX/maxX, minR/maxR -> minY/maxY
+	// Note: This is a temporary solution during the transition period
+	
+	// Convert arc length to legacy X position using ringmap functions
+	// Legacy X = s (arc length), wrapped to [0, RingCircumference)
+	minX := ringmap.WrapArcLength(minS)
+	maxX := ringmap.WrapArcLength(maxS)
+	
+	// Handle wrapping: if minS > maxS (after wrapping), the bounding box wraps around
+	// Check if the bounding box crosses the ring boundary
+	if minS < 0 && maxS > 0 {
+		// Bounding box wraps around - need to handle this case
+		// For now, expand the query to cover the full visible area
+		// This is a simplified approach - a full implementation would query both sides
+		if maxX < minX {
+			// Wrapped case: query from minX to circumference and from 0 to maxX
+			// For simplicity, query the larger range
+			if (maxX + (RingCircumference - minX)) > (minX - maxX) {
+				// Wrapped range is larger, query full ring
+				minX = 0
+				maxX = RingCircumference
+			}
+		}
+	}
+	
+	// R maps to Y (width position)
+	minY := minR
+	maxY := maxR
+	
+	// Z is not used in 2D geometry queries (it's the vertical offset, handled by floor)
+	
+	return s.ListZonesByArea(floor, minX, minY, maxX, maxY)
 }
 
 // ListZonesByOwner fetches zones for the provided owner id.
