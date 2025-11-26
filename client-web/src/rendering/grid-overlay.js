@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
+import { DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 
 const DEFAULTS = {
   radius: 250,

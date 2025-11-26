@@ -2,7 +2,7 @@ import { fetchZonesByArea } from '../api/zone-service.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 import { wsClient } from '../network/websocket-client.js';
 import * as THREE from 'three';
-import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates.js';
+import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates-new.js';
 import { 
   legacyPositionToRingPolar, 
   ringPolarToRingArc,

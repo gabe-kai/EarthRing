@@ -4,7 +4,7 @@
  */
 
 import { wsClient } from '../network/websocket-client.js';
-import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS } from '../utils/coordinates.js';
+import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS } from '../utils/coordinates-new.js';
 import { 
   legacyPositionToRingPolar, 
   ringPolarToRingArc, 

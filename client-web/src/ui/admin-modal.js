@@ -3,7 +3,7 @@
  * Modal with tabs for Player and Chunks management
  */
 
-import { positionToChunkIndex, chunkIndexToPositionRange, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates.js';
+import { positionToChunkIndex, chunkIndexToPositionRange, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { getCurrentUser } from '../auth/auth-service.js';
 import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
 import { deleteAllChunks, getChunkMetadata, deleteChunk } from '../api/chunk-service.js';

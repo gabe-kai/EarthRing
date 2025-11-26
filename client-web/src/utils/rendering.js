@@ -4,14 +4,23 @@
  */
 
 import * as THREE from 'three';
-import { toThreeJS, fromThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition } from './coordinates.js';
 import { 
+  toThreeJS,
+  fromThreeJS,
+  DEFAULT_FLOOR_HEIGHT,
+  wrapRingPosition,
+  ringArcToThreeJS,
+  threeJSToRingArc,
+  ringPolarToThreeJS,
+  threeJSToRingPolar,
   legacyPositionToRingPolar, 
   ringPolarToRingArc,
   ringPolarToLegacyPosition,
   ringArcToRingPolar,
   er0ToRingPolar,
-  ringPolarToER0
+  ringPolarToER0,
+  normalizeRelativeToCamera,
+  denormalizeFromCamera
 } from './coordinates-new.js';
 
 /**

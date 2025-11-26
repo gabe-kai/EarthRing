@@ -4,7 +4,7 @@
  */
 
 import { getChunkMetadata, deleteChunk } from '../api/chunk-service.js';
-import { positionToChunkIndex, chunkIndexToPositionRange } from '../utils/coordinates.js';
+import { positionToChunkIndex, chunkIndexToPositionRange } from '../utils/coordinates-new.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 
 let chunkPanel = null;

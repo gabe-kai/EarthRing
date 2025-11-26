@@ -16,7 +16,7 @@ import {
   setCameraPositionFromER0,
   getER0PositionFromCamera
 } from '../utils/rendering.js';
-import { toThreeJS, wrapRingPosition, DEFAULT_FLOOR_HEIGHT, fromThreeJS } from '../utils/coordinates.js';
+import { toThreeJS, wrapRingPosition, DEFAULT_FLOOR_HEIGHT, fromThreeJS } from '../utils/coordinates-new.js';
 import { 
   legacyPositionToRingPolar, 
   ringPolarToRingArc,

@@ -22,7 +22,7 @@ import { DebugInfoPanel } from './ui/debug-info.js';
 import { createZonesToolbar } from './ui/zones-toolbar.js';
 import { wsClient } from './network/websocket-client.js';
 import { createMeshAtEarthRingPosition } from './utils/rendering.js';
-import { positionToChunkIndex } from './utils/coordinates.js';
+import { positionToChunkIndex } from './utils/coordinates-new.js';
 import { findNearestStation, getStationPosition, getAllStationPositions } from './utils/stations.js';
 
 // Initialize game state manager
