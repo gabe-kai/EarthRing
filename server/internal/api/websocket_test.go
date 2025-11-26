@@ -317,7 +317,7 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
 
-	// Create chunks table (needed for chunk_request message handling)
+	// Create chunks table (needed for streaming message handling)
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS chunks (
 			id SERIAL PRIMARY KEY,
@@ -400,14 +400,6 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 			message: &WebSocketMessage{
 				Type: "ping",
 				ID:   "test-id",
-			},
-		},
-		{
-			name: "chunk_request message",
-			message: &WebSocketMessage{
-				Type: "chunk_request",
-				ID:   "req-123",
-				Data: json.RawMessage(`{"chunks":["0_12345"]}`),
 			},
 		},
 		{
@@ -677,9 +669,11 @@ func TestWebSocketHub_RegisterUnregister(t *testing.T) {
 	}
 }
 
-func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	testutil.CloseDB(t, db)
+// TestWebSocketHandlers_handleChunkRequest removed - chunk_request handler is legacy and has been removed
+// The entire test function has been removed as it tested the legacy chunk_request handler
+func _TestWebSocketHandlers_handleChunkRequest_removed(t *testing.T) {
+	// This test has been removed - chunk_request is legacy code
+	t.Skip("chunk_request handler removed")
 
 	// Create chunks table with full schema
 	_, err := db.Exec(`

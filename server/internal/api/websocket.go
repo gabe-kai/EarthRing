@@ -435,8 +435,6 @@ func (h *WebSocketHandlers) handleMessage(conn *WebSocketConnection, msg *WebSoc
 	switch msg.Type {
 	case "ping":
 		h.handlePing(conn, msg)
-	case "chunk_request":
-		h.handleChunkRequest(conn, msg)
 	case "player_move":
 		h.handlePlayerMove(conn, msg)
 	case "stream_subscribe":
@@ -466,12 +464,6 @@ func (h *WebSocketHandlers) handlePing(conn *WebSocketConnection, msg *WebSocket
 	default:
 		log.Printf("Failed to send pong: channel full")
 	}
-}
-
-// ChunkRequestData represents the data payload for a chunk_request message
-type ChunkRequestData struct {
-	Chunks   []string `json:"chunks"`              // Array of chunk IDs in format "floor_chunk_index"
-	LODLevel string   `json:"lod_level,omitempty"` // Optional LOD level: "low", "medium", "high"
 }
 
 // compressChunkGeometry compresses chunk geometry for transmission
@@ -803,47 +795,6 @@ func (h *WebSocketHandlers) sendChunkData(conn *WebSocketConnection, chunks []Ch
 	}
 }
 
-// handleChunkRequest handles chunk request messages
-func (h *WebSocketHandlers) handleChunkRequest(conn *WebSocketConnection, msg *WebSocketMessage) {
-	// Parse request data
-	var requestData ChunkRequestData
-	if err := json.Unmarshal(msg.Data, &requestData); err != nil {
-		conn.sendError(msg.ID, "Invalid chunk request format", "InvalidMessageFormat")
-		return
-	}
-
-	// Validate chunks array
-	if len(requestData.Chunks) == 0 {
-		conn.sendError(msg.ID, "Chunks array cannot be empty", "InvalidMessageFormat")
-		return
-	}
-
-	// Limit number of chunks per request (prevent abuse)
-	maxChunks := 10
-	if len(requestData.Chunks) > maxChunks {
-		conn.sendError(msg.ID, fmt.Sprintf("Too many chunks requested (max %d)", maxChunks), "InvalidMessageFormat")
-		return
-	}
-
-	// Default LOD level
-	lodLevel := requestData.LODLevel
-	if lodLevel == "" {
-		lodLevel = "medium"
-	}
-
-	// Validate LOD level
-	if lodLevel != "low" && lodLevel != "medium" && lodLevel != "high" {
-		conn.sendError(msg.ID, "Invalid LOD level (must be 'low', 'medium', or 'high')", "InvalidMessageFormat")
-		return
-	}
-
-	// Load chunks using server-side pipeline
-	chunks := h.loadChunksForIDs(requestData.Chunks, lodLevel)
-
-	// Send chunk_data response
-	h.sendChunkData(conn, chunks, "chunk_data", msg.ID)
-}
-
 // handleStreamSubscribe registers a server-driven streaming subscription.
 func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg *WebSocketMessage) {
 	if h.streamManager == nil {
@@ -988,8 +939,8 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		return
 	}
 
-	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, active_floor=%d",
-		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ActiveFloor)
+	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, arc_length=%.0f, theta=%.6f, r=%.2f, z=%.2f, active_floor=%d",
+		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ArcLength, req.Pose.Theta, req.Pose.R, req.Pose.Z, req.Pose.ActiveFloor)
 
 	// Update pose and get chunk deltas
 	op := h.profiler.Start("stream_update_pose")

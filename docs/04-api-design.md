@@ -561,7 +561,7 @@ Content-Type: application/json
 
 #### Request Chunks via WebSocket ✅ **IMPLEMENTED**
 
-Chunk requests are implemented via WebSocket using the `chunk_request` message type (see WebSocket Protocol section above). This provides real-time bidirectional communication for chunk loading.
+**Note**: The legacy `chunk_request` message type has been removed. Chunk loading now uses server-driven streaming via `stream_subscribe` and `stream_update_pose` messages. See the Streaming System documentation for details.
 
 **Database Persistence**: ✅ **IMPLEMENTED**
 - Chunks are automatically stored in database after generation
@@ -913,20 +913,10 @@ All WebSocket messages use JSON:
    - Recommended interval: 30 seconds
    - Server also sends automatic ping frames every 30 seconds
 
-2. **chunk_request** ✅ **IMPLEMENTED**
-   ```json
-   {
-     "type": "chunk_request",
-     "id": "req_123",
-     "data": {
-       "chunks": ["0_12345", "0_12346"],
-       "lod_level": "medium"
-     }
-   }
-   ```
-   - Request chunks via WebSocket (up to 10 chunks per request)
-   - Validates chunk IDs (format: "floor_chunk_index", range: 0-263,999)
-   - Validates LOD level ("low", "medium", "high", default: "medium")
+2. **chunk_request** ❌ **REMOVED** (Replaced by server-driven streaming)
+   - Legacy message type removed
+   - Use `stream_subscribe` and `stream_update_pose` instead
+   - See Streaming System documentation for current implementation
    - Returns `chunk_data` response with requested chunks
    - Generates chunks via procedural service if they don't exist in database
    - Server responds with `chunk_data` message

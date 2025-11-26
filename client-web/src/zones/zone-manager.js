@@ -2,11 +2,16 @@ import { fetchZonesByArea } from '../api/zone-service.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 import { wsClient } from '../network/websocket-client.js';
 import * as THREE from 'three';
-import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates.js';
+import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates-new.js';
+import { 
+  legacyPositionToRingPolar, 
+  ringPolarToRingArc,
+  ringPolarToLegacyPosition,
+  RING_CIRCUMFERENCE as NEW_RING_CIRCUMFERENCE
+} from '../utils/coordinates-new.js';
 
 const DEFAULT_ZONE_RANGE = 5000; // meters along ring
 const DEFAULT_WIDTH_RANGE = 3000; // meters across width
-const RING_CIRCUMFERENCE = 264000000;
 
 const ZONE_STYLES = {
   residential: { fill: 'rgba(111,207,151,0.35)', stroke: 'rgba(111,207,151,0.95)' },
@@ -149,44 +154,56 @@ export class ZoneManager {
     }
     
     // Validate range to prevent invalid bounding boxes
-    const RING_CIRCUMFERENCE = 264000000;
-    if (range <= 0 || range > RING_CIRCUMFERENCE / 2) {
+    if (range <= 0 || range > NEW_RING_CIRCUMFERENCE / 2) {
       console.warn(`Invalid zone range: ${range}, clamping to valid range`);
-      range = Math.min(Math.max(range, 100), RING_CIRCUMFERENCE / 2 - 1000);
+      range = Math.min(Math.max(range, 100), NEW_RING_CIRCUMFERENCE / 2 - 1000);
     }
 
     const cameraPos = this.cameraController.getEarthRingPosition();
     // Get active floor from game state (independent of camera elevation)
     const floor = this.gameState.getActiveFloor();
 
-    // Wrap camera X to valid range before calculating bounds
+    // Convert camera position to RingArc coordinates
     const cameraXWrapped = wrapRingPosition(cameraPos.x);
+    const cameraPolar = legacyPositionToRingPolar(cameraXWrapped, cameraPos.y || 0, 0);
+    const cameraArc = ringPolarToRingArc(cameraPolar);
     
-    // Calculate bounds relative to wrapped camera position
-    let minX = cameraXWrapped - range;
-    let maxX = cameraXWrapped + range;
+    // Calculate bounds in RingArc coordinates (arc length)
+    const minS = cameraArc.s - range;
+    const maxS = cameraArc.s + range;
+    
+    // Convert back to legacy coordinates for REST API (backward compatibility)
+    // Note: For streaming, the server will use RingArc coordinates from the pose
+    const minPolar = { theta: (minS / NEW_RING_CIRCUMFERENCE) * 2 * Math.PI, r: cameraPolar.r, z: cameraPolar.z };
+    const maxPolar = { theta: (maxS / NEW_RING_CIRCUMFERENCE) * 2 * Math.PI, r: cameraPolar.r, z: cameraPolar.z };
+    const minLegacy = ringPolarToLegacyPosition(minPolar);
+    const maxLegacy = ringPolarToLegacyPosition(maxPolar);
+    
+    // Wrap legacy coordinates for API call
+    let minX = wrapRingPosition(minLegacy.x);
+    let maxX = wrapRingPosition(maxLegacy.x);
     
     // Handle wrap-around: ensure minX < maxX after wrapping
     // If wrapping causes minX > maxX, clamp to valid range
     if (minX < 0) {
       minX = wrapRingPosition(minX);
     }
-    if (maxX >= RING_CIRCUMFERENCE) {
+    if (maxX >= NEW_RING_CIRCUMFERENCE) {
       maxX = wrapRingPosition(maxX);
     }
     
     // Ensure minX < maxX (if wrapping caused inversion, clamp to valid range)
     if (minX >= maxX) {
       // This happens when the range wraps around the ring boundary
-      // Clamp to valid range: [0, RING_CIRCUMFERENCE)
+      // Clamp to valid range: [0, NEW_RING_CIRCUMFERENCE)
       minX = Math.max(0, cameraXWrapped - range);
-      maxX = Math.min(RING_CIRCUMFERENCE, cameraXWrapped + range);
+      maxX = Math.min(NEW_RING_CIRCUMFERENCE, cameraXWrapped + range);
       // Ensure they're still valid
       if (minX >= maxX) {
         // Fallback: use a smaller range centered on camera
-        const safeRange = Math.min(range, RING_CIRCUMFERENCE / 2 - 1);
+        const safeRange = Math.min(range, NEW_RING_CIRCUMFERENCE / 2 - 1);
         minX = Math.max(0, cameraXWrapped - safeRange);
-        maxX = Math.min(RING_CIRCUMFERENCE, cameraXWrapped + safeRange);
+        maxX = Math.min(NEW_RING_CIRCUMFERENCE, cameraXWrapped + safeRange);
       }
     }
     
@@ -254,7 +271,7 @@ export class ZoneManager {
           
           // If zone spans more than half the ring, never remove it (it's always "near" the camera)
           const zoneSpan = maxX - minX;
-          if (zoneSpan > RING_CIRCUMFERENCE / 2) {
+          if (zoneSpan > NEW_RING_CIRCUMFERENCE / 2) {
             if (window.DEBUG_ZONE_COORDS) {
               console.log('[ZoneManager] Keeping large-span zone outside fetch range:', {
                 zoneId: existingZone.id,
@@ -266,7 +283,7 @@ export class ZoneManager {
           
           // Calculate distance accounting for wrap-around
           const directDistance = Math.abs(zoneXWrapped - cameraXWrapped);
-          const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+          const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
           const distance = Math.min(directDistance, wrappedDistance);
           
           // Only remove if zone is clearly outside fetch range (with buffer)
@@ -326,7 +343,7 @@ export class ZoneManager {
 
     // Get camera position for wrapping
     // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
-    // The function expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE))
+    // The function expects the actual camera position (which may be negative or outside [0, NEW_RING_CIRCUMFERENCE))
     const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
     const cameraX = cameraPos.x; // Use unwrapped camera position
 
@@ -344,8 +361,26 @@ export class ZoneManager {
         minX = Math.min(minX, x);
         maxX = Math.max(maxX, x);
       });
-      const zoneSpan = maxX - minX;
-      isFullRingZone = zoneSpan > RING_CIRCUMFERENCE / 2;
+      const directSpan = maxX - minX;
+      const wrappedSpan = NEW_RING_CIRCUMFERENCE - directSpan;
+      const effectiveSpan = Math.min(directSpan, wrappedSpan);
+      
+      // Treat as full-ring only if the EFFECTIVE span (shortest arc on the ring)
+      // exceeds half the ring circumference. This avoids misclassifying small
+      // cross-boundary zones (e.g., [-60, +60] around 0) as full-ring zones.
+      isFullRingZone = effectiveSpan > NEW_RING_CIRCUMFERENCE / 2;
+      
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneManager] Zone span analysis:', {
+          zoneId: zone.id,
+          minX,
+          maxX,
+          directSpan,
+          wrappedSpan,
+          effectiveSpan,
+          isFullRingZone,
+        });
+      }
     }
 
     // For full-ring zones, check if we can reuse existing mesh
@@ -358,7 +393,7 @@ export class ZoneManager {
         const cameraXWrapped = wrapRingPosition(cameraX);
         const lastCameraXWrapped = wrapRingPosition(cached.lastCameraX);
         const cameraDelta = Math.abs(cameraXWrapped - lastCameraXWrapped);
-        const wrappedDelta = Math.min(cameraDelta, RING_CIRCUMFERENCE - cameraDelta);
+        const wrappedDelta = Math.min(cameraDelta, NEW_RING_CIRCUMFERENCE - cameraDelta);
         
         // Only update if camera moved significantly (for wrapping)
         if (wrappedDelta < this.WRAP_RE_RENDER_THRESHOLD) {
@@ -735,7 +770,7 @@ export class ZoneManager {
     
     // Calculate distance moved (accounting for wrapping)
     const directDistance = Math.abs(currentCameraX - this.lastCameraX);
-    const wrappedDistance = RING_CIRCUMFERENCE - directDistance;
+    const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
     const distanceMoved = Math.min(directDistance, wrappedDistance);
     
     if (distanceMoved > this.WRAP_RE_RENDER_THRESHOLD) {

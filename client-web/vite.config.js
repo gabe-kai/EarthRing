@@ -22,6 +22,14 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
+      // Suppress source map warnings for dependencies
+      onwarn(warning, warn) {
+        // Suppress source map warnings for node_modules
+        if (warning.code === 'SOURCEMAP_ERROR' && warning.url && warning.url.includes('node_modules')) {
+          return;
+        }
+        warn(warning);
+      },
       output: {
         manualChunks: {
           // Split admin modal and its dependencies into a separate chunk

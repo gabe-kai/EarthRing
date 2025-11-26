@@ -6,8 +6,25 @@
 
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as THREE from 'three';
-import { setCameraPositionFromEarthRing, getEarthRingPositionFromCamera } from '../utils/rendering.js';
-import { toThreeJS, wrapRingPosition, DEFAULT_FLOOR_HEIGHT, fromThreeJS } from '../utils/coordinates.js';
+import { 
+  setCameraPositionFromEarthRing, 
+  getEarthRingPositionFromCamera,
+  getRingArcPositionFromCamera,
+  getRingPolarPositionFromCamera,
+  setCameraPositionFromRingArc,
+  setCameraPositionFromRingPolar,
+  setCameraPositionFromER0,
+  getER0PositionFromCamera
+} from '../utils/rendering.js';
+import { toThreeJS, wrapRingPosition, DEFAULT_FLOOR_HEIGHT, fromThreeJS } from '../utils/coordinates-new.js';
+import { 
+  legacyPositionToRingPolar, 
+  ringPolarToRingArc,
+  ringPolarToLegacyPosition,
+  ringArcToRingPolar,
+  er0ToRingPolar,
+  ringPolarToER0
+} from '../utils/coordinates-new.js';
 
 const CAMERA_MIN_CLEARANCE = 2; // meters above current floor plane
 const POLAR_EPSILON = 0.01;
@@ -175,8 +192,8 @@ export class CameraController {
   }
 
   /**
-   * Set camera position using EarthRing coordinates
-   * @param {Object} earthringPosition - EarthRing position {x, y, z}
+   * Set camera position using EarthRing coordinates (legacy)
+   * @param {Object} earthringPosition - EarthRing position {x, y, z} (legacy coordinates)
    */
   setPositionFromEarthRing(earthringPosition) {
     // Clamp Z to not go below current floor
@@ -185,13 +202,89 @@ export class CameraController {
     this.clampCameraHeight();
     this.controls.update();
   }
+
+  /**
+   * Set camera position using RingArc coordinates (new coordinate system)
+   * @param {Object} ringArc - RingArc position {s, r, z}
+   */
+  setPositionFromRingArc(ringArc) {
+    // Convert to legacy for clamping (clampToFloor expects legacy coordinates)
+    const polar = ringArcToRingPolar(ringArc);
+    const legacyPos = ringPolarToLegacyPosition(polar);
+    // Clamp Z to not go below current floor
+    const clamped = this.clampToFloor(legacyPos);
+    // Convert back to RingArc and set position
+    const clampedPolar = legacyPositionToRingPolar(clamped.x, clamped.y, clamped.z);
+    const clampedArc = ringPolarToRingArc(clampedPolar);
+    setCameraPositionFromRingArc(this.camera, clampedArc);
+    this.clampCameraHeight();
+    this.controls.update();
+  }
+
+  /**
+   * Set camera position using RingPolar coordinates (new coordinate system)
+   * @param {Object} ringPolar - RingPolar position {theta, r, z}
+   */
+  setPositionFromRingPolar(ringPolar) {
+    // Convert to legacy for clamping (clampToFloor expects legacy coordinates)
+    const legacyPos = ringPolarToLegacyPosition(ringPolar);
+    // Clamp Z to not go below current floor
+    const clamped = this.clampToFloor(legacyPos);
+    // Convert back to RingPolar and set position
+    const clampedPolar = legacyPositionToRingPolar(clamped.x, clamped.y, clamped.z);
+    setCameraPositionFromRingPolar(this.camera, clampedPolar);
+    this.clampCameraHeight();
+    this.controls.update();
+  }
+
+  /**
+   * Set camera position using ER0 coordinates (new coordinate system)
+   * @param {Object} er0 - ER0 position {x, y, z} (Earth-Centered, Earth-Fixed)
+   */
+  setPositionFromER0(er0) {
+    // Convert ER0 → RingPolar → Legacy for clamping (clampToFloor expects legacy coordinates)
+    const polar = er0ToRingPolar(er0);
+    const legacyPos = ringPolarToLegacyPosition(polar);
+    // Clamp Z to not go below current floor
+    const clamped = this.clampToFloor(legacyPos);
+    // Convert back to ER0 and set position
+    const clampedPolar = legacyPositionToRingPolar(clamped.x, clamped.y, clamped.z);
+    const clampedER0 = ringPolarToER0(clampedPolar);
+    setCameraPositionFromER0(this.camera, clampedER0);
+    this.clampCameraHeight();
+    this.controls.update();
+  }
   
   /**
-   * Get current camera position in EarthRing coordinates
-   * @returns {Object} EarthRing position {x, y, z}
+   * Get current camera position in EarthRing coordinates (legacy)
+   * @returns {Object} EarthRing position {x, y, z} (legacy coordinates)
    */
   getEarthRingPosition() {
     return getEarthRingPositionFromCamera(this.camera);
+  }
+
+  /**
+   * Get current camera position in RingArc coordinates (new coordinate system)
+   * @returns {Object} RingArc position {s, r, z}
+   */
+  getRingArcPosition() {
+    return getRingArcPositionFromCamera(this.camera);
+  }
+
+  /**
+   * Get current camera position in RingPolar coordinates (new coordinate system)
+   * @returns {Object} RingPolar position {theta, r, z}
+   */
+  getRingPolarPosition() {
+    return getRingPolarPositionFromCamera(this.camera);
+  }
+
+  /**
+   * Get current camera position in ER0 coordinates (new coordinate system)
+   * @returns {Object} ER0 position {x, y, z} (Earth-Centered, Earth-Fixed)
+   */
+  getER0Position() {
+    return getER0PositionFromCamera(this.camera);
   }
 
   /**

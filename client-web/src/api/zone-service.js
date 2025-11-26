@@ -143,7 +143,8 @@ export async function getZone(zoneID) {
  */
 export async function getZonesByFloor(floor) {
   // Use a very large bounding box to get all zones on this floor
-  const RING_CIRCUMFERENCE = 264000000;
+  // Import from coordinates-new.js for consistency
+  const { RING_CIRCUMFERENCE } = await import('../utils/coordinates-new.js');
   const MAX_WIDTH = 5000; // 5km width should cover all zones
   return fetchZonesByArea({
     floor,

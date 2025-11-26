@@ -23,7 +23,7 @@ This document summarizes the current status of the client-server responsibility 
 #### Phase 3: Client Slim-Down ✅
 - Client uses `stream_subscribe` and `stream_update_pose`
 - ChunkManager and ZoneManager consume streaming deltas
-- Legacy `chunk_request` kept for backward compatibility
+- Legacy `chunk_request` handler removed (server-driven streaming is now required)
 - Documentation updated
 
 ### Testing Status ✅
@@ -46,10 +46,12 @@ This document summarizes the current status of the client-server responsibility 
 
 ### Remaining Tasks (Optional/Cleanup)
 
-1. **Legacy Code Removal** (Future, after validation period):
-   - Remove `chunk_request` handler (kept for backward compatibility)
-   - Remove client-side chunk selection logic (already using server-driven)
-   - Remove client-side coordinate math (utilities kept for compatibility)
+1. **Legacy Code Removal** ✅ **COMPLETE**
+   - ✅ Removed `chunk_request` handler from server
+   - ✅ Removed `chunk_request` fallback code from client
+   - ✅ Removed `chunk_data` message handler (legacy responses)
+   - ✅ Client-side chunk selection logic already using server-driven
+   - ⏳ Client-side coordinate math (utilities kept for compatibility - still in use)
 
 2. **Additional Integration Tests** (Optional):
    - Ring wrapping edge cases
@@ -62,7 +64,7 @@ This document summarizes the current status of the client-server responsibility 
    - Performance profiling
    - Edge case validation
 
-## Coordinate System Migration ⏳ **PARTIAL**
+## Coordinate System Migration ✅ **CLIENT-SIDE COMPLETE**
 
 ### Server-Side ✅ **COMPLETE**
 - ER0, RingPolar, RingArc coordinate systems implemented
@@ -71,7 +73,7 @@ This document summarizes the current status of the client-server responsibility 
 - Streaming system supports new coordinates
 - Chunk/zone systems support new coordinates
 
-### Client-Side ⏳ **UTILITIES READY, INTEGRATION PENDING**
+### Client-Side ✅ **COMPLETE**
 
 **Completed:**
 - ✅ Coordinate utilities (`coordinates-new.js`) implemented
@@ -79,24 +81,31 @@ This document summarizes the current status of the client-server responsibility 
 - ✅ Debug Info panel displays new coordinates
 - ✅ Admin Player pane uses new coordinates
 - ✅ Station utilities updated to RingArc
-
-**Remaining Client-Side Migration:**
-- ⏳ **Chunk Manager**: Still uses legacy coordinates (`coordinates.js`)
-  - Uses `positionToChunkIndex()` from legacy system
-  - Uses legacy X position for chunk requests
-  - Needs migration to RingArc/theta-based chunk indexing
-
-- ⏳ **Zone Manager**: Still uses legacy coordinates
-  - Uses legacy X/Y for zone queries
-  - Needs migration to RingArc-based queries
-
-- ⏳ **Camera Controller**: Still uses legacy coordinates
-  - `getEarthRingPosition()` returns legacy X/Y/Z
-  - Needs migration to return RingArc or RingPolar
-
-- ⏳ **Rendering Utilities**: Coordinate conversion ready
-  - Utilities exist but not fully integrated
-  - Needs ER0 → Three.js conversion pipeline
+- ✅ **Chunk Manager**: Migrated to RingArc coordinates
+  - Uses `ringArcToChunkIndex()` from new coordinate system
+  - Converts legacy positions to RingArc for chunk requests
+  - Sends both legacy and new coordinates in streaming messages (backward compatible)
+  - Correctly handles streaming and wrapping when moving in both +X and −X directions
+  - Fixed chunk rendering at theta ≈ ±π: `createRingFloorMesh` now uses actual Three.js world-space camera position for wrapping calculations, ensuring chunks are positioned correctly near the wrap boundary
+- ✅ **Zone Manager**: Migrated to RingArc coordinates
+  - Converts camera position to RingArc internally
+  - Calculates zone bounds using RingArc coordinates
+  - Maintains backward compatibility with REST API
+  - Handles RingArc → legacy bounding box conversion robustly at wrap boundaries
+  - Uses the same camera-relative wrapping as chunks so zone meshes stay visually aligned
+- ✅ **Camera Controller**: Supports new coordinate systems
+  - `getRingArcPosition()` and `getRingPolarPosition()` methods added
+  - `getER0Position()` method added
+  - `setPositionFromRingArc()`, `setPositionFromRingPolar()`, `setPositionFromER0()` methods added
+  - Legacy `getEarthRingPosition()` maintained for backward compatibility
+- ✅ **Rendering Utilities**: ER0 → Three.js conversion pipeline complete
+  - `setObjectPositionFromER0()` and `getER0PositionFromObject()` added
+  - `setCameraPositionFromER0()` and `getER0PositionFromCamera()` added
+  - `createMeshAtER0Position()` added
+  - Full conversion chain: ER0 → RingPolar → Legacy → Three.js
+- ✅ **Zone Editor**: Updated to use camera-relative EarthRing coordinates and centralized wrapping helpers
+  - Rectangle/circle/paintbrush previews now match final zone geometry
+  - Zones can be drawn correctly across the X=0 wrap point without mirroring or displacement
 
 ### Migration Strategy
 
@@ -115,8 +124,8 @@ The coordinate system migration can proceed independently of the client-server r
 
 ### Coordinate System Migration
 - **Server-Side**: ✅ **COMPLETE**
-- **Client-Side**: ⏳ **UTILITIES READY, INTEGRATION PENDING**
-- **Priority**: Can be done as separate work stream
+- **Client-Side**: ✅ **COMPLETE**
+- **Status**: All major systems migrated. Legacy coordinate support maintained for backward compatibility.
 
 ## Next Steps
 
@@ -127,15 +136,15 @@ The coordinate system migration can proceed independently of the client-server r
 4. ⏳ Performance profiling
 
 ### Future (Coordinate System Migration)
-1. Update ChunkManager to use RingArc coordinates
-2. Update ZoneManager to use RingArc coordinates
-3. Update CameraController to use new coordinates
-4. Update rendering pipeline for ER0 → Three.js
-5. Remove legacy coordinate code after validation
+1. ✅ Update ChunkManager to use RingArc coordinates - **COMPLETE**
+2. ✅ Update ZoneManager to use RingArc coordinates - **COMPLETE**
+3. ✅ Update CameraController to use new coordinates - **COMPLETE**
+4. ✅ Update rendering pipeline for ER0 → Three.js - **COMPLETE**
+5. ⏳ Remove legacy coordinate code after validation - **DEFERRED** (maintained for backward compatibility)
 
-### Cleanup (After Validation Period)
-1. Remove legacy `chunk_request` handler
-2. Remove client-side chunk selection logic
-3. Remove legacy coordinate conversion code
-4. Update all documentation to remove legacy references
+### Cleanup ✅ **COMPLETE**
+1. ✅ Removed legacy `chunk_request` handler
+2. ✅ Client-side chunk selection logic already using server-driven
+3. ⏳ Legacy coordinate conversion code (utilities kept - still in use as compatibility shims)
+4. ✅ Updated documentation to remove legacy references
 

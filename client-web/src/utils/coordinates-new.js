@@ -1,4 +1,4 @@
-/**
+﻿/**
  * New Coordinate System Utilities
  * 
  * Implements ER0 (Earth-Centered, Earth-Fixed) and EarthRing coordinate systems.
@@ -7,11 +7,11 @@
  * 1. ER0: Earth-Centered, Earth-Fixed Frame
  *    - Origin: (0,0,0) = center of Earth
  *    - +X axis: intersection of equator and prime meridian (Kongo Pillar vertical line)
- *    - +Y axis: 90°E on the equator
+ *    - +Y axis: 90Â°E on the equator
  *    - +Z axis: North Pole
  * 
  * 2. RingPolar: (theta, r, z)
- *    - theta: angle around ring in radians (0 at Kongo Hub, wraps at ±π)
+ *    - theta: angle around ring in radians (0 at Kongo Hub, wraps at Â±Ï€)
  *    - r: radial offset from ring centerline in meters
  *    - z: vertical offset from equatorial plane in meters
  * 
@@ -27,6 +27,9 @@ export const RING_ORBITAL_RADIUS = 42164000.0; // Geostationary orbit radius in 
 export const KONGO_HUB_ALTITUDE = 500000.0; // Kongo Hub altitude above Earth's surface in meters
 export const KONGO_HUB_RADIUS = EARTH_RADIUS + KONGO_HUB_ALTITUDE;
 export const RING_CIRCUMFERENCE = 264000000; // Ring circumference in meters
+export const CHUNK_LENGTH = 1000; // Chunk length in meters (1 km)
+export const CHUNK_COUNT = 264000; // Total number of chunks around the ring
+export const DEFAULT_FLOOR_HEIGHT = 20; // Default floor height in meters (20 meters per level for main ring structure)
 
 // Kongo Hub ER0 coordinates
 export const KONGO_HUB_ER0 = {
@@ -46,7 +49,7 @@ export const KONGO_HUB_ER0 = {
 /**
  * RingPolar represents a position in EarthRing polar coordinates
  * @typedef {Object} RingPolar
- * @property {number} theta - Angle around ring in radians (0 at Kongo Hub, wraps at ±π)
+ * @property {number} theta - Angle around ring in radians (0 at Kongo Hub, wraps at Â±Ï€)
  * @property {number} r - Radial offset from ring centerline in meters
  * @property {number} z - Vertical offset from equatorial plane in meters
  */
@@ -103,15 +106,15 @@ export function er0ToRingPolar(er0) {
 
 /**
  * Convert RingArc coordinates to RingPolar coordinates
- * Formula: theta = (s / RingCircumference) * 2π, then normalize to [-π, π)
+ * Formula: theta = (s / RingCircumference) * 2Ï€, then normalize to [-Ï€, Ï€)
  * 
  * @param {RingArc} arc - RingArc coordinates
  * @returns {RingPolar} RingPolar coordinates
  */
 export function ringArcToRingPolar(arc) {
-  // Convert arc length to theta: theta = (s / C) * 2π
+  // Convert arc length to theta: theta = (s / C) * 2Ï€
   let theta = (arc.s / RING_CIRCUMFERENCE) * 2 * Math.PI;
-  // Normalize theta to [-π, π)
+  // Normalize theta to [-Ï€, Ï€)
   theta = wrapTheta(theta);
   return {
     theta: theta,
@@ -122,20 +125,17 @@ export function ringArcToRingPolar(arc) {
 
 /**
  * Convert RingPolar coordinates to RingArc coordinates
- * Formula: s = (theta / 2π) * RingCircumference, wrapped to [0, RingCircumference)
+ * Formula: s = (theta / 2Ï€) * RingCircumference, wrapped to [0, RingCircumference)
  * 
  * @param {RingPolar} polar - RingPolar coordinates
  * @returns {RingArc} RingArc coordinates
  */
 export function ringPolarToRingArc(polar) {
-  // Normalize theta to [0, 2π) for arc length calculation
-  let theta = polar.theta;
-  if (theta < 0) {
-    theta += 2 * Math.PI;
-  }
   // Convert to arc length: s = (theta / 2π) * RingCircumference
-  let s = (theta / (2 * Math.PI)) * RING_CIRCUMFERENCE;
-  // Wrap s to [0, RingCircumference)
+  // Preserve sign of theta to handle negative positions correctly
+  // Negative theta maps to negative arc length, which wraps correctly
+  let s = (polar.theta / (2 * Math.PI)) * RING_CIRCUMFERENCE;
+  // Wrap s to [0, RingCircumference) - this handles negative values correctly
   s = wrapArcLength(s);
   return {
     s: s,
@@ -145,10 +145,10 @@ export function ringPolarToRingArc(polar) {
 }
 
 /**
- * Wrap theta to the range [-π, π)
+ * Wrap theta to the range [-Ï€, Ï€)
  * 
  * @param {number} theta - Angle in radians
- * @returns {number} Wrapped angle in [-π, π)
+ * @returns {number} Wrapped angle in [-Ï€, Ï€)
  */
 export function wrapTheta(theta) {
   return ((theta + Math.PI) % (2 * Math.PI)) - Math.PI;
@@ -167,7 +167,7 @@ export function wrapArcLength(s) {
 /**
  * Convert legacy X position (0 to 264,000,000) to RingPolar
  * Legacy X=0 corresponds to Kongo Hub (theta=0)
- * Legacy X increases eastward, so theta = (X / RingCircumference) * 2π
+ * Legacy X increases eastward, so theta = (X / RingCircumference) * 2Ï€
  * Legacy Y (width position) maps to R (radial offset)
  * Legacy Z (floor/level) maps to Z (vertical offset)
  * 
@@ -177,11 +177,10 @@ export function wrapArcLength(s) {
  * @returns {RingPolar} RingPolar coordinates
  */
 export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
-  // Wrap legacy X to [0, RingCircumference)
-  const wrappedX = ((legacyX % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
-  
-  // Convert to theta: theta = (X / C) * 2π, then shift to [-π, π)
-  let theta = (wrappedX / RING_CIRCUMFERENCE) * 2 * Math.PI;
+  // Convert to theta directly from legacy X, preserving sign information
+  // theta = (X / C) * 2π, then normalize to [-π, π)
+  // This handles negative positions correctly (e.g., -1000 maps to negative theta)
+  let theta = (legacyX / RING_CIRCUMFERENCE) * 2 * Math.PI;
   theta = wrapTheta(theta);
   
   return {
@@ -193,7 +192,7 @@ export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
 
 /**
  * Convert RingPolar to legacy position
- * Legacy X = (theta / 2π) * RingCircumference, wrapped to [0, RingCircumference)
+ * Legacy X = (theta / 2Ï€) * RingCircumference, wrapped to [0, RingCircumference)
  * Legacy Y = R (radial offset)
  * Legacy Z = Z (vertical offset)
  * 
@@ -201,7 +200,7 @@ export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
  * @returns {Object} Legacy position {x, y, z}
  */
 export function ringPolarToLegacyPosition(polar) {
-  // Normalize theta to [0, 2π)
+  // Normalize theta to [0, 2Ï€)
   let theta = polar.theta;
   if (theta < 0) {
     theta += 2 * Math.PI;
@@ -269,6 +268,63 @@ export function validateRingArc(arc) {
 }
 
 /**
+ * Convert RingArc arc length (s) to chunk index
+ * Chunk index = s / CHUNK_LENGTH, wrapped to [0, CHUNK_COUNT)
+ * 
+ * @param {RingArc} arc - RingArc coordinates
+ * @returns {number} Chunk index (0 to CHUNK_COUNT - 1)
+ */
+export function ringArcToChunkIndex(arc) {
+  const wrappedS = wrapArcLength(arc.s);
+  let chunkIndex = Math.floor(wrappedS / CHUNK_LENGTH);
+  if (chunkIndex >= CHUNK_COUNT) {
+    chunkIndex = chunkIndex % CHUNK_COUNT;
+  }
+  return chunkIndex;
+}
+
+/**
+ * Convert RingPolar to chunk index via RingArc
+ * 
+ * @param {RingPolar} polar - RingPolar coordinates
+ * @returns {number} Chunk index (0 to CHUNK_COUNT - 1)
+ */
+export function ringPolarToChunkIndex(polar) {
+  const arc = ringPolarToRingArc(polar);
+  return ringArcToChunkIndex(arc);
+}
+
+/**
+ * Convert chunk index to RingArc coordinates
+ * Returns the center arc length of the chunk
+ * 
+ * @param {number} chunkIndex - Chunk index (0 to CHUNK_COUNT - 1)
+ * @returns {RingArc} RingArc coordinates at chunk center
+ */
+export function chunkIndexToRingArc(chunkIndex) {
+  // Wrap chunk index to valid range
+  const wrappedIndex = ((chunkIndex % CHUNK_COUNT) + CHUNK_COUNT) % CHUNK_COUNT;
+  // Center of chunk: s = (chunkIndex + 0.5) * CHUNK_LENGTH
+  const s = (wrappedIndex + 0.5) * CHUNK_LENGTH;
+  return {
+    s: wrapArcLength(s),
+    r: 0, // Default to centerline
+    z: 0, // Default to equatorial plane
+  };
+}
+
+/**
+ * Convert chunk index to RingPolar coordinates via RingArc
+ * 
+ * @param {number} chunkIndex - Chunk index (0 to CHUNK_COUNT - 1)
+ * @returns {RingPolar} RingPolar coordinates at chunk center
+ */
+export function chunkIndexToRingPolar(chunkIndex) {
+  const arc = chunkIndexToRingArc(chunkIndex);
+  return ringArcToRingPolar(arc);
+}
+
+/**
  * Validate ER0 coordinates
  * 
  * @param {ER0Point} er0 - ER0 coordinates to validate
@@ -291,5 +347,200 @@ export function validateER0(er0) {
     valid: errors.length === 0,
     errors: errors,
   };
+}
+
+/**
+ * Three.js coordinate point
+ * @typedef {Object} ThreeJSPoint
+ * @property {number} x - Right (maps from ring position)
+ * @property {number} y - Up (maps from floor * floor_height)
+ * @property {number} z - Forward (maps from radial offset)
+ */
+
+/**
+ * Convert RingArc coordinates to Three.js coordinates
+ * 
+ * Three.js convention: Y-up, Z-forward
+ * - X: Right (maps from arc length s)
+ * - Y: Up (maps from z * floor_height, where z is vertical offset)
+ * - Z: Forward (maps from radial offset r)
+ * 
+ * @param {RingArc} ringArc - RingArc coordinate point
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {ThreeJSPoint} Three.js coordinate point
+ */
+export function ringArcToThreeJS(ringArc, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  return {
+    x: ringArc.s,
+    y: ringArc.z * floorHeight, // z is vertical offset, convert to height
+    z: ringArc.r, // r is radial offset
+  };
+}
+
+/**
+ * Convert Three.js coordinates to RingArc coordinates
+ * 
+ * @param {ThreeJSPoint} threeJSPoint - Three.js coordinate point
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {RingArc} RingArc coordinate point
+ */
+export function threeJSToRingArc(threeJSPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  return {
+    s: threeJSPoint.x,
+    r: threeJSPoint.z,
+    z: threeJSPoint.y / floorHeight, // Convert height back to vertical offset
+  };
+}
+
+/**
+ * Convert RingPolar coordinates to Three.js coordinates
+ * 
+ * @param {RingPolar} ringPolar - RingPolar coordinate point
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {ThreeJSPoint} Three.js coordinate point
+ */
+export function ringPolarToThreeJS(ringPolar, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  const arc = ringPolarToRingArc(ringPolar);
+  return ringArcToThreeJS(arc, floorHeight);
+}
+
+/**
+ * Convert Three.js coordinates to RingPolar coordinates
+ * 
+ * @param {ThreeJSPoint} threeJSPoint - Three.js coordinate point
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {RingPolar} RingPolar coordinate point
+ */
+export function threeJSToRingPolar(threeJSPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  const arc = threeJSToRingArc(threeJSPoint, floorHeight);
+  return ringArcToRingPolar(arc);
+}
+
+/**
+ * Legacy wrapper: Convert legacy EarthRing coordinates to Three.js coordinates.
+ * 
+ * IMPORTANT: This function is intentionally a **direct linear mapping**
+ * between legacy EarthRing and Three.js coordinates. It does NOT wrap
+ * or convert through RingArc/RingPolar so that negative and large X values
+ * are preserved. Higher-level helpers (normalizeRelativeToCamera, etc.)
+ * handle wrapping where needed.
+ * 
+ * @deprecated Use ringArcToThreeJS or ringPolarToThreeJS for new code.
+ * @param {Object} earthringPoint - Legacy EarthRing position {x, y, z}
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {ThreeJSPoint} Three.js coordinate point
+ */
+export function toThreeJS(earthringPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  return {
+    x: earthringPoint.x,
+    y: earthringPoint.z * floorHeight,
+    z: earthringPoint.y,
+  };
+}
+
+/**
+ * Legacy wrapper: Convert Three.js coordinates to legacy EarthRing coordinates.
+ * 
+ * This is the inverse of toThreeJS and likewise avoids any wrapping or
+ * RingArc/RingPolar conversions so that raw positions (including negatives)
+ * are preserved for camera-relative logic.
+ * 
+ * @deprecated Use threeJSToRingArc or threeJSToRingPolar for new code.
+ * @param {ThreeJSPoint} threeJSPoint - Three.js coordinate point
+ * @param {number} [floorHeight=DEFAULT_FLOOR_HEIGHT] - Height per floor in meters
+ * @returns {Object} Legacy EarthRing position {x, y, z}
+ */
+export function fromThreeJS(threeJSPoint, floorHeight = DEFAULT_FLOOR_HEIGHT) {
+  return {
+    x: threeJSPoint.x,
+    y: threeJSPoint.z,
+    z: Math.round(threeJSPoint.y / floorHeight),
+  };
+}
+
+/**
+ * Legacy wrapper: Wrap ring position to valid range (0 to 264,000,000 meters)
+ * 
+ * @deprecated Use wrapArcLength instead
+ * @param {number} ringPosition - Ring position in meters
+ * @returns {number} Wrapped ring position (0 to 264,000,000)
+ */
+export function wrapRingPosition(ringPosition) {
+  return wrapArcLength(ringPosition);
+}
+
+/**
+ * Legacy wrapper: Convert EarthRing position to chunk index
+ * 
+ * @deprecated Use ringArcToChunkIndex instead
+ * @param {number} ringPosition - Ring position in meters (X coordinate)
+ * @returns {number} Chunk index (0 to 263,999)
+ */
+export function positionToChunkIndex(ringPosition) {
+  const wrapped = wrapArcLength(ringPosition);
+  const arc = { s: wrapped, r: 0, z: 0 };
+  return ringArcToChunkIndex(arc);
+}
+
+/**
+ * Legacy wrapper: Convert chunk index to ring position range
+ * 
+ * @deprecated Use chunkIndexToRingArc instead
+ * @param {number} chunkIndex - Chunk index (0 to 263,999)
+ * @returns {Object} Object with min and max ring positions in meters
+ * @property {number} min - Minimum ring position for this chunk
+ * @property {number} max - Maximum ring position for this chunk
+ */
+export function chunkIndexToPositionRange(chunkIndex) {
+  const arc = chunkIndexToRingArc(chunkIndex);
+  return { min: arc.s, max: arc.s + CHUNK_LENGTH };
+}
+
+/**
+ * Normalize a ring position relative to a camera position
+ * 
+ * This ensures coordinates are within [-RING_CIRCUMFERENCE/2, RING_CIRCUMFERENCE/2] of the camera,
+ * preventing coordinates from wrapping to the opposite side of the ring.
+ * 
+ * @param {number} ringPosition - Absolute ring position (arc length) to normalize
+ * @param {number} cameraPosition - Camera's absolute ring position (arc length)
+ * @returns {number} Normalized position relative to camera (can be negative)
+ */
+export function normalizeRelativeToCamera(ringPosition, cameraPosition) {
+  const dx = ringPosition - cameraPosition;
+  const half = RING_CIRCUMFERENCE / 2;
+  let adjusted = dx;
+  
+  // Normalize to [-half, half] range
+  while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
+  while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
+  
+  return cameraPosition + adjusted;
+}
+
+/**
+ * Convert a normalized (camera-relative) coordinate back to absolute coordinate
+ * 
+ * This converts a coordinate that was normalized relative to a camera position
+ * back to an absolute coordinate [0, RING_CIRCUMFERENCE).
+ * 
+ * @param {number} normalizedPosition - Normalized position (can be negative)
+ * @param {number} cameraPosition - Camera's absolute ring position (arc length)
+ * @returns {number} Absolute ring position [0, RING_CIRCUMFERENCE)
+ */
+export function denormalizeFromCamera(normalizedPosition, cameraPosition) {
+  // Wrap camera position to get its absolute position [0, RING_CIRCUMFERENCE)
+  const cameraXWrapped = wrapArcLength(cameraPosition);
+  
+  // The normalized position is: cameraPosition + adjusted, where adjusted is in [-half, half]
+  // So the offset from camera is: normalizedPosition - cameraPosition
+  const dx = normalizedPosition - cameraPosition;
+  
+  // Convert to absolute: cameraXWrapped + dx
+  // This can be negative if the normalized position is negative and cameraXWrapped is small
+  const absoluteX = cameraXWrapped + dx;
+  
+  // Wrap to valid range [0, RING_CIRCUMFERENCE)
+  return wrapArcLength(absoluteX);
 }
 

@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, denormalizeFromCamera } from '../utils/coordinates.js';
+import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, denormalizeFromCamera } from '../utils/coordinates-new.js';
 import { createZone, deleteZone } from '../api/zone-service.js';
 import { getCurrentUser } from '../auth/auth-service.js';
 
