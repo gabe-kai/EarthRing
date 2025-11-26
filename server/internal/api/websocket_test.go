@@ -1049,3 +1049,374 @@ func TestWebSocketHandlers_handleChunkRequest(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	})
 }
+
+func TestWebSocketHandlers_handleStreamSubscribe(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+	}
+
+	handlers := NewWebSocketHandlers(db, cfg)
+	go handlers.GetHub().Run()
+	defer func() {
+		time.Sleep(10 * time.Millisecond)
+	}()
+
+	// Create a mock connection
+	conn := &WebSocketConnection{
+		userID:   1,
+		username: "testuser",
+		role:     "player",
+		version:  ProtocolVersion1,
+		send:     make(chan []byte, 256),
+		hub:      handlers.GetHub(),
+	}
+
+	// Register connection
+	handlers.GetHub().register <- conn
+	time.Sleep(10 * time.Millisecond)
+
+	tests := []struct {
+		name        string
+		message     *WebSocketMessage
+		expectError bool
+		errorCode   string
+	}{
+		{
+			name: "valid stream_subscribe with chunks",
+			message: &WebSocketMessage{
+				Type: "stream_subscribe",
+				ID:   "req-sub-1",
+				Data: json.RawMessage(`{
+					"pose": {
+						"ring_position": 10000,
+						"width_offset": 0,
+						"elevation": 0,
+						"active_floor": 0
+					},
+					"radius_meters": 5000,
+					"width_meters": 5000,
+					"include_chunks": true,
+					"include_zones": false
+				}`),
+			},
+			expectError: false,
+		},
+		{
+			name: "valid stream_subscribe with zones",
+			message: &WebSocketMessage{
+				Type: "stream_subscribe",
+				ID:   "req-sub-2",
+				Data: json.RawMessage(`{
+					"pose": {
+						"ring_position": 20000,
+						"width_offset": 0,
+						"elevation": 0,
+						"active_floor": 0
+					},
+					"radius_meters": 5000,
+					"width_meters": 5000,
+					"include_chunks": false,
+					"include_zones": true
+				}`),
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid stream_subscribe payload (missing required fields)",
+			message: &WebSocketMessage{
+				Type: "stream_subscribe",
+				ID:   "req-sub-3",
+				Data: json.RawMessage(`{"invalid": "data"}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidSubscriptionRequest", // JSON unmarshals but validation fails
+		},
+		{
+			name: "stream_subscribe with zero radius",
+			message: &WebSocketMessage{
+				Type: "stream_subscribe",
+				ID:   "req-sub-4",
+				Data: json.RawMessage(`{
+					"pose": {
+						"ring_position": 10000,
+						"active_floor": 0
+					},
+					"radius_meters": 0,
+					"include_chunks": true
+				}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidSubscriptionRequest",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear send channel
+			for len(conn.send) > 0 {
+				<-conn.send
+			}
+
+			handlers.handleStreamSubscribe(conn, tt.message)
+
+			// Wait for response
+			select {
+			case responseBytes := <-conn.send:
+				var response WebSocketMessage
+				if err := json.Unmarshal(responseBytes, &response); err != nil {
+					t.Fatalf("Failed to unmarshal response: %v", err)
+				}
+
+				if tt.expectError {
+					// Should receive error message
+					var errorMsg WebSocketError
+					if err := json.Unmarshal(responseBytes, &errorMsg); err != nil {
+						t.Fatalf("Failed to unmarshal error: %v", err)
+					}
+					if errorMsg.Type != "error" {
+						t.Errorf("Expected error message, got type %s", response.Type)
+					}
+					if errorMsg.Code != tt.errorCode {
+						t.Errorf("Expected error code %s, got %s", tt.errorCode, errorMsg.Code)
+					}
+				} else {
+					// Should receive stream_ack message
+					if response.Type != "stream_ack" {
+						t.Errorf("Expected stream_ack message, got type %s", response.Type)
+					}
+					if response.ID != tt.message.ID {
+						t.Errorf("Expected response ID %s, got %s", tt.message.ID, response.ID)
+					}
+
+					var ackData struct {
+						SubscriptionID string   `json:"subscription_id"`
+						ChunkIDs       []string `json:"chunk_ids,omitempty"`
+						Message        string   `json:"message"`
+					}
+					if err := json.Unmarshal(response.Data, &ackData); err != nil {
+						t.Fatalf("Failed to unmarshal ack data: %v", err)
+					}
+					if ackData.SubscriptionID == "" {
+						t.Error("Expected subscription_id in ack response")
+					}
+				}
+			case <-time.After(1 * time.Second):
+				if !tt.expectError {
+					t.Error("Timeout waiting for response")
+				}
+			}
+		})
+	}
+
+	// Unregister connection
+	handlers.GetHub().unregister <- conn
+	time.Sleep(10 * time.Millisecond)
+}
+
+func TestWebSocketHandlers_handleStreamUpdatePose(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+		},
+	}
+
+	handlers := NewWebSocketHandlers(db, cfg)
+	go handlers.GetHub().Run()
+	defer func() {
+		time.Sleep(10 * time.Millisecond)
+	}()
+
+	// Create a mock connection
+	conn := &WebSocketConnection{
+		userID:   1,
+		username: "testuser",
+		role:     "player",
+		version:  ProtocolVersion1,
+		send:     make(chan []byte, 256),
+		hub:      handlers.GetHub(),
+	}
+
+	// Register connection
+	handlers.GetHub().register <- conn
+	time.Sleep(10 * time.Millisecond)
+
+	// First, create a subscription
+	subscribeMsg := &WebSocketMessage{
+		Type: "stream_subscribe",
+		ID:   "req-sub-initial",
+		Data: json.RawMessage(`{
+			"pose": {
+				"ring_position": 10000,
+				"width_offset": 0,
+				"elevation": 0,
+				"active_floor": 0
+			},
+			"radius_meters": 5000,
+			"width_meters": 5000,
+			"include_chunks": true,
+			"include_zones": false
+		}`),
+	}
+
+	handlers.handleStreamSubscribe(conn, subscribeMsg)
+
+	// Wait for subscription ack
+	var subscriptionID string
+	select {
+	case responseBytes := <-conn.send:
+		var response WebSocketMessage
+		if err := json.Unmarshal(responseBytes, &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+		var ackData struct {
+			SubscriptionID string `json:"subscription_id"`
+		}
+		if err := json.Unmarshal(response.Data, &ackData); err != nil {
+			t.Fatalf("Failed to unmarshal ack data: %v", err)
+		}
+		subscriptionID = ackData.SubscriptionID
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for subscription ack")
+	}
+
+	if subscriptionID == "" {
+		t.Fatal("Failed to get subscription ID")
+	}
+
+	tests := []struct {
+		name        string
+		message     *WebSocketMessage
+		expectError bool
+		errorCode   string
+	}{
+		{
+			name: "valid stream_update_pose",
+			message: &WebSocketMessage{
+				Type: "stream_update_pose",
+				ID:   "req-pose-1",
+				Data: json.RawMessage(fmt.Sprintf(`{
+					"subscription_id": "%s",
+					"pose": {
+						"ring_position": 20000,
+						"width_offset": 0,
+						"elevation": 0,
+						"active_floor": 0
+					}
+				}`, subscriptionID)),
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid stream_update_pose payload",
+			message: &WebSocketMessage{
+				Type: "stream_update_pose",
+				ID:   "req-pose-2",
+				Data: json.RawMessage(`{"invalid": "data"}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "missing subscription_id",
+			message: &WebSocketMessage{
+				Type: "stream_update_pose",
+				ID:   "req-pose-3",
+				Data: json.RawMessage(`{
+					"pose": {
+						"ring_position": 20000,
+						"active_floor": 0
+					}
+				}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidMessageFormat",
+		},
+		{
+			name: "invalid subscription_id",
+			message: &WebSocketMessage{
+				Type: "stream_update_pose",
+				ID:   "req-pose-4",
+				Data: json.RawMessage(`{
+					"subscription_id": "nonexistent",
+					"pose": {
+						"ring_position": 20000,
+						"active_floor": 0
+					}
+				}`),
+			},
+			expectError: true,
+			errorCode:   "InvalidSubscriptionRequest",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear send channel
+			for len(conn.send) > 0 {
+				<-conn.send
+			}
+
+			handlers.handleStreamUpdatePose(conn, tt.message)
+
+			// Wait for response
+			select {
+			case responseBytes := <-conn.send:
+				var response WebSocketMessage
+				if err := json.Unmarshal(responseBytes, &response); err != nil {
+					t.Fatalf("Failed to unmarshal response: %v", err)
+				}
+
+				if tt.expectError {
+					// Should receive error message
+					var errorMsg WebSocketError
+					if err := json.Unmarshal(responseBytes, &errorMsg); err != nil {
+						t.Fatalf("Failed to unmarshal error: %v", err)
+					}
+					if errorMsg.Type != "error" {
+						t.Errorf("Expected error message, got type %s", response.Type)
+					}
+					if errorMsg.Code != tt.errorCode {
+						t.Errorf("Expected error code %s, got %s", tt.errorCode, errorMsg.Code)
+					}
+				} else {
+					// Should receive stream_pose_ack message
+					if response.Type != "stream_pose_ack" {
+						t.Errorf("Expected stream_pose_ack message, got type %s", response.Type)
+					}
+					if response.ID != tt.message.ID {
+						t.Errorf("Expected response ID %s, got %s", tt.message.ID, response.ID)
+					}
+
+					var ackData struct {
+						SubscriptionID string `json:"subscription_id"`
+						Message        string `json:"message"`
+					}
+					if err := json.Unmarshal(response.Data, &ackData); err != nil {
+						t.Fatalf("Failed to unmarshal ack data: %v", err)
+					}
+					if ackData.SubscriptionID != subscriptionID {
+						t.Errorf("Expected subscription_id %s, got %s", subscriptionID, ackData.SubscriptionID)
+					}
+				}
+			case <-time.After(1 * time.Second):
+				if !tt.expectError {
+					t.Error("Timeout waiting for response")
+				}
+			}
+		})
+	}
+
+	// Unregister connection
+	handlers.GetHub().unregister <- conn
+	time.Sleep(10 * time.Millisecond)
+}

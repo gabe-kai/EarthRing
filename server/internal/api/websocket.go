@@ -903,6 +903,11 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 	// Phase 2: Server-side chunk delivery - send initial chunks asynchronously
 	if req.IncludeChunks && len(plan.ChunkIDs) > 0 {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Stream] Recovered from panic while sending chunks for subscription %s: %v", plan.SubscriptionID, r)
+				}
+			}()
 			log.Printf("[Stream] Loading %d chunks for subscription %s: %v", len(plan.ChunkIDs), plan.SubscriptionID, plan.ChunkIDs)
 			// Load chunks using server-side pipeline (database lookup, generation, compression)
 			chunks := h.loadChunksForIDs(plan.ChunkIDs, "medium")
@@ -922,6 +927,11 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 	// Phase 2: Server-side zone delivery - send initial zones asynchronously
 	if req.IncludeZones {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Stream] Recovered from panic while sending zones for subscription %s: %v", plan.SubscriptionID, r)
+				}
+			}()
 			// Compute bounding box for zone query
 		bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
 		zones := h.loadZonesForArea(bbox, req.Pose)
@@ -997,6 +1007,11 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 			// Load and send added chunks
 			if len(chunkDelta.AddedChunks) > 0 {
 				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[Stream] Recovered from panic while sending chunk deltas for subscription %s: %v", req.SubscriptionID, r)
+						}
+					}()
 					chunks := h.loadChunksForIDs(chunkDelta.AddedChunks, "medium")
 					if len(chunks) > 0 {
 						h.sendChunkData(conn, chunks, "stream_delta", "")
@@ -1016,6 +1031,11 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 	// Handle zone deltas if zones are included
 	if subscription.Request.IncludeZones && subscription.ZoneBoundingBox != nil {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Stream] Recovered from panic while updating zones for subscription %s: %v", req.SubscriptionID, r)
+				}
+			}()
 			// Recompute bounding box (already updated in UpdatePose)
 			bbox := *subscription.ZoneBoundingBox
 			
@@ -1167,6 +1187,12 @@ type ZoneDataResponse struct {
 
 // sendZoneData sends zone data to a WebSocket connection.
 func (h *WebSocketHandlers) sendZoneData(conn *WebSocketConnection, zones []database.Zone, messageType string, messageID string) {
+	// Use recover to handle panics from closed channels (e.g., during test cleanup)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Failed to send %s: connection closed (panic: %v)", messageType, r)
+		}
+	}()
 	response := WebSocketMessage{
 		Type: messageType,
 		ID:   messageID,

@@ -260,16 +260,17 @@ func TestStreamingIntegration(t *testing.T) {
 
 ## Known Limitations
 
-1. **Pose Updates**: Currently, pose updates require client to send new `stream_subscribe` messages. Future: Add `stream_update_pose` message type.
-2. **Zone Delta Delivery**: Zone deltas computed but not yet sent on pose updates (requires pose update handler).
-3. **Full-Ring Zones**: System zones that span full ring may need special handling.
+1. ✅ **Pose Updates**: `stream_update_pose` message handler implemented and working
+2. ✅ **Zone Delta Delivery**: Zone deltas computed and sent on pose updates
+3. **Full-Ring Zones**: System zones that span full ring may need special handling (future enhancement)
 
 ## Next Steps
 
 1. ✅ Unit tests for streaming manager
-2. ⏳ Manual testing of WebSocket streaming
-3. ⏳ Add `stream_update_pose` message handler
-4. ⏳ Implement zone delta delivery on pose updates
-5. ⏳ Automated integration test suite
-6. ⏳ Performance profiling and optimization
+2. ✅ Add `stream_update_pose` message handler
+3. ✅ Implement zone delta delivery on pose updates
+4. ⏳ Add unit tests for WebSocket streaming handlers (`stream_subscribe`, `stream_update_pose`)
+5. ⏳ Manual testing of WebSocket streaming (in progress - chunks unloading confirmed working)
+6. ⏳ Automated integration test suite
+7. ⏳ Performance profiling and optimization
 
