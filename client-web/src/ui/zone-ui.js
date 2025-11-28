@@ -5,7 +5,9 @@
 
 import { isAuthenticated } from '../auth/auth-service.js';
 import { TOOLS } from '../zones/zone-editor.js';
-import { showZoneInfoWindow, hideZoneInfoWindow } from './zone-info-window.js';
+import { updateInfoBox } from './info-box.js';
+import { deleteZone, updateZone } from '../api/zone-service.js';
+import { getPlayerProfile } from '../api/player-service.js';
 import { addTab, setTabContent, switchTab } from './bottom-toolbar.js';
 
 let zoneEditor = null;
@@ -309,18 +311,125 @@ function setupZonesToolbarListeners() {
       }
     });
 
-    zoneEditor.onZoneSelectedCallbacks.push((zone) => {
-      showZoneInfoWindow(zone, (zoneID) => {
-        // Handle zone deletion
-        const zoneManager = window.earthring?.zoneManager;
-        const gameStateManager = window.earthring?.gameStateManager;
-        if (gameStateManager) {
-          gameStateManager.removeZone(zoneID);
+    // Clear info box when zone is deselected
+    zoneEditor.onZoneDeselectedCallbacks.push(() => {
+      updateInfoBox({}, { title: 'Info' });
+    });
+
+    zoneEditor.onZoneSelectedCallbacks.push(async (zone) => {
+      // Format zone type for display
+      const zoneTypeDisplay = zone.zone_type
+        ? zone.zone_type.split('-').map(word => 
+            word.charAt(0).toUpperCase() + word.slice(1)
+          ).join(' ')
+        : 'Unknown';
+      
+      // Format area for display
+      let areaDisplay = 'N/A';
+      if (zone.area !== undefined && zone.area !== null) {
+        areaDisplay = `${zone.area.toFixed(2)} m²`;
+      }
+      
+      // Fetch owner username for tooltip
+      let ownerUsername = null;
+      if (zone.owner_id) {
+        try {
+          const ownerProfile = await getPlayerProfile(zone.owner_id);
+          ownerUsername = ownerProfile.username || null;
+        } catch (error) {
+          console.warn('Failed to fetch owner username:', error);
         }
-        if (zoneManager) {
-          zoneManager.removeZone(zoneID);
+      }
+      
+      // Build tooltip text
+      const tooltipParts = [];
+      tooltipParts.push(`Zone ID: ${zone.id}`);
+      if (ownerUsername) {
+        tooltipParts.push(`Owner: ${ownerUsername}`);
+      } else if (zone.owner_id) {
+        tooltipParts.push(`Owner ID: ${zone.owner_id}`);
+      }
+      const tooltip = tooltipParts.join('\n');
+      
+      // Build zone info object for info box (excluding Type, Created, Owner ID)
+      const zoneInfo = {
+        'Name': zone.name || `Zone ${zone.id}`,
+        'Floor': (zone.floor ?? 0).toString(),
+        'Area': areaDisplay,
+      };
+      
+      // Define name save handler
+      const saveName = async (newName) => {
+        if (newName === (zone.name || `Zone ${zone.id}`)) {
+          return; // No change
         }
-        zoneEditor.deselectZone();
+        
+        try {
+          await updateZone(zone.id, { name: newName });
+          // Update zone in zone manager
+          const zoneManager = window.earthring?.zoneManager;
+          if (zoneManager) {
+            const zoneMesh = zoneManager.zoneMeshes.get(zone.id);
+            if (zoneMesh && zoneMesh.userData) {
+              zoneMesh.userData.zone = { ...zone, name: newName };
+            }
+          }
+          // Update zone in editor
+          if (zoneEditor.selectedZone) {
+            zoneEditor.selectedZone.name = newName;
+          }
+          // Update the displayed name in the info box
+          const nameField = document.querySelector('[data-field="Name"]');
+          if (nameField) {
+            nameField.textContent = newName;
+          }
+        } catch (error) {
+          console.error('Failed to update zone name:', error);
+          alert(`Failed to update zone name: ${error.message}`);
+          // Restore original value
+          const nameField = document.querySelector('[data-field="Name"]');
+          if (nameField) {
+            nameField.textContent = zone.name || `Zone ${zone.id}`;
+          }
+        }
+      };
+      
+      // Define delete action
+      const deleteAction = async () => {
+        if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
+          return;
+        }
+        
+        try {
+          await deleteZone(zone.id);
+          // Handle zone deletion
+          const zoneManager = window.earthring?.zoneManager;
+          const gameStateManager = window.earthring?.gameStateManager;
+          if (gameStateManager) {
+            gameStateManager.removeZone(zone.id);
+          }
+          if (zoneManager) {
+            zoneManager.removeZone(zone.id);
+          }
+          zoneEditor.deselectZone();
+          // Clear info box
+          updateInfoBox({});
+        } catch (error) {
+          console.error('Failed to delete zone:', error);
+          alert(`Failed to delete zone: ${error.message}`);
+        }
+      };
+      
+      // Update info box with zone information
+      updateInfoBox(zoneInfo, {
+        title: `${zoneTypeDisplay} Zone Details`,
+        tooltip: tooltip,
+        actions: {
+          'Delete Zone': deleteAction
+        },
+        editableFields: {
+          'Name': { onSave: saveName }
+        }
       });
     });
 
@@ -341,7 +450,8 @@ export function showZonePanel() {
 }
 
 export function hideZonePanel() {
-  hideZoneInfoWindow();
+  // Clear info box when panel closes
+  updateInfoBox({});
   // Deselect tool when panel closes
   if (zoneEditor) {
     zoneEditor.setTool(TOOLS.NONE);

@@ -442,8 +442,8 @@ export function showUserInfo() {
   style.textContent = `
     #user-info-bar {
       position: fixed;
-      top: 10px;
-      right: 10px;
+      top: 0;
+      right: 0;
       z-index: 9999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
@@ -452,10 +452,16 @@ export function showUserInfo() {
       display: flex;
       align-items: center;
       gap: 1rem;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.7);
       padding: 0.75rem 1rem;
-      border-radius: 6px;
-      border: 1px solid #333;
+      border-bottom-left-radius: 8px;
+      border-top-right-radius: 0;
+      border-top-left-radius: 0;
+      border-bottom-right-radius: 0;
+      border: 2px solid #4caf50;
+      border-top: none;
+      border-right: none;
+      backdrop-filter: blur(10px);
     }
     
     .user-name {
@@ -526,13 +532,13 @@ export function showUserInfo() {
   
   userBar.innerHTML = `
     <div class="user-info-container">
+      <button class="admin-button" id="admin-button">Admin</button>
       <div class="user-name-container" style="position: relative;">
         <span class="user-name" id="user-name">${user.username}</span>
         <div class="user-dropdown" id="user-dropdown">
           <div class="user-dropdown-item" id="logout-menu-item">Logout</div>
         </div>
       </div>
-      <button class="admin-button" id="admin-button">Admin</button>
     </div>
   `;
   

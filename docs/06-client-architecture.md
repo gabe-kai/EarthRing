@@ -1031,7 +1031,11 @@ class GraphicsAbstraction {
 
 1. **HUD (Heads-Up Display)**
    - Player info (level, currency) - Top-right "Logged In As" panel
-   - Minimap - Future
+   - Minimap (`client-web/src/ui/minimap.js`) - Bottom-left, shows player position and direction
+     - Two zoom levels: full ring view (all 12 stations) and local area (2km top-down view)
+     - Displays chunk platforms in local view with correct width and positioning
+     - Player facing arrow shows direction of movement
+     - Title shows station name (if on station) or "Ring" with current s-coordinate and floor
    - Notifications - Future
 
 2. **Debug Info Panel** (`client-web/src/ui/debug-info.js`):
@@ -1183,8 +1187,11 @@ class GraphicsAbstraction {
 2. **Panel System**:
    - **Top-right**: User info panel ("Logged In As [username]" with Player/Chunks/Logout buttons), Debug Info panel (below user info, starts minimized)
    - **Bottom**: Horizontal toolbar with tabs (Zones tab contains zone editor tools: zone type selection, drawing tools, settings)
+   - **Bottom-left**: Minimap (shows player position, direction, and nearby platforms)
+   - **Bottom-right**: Info box (displays selected item details, notifications)
+   - **Top-left**: Console (toggle with `` ` `` key, shows debug commands and output)
    - **Left-side**: Legacy zones toolbar (may be deprecated in favor of bottom toolbar)
-   - **Future panels**: Minimap, chat, notifications (to be positioned as needed)
+   - **Future panels**: Chat, notifications (to be positioned as needed)
    - Panels slide in/out based on screen width and user preferences
 
 3. **Viewport Management**:

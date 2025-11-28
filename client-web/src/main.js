@@ -4,6 +4,7 @@
  */
 
 import { showAuthUI, showUserInfo } from './auth/auth-ui.js';
+import { createConsole } from './ui/console.js';
 import { isAuthenticated } from './auth/auth-service.js';
 import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
@@ -19,7 +20,9 @@ import { ZoneManager } from './zones/zone-manager.js';
 import { ZoneEditor } from './zones/zone-editor.js';
 import { GridOverlay } from './rendering/grid-overlay.js';
 import { DebugInfoPanel } from './ui/debug-info.js';
+import { Minimap } from './ui/minimap.js';
 import { createZonesToolbar } from './ui/zones-toolbar.js';
+import { createInfoBox } from './ui/info-box.js';
 import { wsClient } from './network/websocket-client.js';
 import { createMeshAtEarthRingPosition } from './utils/rendering.js';
 import { positionToChunkIndex } from './utils/coordinates-new.js';
@@ -61,6 +64,9 @@ const debugPanel = new DebugInfoPanel(
   zoneManager
 );
 
+// Initialize minimap
+const minimap = new Minimap(cameraController, gameStateManager, sceneManager, chunkManager);
+
 // Global mouse position tracker for debug panel
 const globalMousePosition = { x: 0, y: 0 };
 document.addEventListener('mousemove', (event) => {
@@ -75,6 +81,7 @@ window.earthring = {
   cameraController,
   gameStateManager,
   chunkManager,
+  debugInfoPanel: debugPanel,
   zoneManager,
   zoneEditor,
   gridOverlay,
@@ -232,11 +239,17 @@ sceneManager.onRender((deltaTime) => {
   debugPanel.update();
 });
 
-// Initialize bottom toolbar
-createBottomToolbar();
+  // Initialize bottom toolbar
+  createBottomToolbar();
+
+  // Initialize console (hidden by default)
+  createConsole();
 
 // Start rendering loop
 sceneManager.start();
+
+// Create info box (permanent UI element)
+createInfoBox();
 
 // Authentication initialization
 if (isAuthenticated()) {
