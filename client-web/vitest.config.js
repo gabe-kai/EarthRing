@@ -9,6 +9,8 @@ export default defineConfig({
       ['**/ui/**/*.test.js', 'jsdom'],
       ['**/ui/**/*.spec.js', 'jsdom'],
     ],
+    // Setup file to handle unhandled errors from jsdom dependencies
+    setupFiles: ['./vitest.setup.js'],
   },
 });
 
