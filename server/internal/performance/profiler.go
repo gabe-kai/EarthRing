@@ -10,22 +10,22 @@ import (
 
 // Profiler tracks performance metrics for various operations
 type Profiler struct {
-	mu       sync.RWMutex
-	metrics  map[string]*Metric
-	enabled  bool
+	mu        sync.RWMutex
+	metrics   map[string]*Metric
+	enabled   bool
 	startTime time.Time
 }
 
 // Metric tracks statistics for a specific operation
 type Metric struct {
-	Name        string
-	Count       int64
-	TotalTime   time.Duration
-	MinTime     time.Duration
-	MaxTime     time.Duration
-	LastTime    time.Duration
-	LastCall    time.Time
-	mu          sync.Mutex
+	Name      string
+	Count     int64
+	TotalTime time.Duration
+	MinTime   time.Duration
+	MaxTime   time.Duration
+	LastTime  time.Duration
+	LastCall  time.Time
+	mu        sync.Mutex
 }
 
 // Operation represents a single timed operation
@@ -38,8 +38,8 @@ type Operation struct {
 // NewProfiler creates a new performance profiler
 func NewProfiler(enabled bool) *Profiler {
 	return &Profiler{
-		metrics:  make(map[string]*Metric),
-		enabled:  enabled,
+		metrics:   make(map[string]*Metric),
+		enabled:   enabled,
 		startTime: time.Now(),
 	}
 }
@@ -250,4 +250,3 @@ func (p *Profiler) IsEnabled() bool {
 	defer p.mu.RUnlock()
 	return p.enabled
 }
-

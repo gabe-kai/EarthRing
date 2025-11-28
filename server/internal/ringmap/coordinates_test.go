@@ -11,11 +11,11 @@ func TestRingPolarToER0(t *testing.T) {
 	// Test Kongo Hub: theta = 0, r = 0, z = 0
 	polar := RingPolar{Theta: 0, R: 0, Z: 0}
 	er0 := RingPolarToER0(polar)
-	
+
 	expectedX := RingOrbitalRadius
 	expectedY := 0.0
 	expectedZ := 0.0
-	
+
 	if math.Abs(er0.X-expectedX) > epsilon {
 		t.Errorf("RingPolarToER0: X = %f, expected %f", er0.X, expectedX)
 	}
@@ -31,11 +31,11 @@ func TestER0ToRingPolar(t *testing.T) {
 	// Test Kongo Hub: ER0 = (RingOrbitalRadius, 0, 0)
 	er0 := ER0Point{X: RingOrbitalRadius, Y: 0, Z: 0}
 	polar := ER0ToRingPolar(er0)
-	
+
 	expectedTheta := 0.0
 	expectedR := 0.0
 	expectedZ := 0.0
-	
+
 	if math.Abs(polar.Theta-expectedTheta) > epsilon {
 		t.Errorf("ER0ToRingPolar: Theta = %f, expected %f", polar.Theta, expectedTheta)
 	}
@@ -61,12 +61,12 @@ func TestRoundTripER0RingPolar(t *testing.T) {
 		{"With vertical offset", ER0Point{X: RingOrbitalRadius, Y: 0, Z: 500}},
 		{"Combined offsets", ER0Point{X: RingOrbitalRadius + 500, Y: 1000, Z: 200}},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			polar := ER0ToRingPolar(tc.er0)
 			er0Back := RingPolarToER0(polar)
-			
+
 			if math.Abs(er0Back.X-tc.er0.X) > epsilon {
 				t.Errorf("Round-trip X: %f → %f (diff: %f)", tc.er0.X, er0Back.X, math.Abs(er0Back.X-tc.er0.X))
 			}
@@ -84,16 +84,16 @@ func TestRingArcToRingPolar(t *testing.T) {
 	// Test Kongo Hub: s = 0
 	arc := RingArc{S: 0, R: 0, Z: 0}
 	polar := RingArcToRingPolar(arc)
-	
+
 	expectedTheta := 0.0
 	if math.Abs(polar.Theta-expectedTheta) > epsilon {
 		t.Errorf("RingArcToRingPolar: Theta = %f, expected %f", polar.Theta, expectedTheta)
 	}
-	
+
 	// Test halfway around ring: s = RingCircumference / 2
 	arc = RingArc{S: float64(RingCircumference) / 2, R: 0, Z: 0}
 	polar = RingArcToRingPolar(arc)
-	
+
 	expectedTheta = math.Pi
 	if math.Abs(math.Abs(polar.Theta)-expectedTheta) > epsilon {
 		t.Errorf("RingArcToRingPolar: Theta = %f, expected ±%f", polar.Theta, expectedTheta)
@@ -104,16 +104,16 @@ func TestRingPolarToRingArc(t *testing.T) {
 	// Test Kongo Hub: theta = 0
 	polar := RingPolar{Theta: 0, R: 0, Z: 0}
 	arc := RingPolarToRingArc(polar)
-	
+
 	expectedS := 0.0
 	if math.Abs(arc.S-expectedS) > epsilon {
 		t.Errorf("RingPolarToRingArc: S = %f, expected %f", arc.S, expectedS)
 	}
-	
+
 	// Test halfway around ring: theta = π
 	polar = RingPolar{Theta: math.Pi, R: 0, Z: 0}
 	arc = RingPolarToRingArc(polar)
-	
+
 	expectedS = float64(RingCircumference) / 2
 	if math.Abs(arc.S-expectedS) > epsilon {
 		t.Errorf("RingPolarToRingArc: S = %f, expected %f", arc.S, expectedS)
@@ -134,12 +134,12 @@ func TestRoundTripRingPolarRingArc(t *testing.T) {
 		{"With vertical offset", RingPolar{Theta: 0, R: 0, Z: 500}},
 		{"Combined offsets", RingPolar{Theta: math.Pi / 4, R: 500, Z: 200}},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			arc := RingPolarToRingArc(tc.polar)
 			polarBack := RingArcToRingPolar(arc)
-			
+
 			// Theta might differ by 2π, so normalize
 			thetaDiff := math.Abs(polarBack.Theta - tc.polar.Theta)
 			if thetaDiff > epsilon && math.Abs(thetaDiff-2*math.Pi) > epsilon {
@@ -170,7 +170,7 @@ func TestWrapTheta(t *testing.T) {
 		{math.Pi / 2, math.Pi / 2},
 		{-math.Pi / 2, -math.Pi / 2},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run("", func(t *testing.T) {
 			result := WrapTheta(tc.input)
@@ -198,7 +198,7 @@ func TestWrapArcLength(t *testing.T) {
 		{circ + 1000, 1000},
 		{-1000, circ - 1000},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run("", func(t *testing.T) {
 			result := WrapArcLength(tc.input)
@@ -213,16 +213,16 @@ func TestLegacyPositionToRingPolar(t *testing.T) {
 	// Test Kongo Hub: legacy X = 0
 	legacyX := 0.0
 	polar := LegacyPositionToRingPolar(legacyX, 0, 0)
-	
+
 	expectedTheta := 0.0
 	if math.Abs(polar.Theta-expectedTheta) > epsilon {
 		t.Errorf("LegacyPositionToRingPolar: Theta = %f, expected %f", polar.Theta, expectedTheta)
 	}
-	
+
 	// Test halfway around ring: legacy X = RingCircumference / 2
 	legacyX = float64(RingCircumference) / 2
 	polar = LegacyPositionToRingPolar(legacyX, 0, 0)
-	
+
 	expectedTheta = math.Pi
 	if math.Abs(math.Abs(polar.Theta)-expectedTheta) > epsilon {
 		t.Errorf("LegacyPositionToRingPolar: Theta = %f, expected ±%f", polar.Theta, expectedTheta)
@@ -233,16 +233,16 @@ func TestRingPolarToLegacyPosition(t *testing.T) {
 	// Test Kongo Hub: theta = 0
 	polar := RingPolar{Theta: 0, R: 0, Z: 0}
 	x, _, _ := RingPolarToLegacyPosition(polar)
-	
+
 	expectedX := 0.0
 	if math.Abs(x-expectedX) > epsilon {
 		t.Errorf("RingPolarToLegacyPosition: X = %f, expected %f", x, expectedX)
 	}
-	
+
 	// Test halfway around ring: theta = π
 	polar = RingPolar{Theta: math.Pi, R: 0, Z: 0}
 	x, _, _ = RingPolarToLegacyPosition(polar)
-	
+
 	expectedX = float64(RingCircumference) / 2
 	if math.Abs(x-expectedX) > epsilon {
 		t.Errorf("RingPolarToLegacyPosition: X = %f, expected %f", x, expectedX)
@@ -252,10 +252,10 @@ func TestRingPolarToLegacyPosition(t *testing.T) {
 func TestRoundTripLegacyRingPolar(t *testing.T) {
 	// Test round-trip conversion: Legacy → RingPolar → Legacy
 	testCases := []struct {
-		name     string
-		legacyX  float64
-		legacyY  float64
-		legacyZ  float64
+		name    string
+		legacyX float64
+		legacyY float64
+		legacyZ float64
 	}{
 		{"Kongo Hub", 0, 0, 0},
 		{"Quarter way", float64(RingCircumference) / 4, 0, 0},
@@ -265,12 +265,12 @@ func TestRoundTripLegacyRingPolar(t *testing.T) {
 		{"With Z offset", 0, 0, 5},
 		{"Combined", 1000000, 500, 2},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			polar := LegacyPositionToRingPolar(tc.legacyX, tc.legacyY, tc.legacyZ)
 			x, y, z := RingPolarToLegacyPosition(polar)
-			
+
 			// X might wrap, so check wrapped difference
 			xDiff := math.Abs(x - tc.legacyX)
 			if xDiff > epsilon && math.Abs(xDiff-float64(RingCircumference)) > epsilon {
@@ -285,4 +285,3 @@ func TestRoundTripLegacyRingPolar(t *testing.T) {
 		})
 	}
 }
-

@@ -98,4 +98,3 @@ func TestProfilerJSONReport(t *testing.T) {
 		t.Error("Expected non-empty JSON report")
 	}
 }
-
