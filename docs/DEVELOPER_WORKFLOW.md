@@ -616,13 +616,37 @@ Brief description of changes
 - Explain the "why", not just the "what"
 - Keep it up to date
 
+## Documentation Organization
+
+### Design Documents (`docs/`)
+- **Main design docs** (`01-architecture-overview.md` through `13-transportation-generation.md`): System architecture, APIs, game mechanics
+- **Workflow docs**: `DEVELOPER_WORKFLOW.md`, `DEPLOYMENT_CHECKLIST.md`, `PERFORMANCE_PROFILING.md`
+- **Feature docs**: Component-specific documentation (e.g., `minimap-system.md`)
+
+### Test Documentation (`docs/tests/`)
+All test-related documentation is organized in the `docs/tests/` subfolder:
+- **Test coverage analysis**: Component-specific test coverage (e.g., `minimap-test-coverage.md`, `zone-system-test-coverage.md`)
+- **Testing strategies**: Integration testing plans, testing gap analysis
+- **Test organization**: See `docs/tests/README.md` for details
+
+**Why separate?**
+- Design docs focus on **what** and **why** (architecture, APIs, mechanics)
+- Test docs focus on **how** (test strategies, coverage, test organization)
+- Keeps design docs focused and test docs discoverable in one place
+
+### Other Documentation Subfolders
+- `docs/bug_fixes/`: Bug fix summaries and analysis
+- `docs/performance/`: Performance analysis and optimization notes
+- `docs/refactor/`: Refactoring plans and status
+
 ## Resources
 
-- [Project README](README.md)
-- [Database Migrations](database/migrations/README.md)
+- [Project README](../README.md)
+- [Database Migrations](../database/migrations/README.md)
 - [Deployment Checklist](DEPLOYMENT_CHECKLIST.md)
-- [Testing Gap Analysis](TESTING_GAP_ANALYSIS.md)
-- [Wrap-Point Fix Summary](WRAP_POINT_FIX_SUMMARY.md)
+- [Test Documentation](tests/README.md)
+- [Testing Gap Analysis](tests/testing-gap-analysis.md)
+- [Wrap-Point Fix Summary](bug_fixes/WRAP_POINT_FIX_SUMMARY.md)
 
 ---
 

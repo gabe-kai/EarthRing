@@ -1,5 +1,14 @@
 # Procedural Generation System
 
+**Status**: ✅ **IMPLEMENTED** - Procedural generation system is implemented with seed-based deterministic generation, building generation, and integration with player actions.
+
+**Related Documentation**:
+- [Map System](02-map-system.md) - Ring geometry and coordinate system
+- [Zone System](09-zone-system.md) - Zones that guide procedural generation
+- [Streaming System](07-streaming-system.md) - Chunk streaming for generated content
+- [Database Schema](03-database-schema.md) - Chunk data storage
+- Server Implementation: `server/internal/procedural/`
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -60,6 +69,8 @@ The procedural generation system creates the cityscape, buildings, parks, and de
 
 ## Seed-Based Deterministic Generation
 
+**Status**: ✅ **IMPLEMENTED** (Phase 1)
+
 ### Seed Hierarchy
 
 Seeds are derived hierarchically to ensure consistency:
@@ -111,6 +122,8 @@ def seeded_random(seed: int):
 **Critical Rule**: Never use true randomness (`random.random()` without seed). Always use seeded RNGs.
 
 ## City Grid Generation
+
+**Status**: 📋 **PLANNED** (Phase 2)
 
 ### Grid-Based Layout
 
@@ -193,6 +206,8 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 ```
 
 ## Building Generation
+
+**Status**: 📋 **PLANNED** (Phase 2)
 
 ### Building Complexity Levels
 
@@ -550,6 +565,8 @@ def generate_building_details(building, building_seed, complexity_level):
 
 ## Window Lighting System
 
+**Status**: 📋 **PLANNED** (Phase 2)
+
 ### Lighting Algorithm
 
 **Decision**: Windows light and dim at appropriate times. Fake lighting acceptable (no dynamic shadows).
@@ -649,6 +666,8 @@ def determine_window_occupancy(window, window_seed, time_of_day):
 
 ## Window Silhouettes
 
+**Status**: 📋 **PLANNED** (Phase 2)
+
 **Decision**: Very simple silhouettes, sprites better than 3D models.
 
 **Silhouette Types:**
@@ -713,6 +732,8 @@ def generate_window_silhouette(window, window_seed, light_state):
 - Size: 64×64 or 128×128 pixels
 
 ## Park and Agricultural Areas
+
+**Status**: 📋 **PLANNED** (Phase 2)
 
 ### Parks
 
@@ -813,6 +834,8 @@ def generate_agricultural_segment(cell, cell_seed, segment_type):
 
 ## Decorative Elements
 
+**Status**: 📋 **PLANNED** (Phase 2)
+
 **Types:**
 
 1. **Street Furniture**
@@ -868,6 +891,8 @@ def place_decorative_elements(cells, chunk_seed):
 ```
 
 ## Performance Optimization
+
+**Status**: 📋 **PLANNED** (Phase 2)
 
 ### LOD (Level of Detail) System
 
@@ -999,6 +1024,8 @@ def generate_chunks_parallel(chunk_ids, chunk_seeds):
 
 ## Integration with Player Actions
 
+**Status**: 📋 **PLANNED** (Phase 2)
+
 ### Player Structure Override
 
 **Rule**: Player-placed structures override procedural generation.
@@ -1051,6 +1078,8 @@ def generate_for_zone(zone, chunk_seed):
 4. Regenerate surrounding areas for continuity
 
 ## Regeneration Strategy
+
+**Status**: 📋 **PLANNED** (Phase 2)
 
 **Decision**: Follow recommendations - regenerate on demand, cache results, only regenerate when necessary.
 

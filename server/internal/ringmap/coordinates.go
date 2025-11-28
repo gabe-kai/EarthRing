@@ -71,16 +71,16 @@ func RingPolarToER0(polar RingPolar) ER0Point {
 func ER0ToRingPolar(er0 ER0Point) RingPolar {
 	// Calculate theta from X and Y
 	theta := math.Atan2(er0.Y, er0.X)
-	
+
 	// Calculate radial distance from Earth's center in the equatorial plane
 	R := math.Sqrt(er0.X*er0.X + er0.Y*er0.Y)
-	
+
 	// Calculate radial offset from ring centerline
 	r := R - RingOrbitalRadius
-	
+
 	// Z is the vertical offset from equatorial plane
 	z := er0.Z
-	
+
 	return RingPolar{
 		Theta: theta,
 		R:     r,
@@ -143,7 +143,7 @@ func LegacyPositionToRingPolar(legacyX float64, legacyY float64, legacyZ float64
 	// This handles negative positions correctly (e.g., -1000 maps to negative theta)
 	theta := (legacyX / float64(RingCircumference)) * 2 * math.Pi
 	theta = WrapTheta(theta)
-	
+
 	return RingPolar{
 		Theta: theta,
 		R:     legacyY, // Legacy Y (width position) maps to R (radial offset)
@@ -161,17 +161,17 @@ func RingPolarToLegacyPosition(polar RingPolar) (x float64, y float64, z float64
 	if theta < 0 {
 		theta += 2 * math.Pi
 	}
-	
+
 	// Convert to legacy X
 	x = (theta / (2 * math.Pi)) * float64(RingCircumference)
 	x = math.Mod(x+float64(RingCircumference), float64(RingCircumference))
-	
+
 	// Legacy Y is the radial offset (R)
 	y = polar.R
-	
+
 	// Legacy Z is the vertical offset (Z)
 	z = polar.Z
-	
+
 	return x, y, z
 }
 
@@ -257,4 +257,3 @@ func ChunkIndexToRingPolar(chunkIndex int) RingPolar {
 	arc := ChunkIndexToRingArc(chunkIndex)
 	return RingArcToRingPolar(arc)
 }
-

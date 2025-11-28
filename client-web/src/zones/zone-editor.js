@@ -58,6 +58,7 @@ export class ZoneEditor {
     this.onToolChangeCallbacks = [];
     this.onZoneCreatedCallbacks = [];
     this.onZoneSelectedCallbacks = [];
+    this.onZoneDeselectedCallbacks = [];
     
     // Create invisible plane for raycasting (at floor level)
     this.createRaycastPlane();
@@ -777,6 +778,15 @@ export class ZoneEditor {
     }
     this.selectedZone = null;
     this.selectedZoneMesh = null;
+    
+    // Trigger deselection callbacks
+    this.onZoneDeselectedCallbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('Error in zone deselection callback:', error);
+      }
+    });
   }
   
   /**

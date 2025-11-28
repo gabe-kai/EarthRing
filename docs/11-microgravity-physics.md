@@ -1,5 +1,13 @@
 # Microgravity Physics Implementation Specification
 
+**Status**: 📋 **DESIGN SPECIFICATION** - This document specifies the planned microgravity physics system implementation.
+
+**Related Documentation**:
+- [Game Mechanics](10-game-mechanics.md) - Racing mechanics that use microgravity physics
+- [Map System](02-map-system.md) - Coordinate system used for physics calculations
+- [Client Architecture](06-client-architecture.md) - Client-side physics implementation
+- [Implementation Phases](../implementation-phases.md) - Feature implementation roadmap
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -79,7 +87,7 @@ This document specifies the implementation details for microgravity physics in E
 
 ### Coordinate System
 
-**EarthRing Coordinate System** (as defined in `02-map-system.md`):
+**EarthRing Coordinate System**: See [Map System Documentation](02-map-system.md#coordinate-system) for complete coordinate system details:
 - **X-axis**: Ring position (0 to 264,000 km, wraps)
 - **Y-axis**: Width position (-200m to +200m base, variable at stations)
 - **Z-axis**: Floor/height (0 = main floor, positive = up)

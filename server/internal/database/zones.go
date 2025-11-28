@@ -1763,12 +1763,12 @@ func (s *ZoneStorage) ListZonesByRingArc(floor int, minS, minR, minZ, maxS, maxR
 	// For now, we convert to legacy coordinates since geometry_polar may not be populated yet
 	// minS/maxS -> minX/maxX, minR/maxR -> minY/maxY
 	// Note: This is a temporary solution during the transition period
-	
+
 	// Convert arc length to legacy X position using ringmap functions
 	// Legacy X = s (arc length), wrapped to [0, RingCircumference)
 	minX := ringmap.WrapArcLength(minS)
 	maxX := ringmap.WrapArcLength(maxS)
-	
+
 	// Handle wrapping: if minS > maxS (after wrapping), the bounding box wraps around
 	// Check if the bounding box crosses the ring boundary
 	if minS < 0 && maxS > 0 {
@@ -1785,11 +1785,11 @@ func (s *ZoneStorage) ListZonesByRingArc(floor int, minS, minR, minZ, maxS, maxR
 			}
 		}
 	}
-	
+
 	// R maps to Y (width position)
 	minY := minR
 	maxY := maxR
-	
+
 	// Z is not used in 2D geometry queries (it's the vertical offset, handled by floor)
 
 	// Validate converted bounding box. If it's degenerate or inverted, log and return no zones

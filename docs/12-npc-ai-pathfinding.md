@@ -1,5 +1,14 @@
 # NPC AI and Pathfinding Specification
 
+**Status**: 📋 **DESIGN SPECIFICATION** - This document specifies the planned NPC AI and pathfinding system implementation.
+
+**Related Documentation**:
+- [Game Mechanics](10-game-mechanics.md) - NPC system overview and game mechanics
+- [Zone System](09-zone-system.md) - Zone-based pathfinding and NPC behavior
+- [Transportation Generation](13-transportation-generation.md) - Transportation network used for pathfinding
+- [Database Schema](03-database-schema.md) - NPC data storage
+- [Implementation Phases](../implementation-phases.md) - Feature implementation roadmap
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -269,7 +278,7 @@ class NPCComplexityManager {
 
 ### Zone-Level Pathfinding
 
-**Purpose**: Find path through zone network for abstract NPCs.
+**Purpose**: Find path through zone network for abstract NPCs. See [Zone System Documentation](09-zone-system.md#zone-to-zone-connectivity) for zone connectivity details.
 
 **Implementation**:
 ```javascript
@@ -314,7 +323,7 @@ class ZonePathfinder {
 
 ### Transportation Network Pathfinding
 
-**Purpose**: Find route through transportation infrastructure (foot, conveyor, tram, maglev).
+**Purpose**: Find route through transportation infrastructure (foot, conveyor, tram, maglev). See [Transportation Generation Documentation](13-transportation-generation.md) for transportation network details.
 
 **Transportation Types**:
 1. **Foot Traffic**: Default, slowest, always available

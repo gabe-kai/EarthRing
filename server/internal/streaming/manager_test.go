@@ -143,9 +143,9 @@ func TestComputeZoneDelta(t *testing.T) {
 			RingPosition: 0,
 			ActiveFloor:  0,
 		},
-		RadiusMeters:  5000,
-		WidthMeters:   5000,
-		IncludeZones:  true,
+		RadiusMeters: 5000,
+		WidthMeters:  5000,
+		IncludeZones: true,
 	}
 
 	plan, err := manager.PlanSubscription(50, req)
@@ -189,8 +189,8 @@ func TestComputeZoneDelta(t *testing.T) {
 func TestComputeZoneBoundingBox(t *testing.T) {
 	pose := CameraPose{
 		RingPosition: 10000,
-		WidthOffset:   500,
-		ActiveFloor:   0,
+		WidthOffset:  500,
+		ActiveFloor:  0,
 	}
 	bbox := ComputeZoneBoundingBox(pose, 5000, 3000)
 	if bbox.Floor != 0 {

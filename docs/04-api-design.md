@@ -1,5 +1,12 @@
 # API Design
 
+**Status**: ✅ **IMPLEMENTED** - REST API and WebSocket protocol are fully implemented.
+
+**Related Documentation**:
+- [Authentication & Security](05-authentication-security.md) - Authentication implementation
+- [Streaming System](07-streaming-system.md) - Server-driven streaming details
+- [Client Architecture](06-client-architecture.md) - Client-side API usage
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -916,12 +923,67 @@ All WebSocket messages use JSON:
 2. **chunk_request** ❌ **REMOVED** (Replaced by server-driven streaming)
    - Legacy message type removed
    - Use `stream_subscribe` and `stream_update_pose` instead
-   - See Streaming System documentation for current implementation
-   - Returns `chunk_data` response with requested chunks
-   - Generates chunks via procedural service if they don't exist in database
-   - Server responds with `chunk_data` message
+   - See [Streaming System documentation](docs/07-streaming-system.md) for current implementation
 
-2. **player_move** ✅ **IMPLEMENTED**
+3. **stream_subscribe** ✅ **IMPLEMENTED** (Server-Driven Streaming)
+   ```json
+   {
+     "type": "stream_subscribe",
+     "id": "req-42",
+     "data": {
+       "pose": {
+         "ring_position": 131981833,
+         "width_offset": 12.5,
+         "elevation": 150.0,
+         "active_floor": 0,
+         "arc_length": 131981833.0,
+         "theta": 0.314159,
+         "r": 12.5,
+         "z": 0.0
+       },
+       "radius_meters": 5000,
+       "width_meters": 3000,
+       "include_chunks": true,
+       "include_zones": true
+     }
+   }
+   ```
+   - **Purpose**: Subscribe to server-driven chunk and zone streaming
+   - **Pose**: Camera/active floor snapshot (supports both legacy `ring_position`/`width_offset` and new `arc_length`/`theta`/`r`/`z` coordinates)
+   - **radius_meters**: Longitudinal range server should cover (converted to chunk IDs server-side)
+   - **width_meters**: Width slice to include zones/procedural objects (future use)
+   - **include_chunks** / **include_zones**: Opt into whichever streams the client supports
+   - **Server Response**: `stream_ack` with `subscription_id` and initial `chunk_ids`
+   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#server-driven-streaming-contracts) for complete details
+
+4. **stream_update_pose** ✅ **IMPLEMENTED** (Server-Driven Streaming)
+   ```json
+   {
+     "type": "stream_update_pose",
+     "id": "req-43",
+     "data": {
+       "subscription_id": "sub_0_1711138123456",
+       "pose": {
+         "ring_position": 131982500,
+         "width_offset": 12.5,
+         "elevation": 150.0,
+         "active_floor": 0,
+         "arc_length": 131982500.0,
+         "theta": 0.314159,
+         "r": 12.5,
+         "z": 0.0
+       }
+     }
+   }
+   ```
+   - **Purpose**: Update camera pose for existing streaming subscription
+   - **subscription_id**: Server-assigned handle from `stream_subscribe` response
+   - **pose**: Updated camera/active floor snapshot
+   - **Server Response**: `stream_pose_ack` with chunk deltas (`AddedChunks`, `RemovedChunks`)
+   - **Delta Delivery**: Added chunks/zones sent asynchronously via `stream_delta` messages
+   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#pose-updates) for complete details
+
+5. **player_move** ✅ **IMPLEMENTED**
    ```json
    {
      "type": "player_move",
@@ -940,7 +1002,7 @@ All WebSocket messages use JSON:
    - Server responds with `player_move_ack` message
    - Position is persisted to database
 
-3. **zone_create**
+6. **zone_create**
    ```json
    {
      "type": "zone_create",
@@ -953,7 +1015,7 @@ All WebSocket messages use JSON:
    }
    ```
 
-4. **structure_place**
+7. **structure_place**
    ```json
    {
      "type": "structure_place",
@@ -966,7 +1028,7 @@ All WebSocket messages use JSON:
    }
    ```
 
-5. **racing_start**
+8. **racing_start**
    ```json
    {
      "type": "racing_start",
@@ -981,7 +1043,7 @@ All WebSocket messages use JSON:
    }
    ```
 
-6. **racing_update**
+9. **racing_update**
    ```json
    {
      "type": "racing_update",
@@ -1019,11 +1081,97 @@ All WebSocket messages use JSON:
    - Sent when an error occurs processing a message
    - Common error codes: `InvalidMessageFormat`, `UnknownMessageType`, `NotImplemented`, `Unauthorized`
 
-3. **chunk_data** ✅ **IMPLEMENTED**
+3. **stream_ack** ✅ **IMPLEMENTED** (Server-Driven Streaming)
+   ```json
+   {
+     "type": "stream_ack",
+     "id": "req-42",
+     "data": {
+       "subscription_id": "sub_0_1711138123456",
+       "chunk_ids": ["0_131981", "0_131982", "0_131983"],
+       "message": "Streaming subscription registered. Chunk/zone deltas will be delivered in upcoming revisions."
+     }
+   }
+   ```
+   - **Purpose**: Acknowledgment response to `stream_subscribe`
+   - **subscription_id**: Server-assigned handle used for future `stream_update_pose` messages
+   - **chunk_ids**: Current chunk window (derived using shared coordinate helpers)
+   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#acknowledgement) for complete details
+
+4. **stream_pose_ack** ✅ **IMPLEMENTED** (Server-Driven Streaming)
+   ```json
+   {
+     "type": "stream_pose_ack",
+     "id": "req-43",
+     "data": {
+       "subscription_id": "sub_0_1711138123456",
+       "message": "Pose updated. Chunk/zone deltas sent.",
+       "chunk_delta": {
+         "AddedChunks": ["0_131985", "0_131986"],
+         "RemovedChunks": ["0_131978", "0_131979"]
+       }
+     }
+   }
+   ```
+   - **Purpose**: Acknowledgment response to `stream_update_pose` with chunk deltas
+   - **subscription_id**: Subscription ID from the pose update request
+   - **chunk_delta**: Chunk IDs added and removed based on pose change
+   - **Delta Delivery**: Added chunks/zones sent asynchronously via `stream_delta` messages
+   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#pose-updates) for complete details
+
+5. **stream_delta** ✅ **IMPLEMENTED** (Server-Driven Streaming)
+   ```json
+   {
+     "type": "stream_delta",
+     "data": {
+       "subscription_id": "sub_0_1711138123456",
+       "chunks": [
+         {
+           "id": "0_131985",
+           "geometry": {
+             "type": "ring_floor",
+             "vertices": [[x1, y1, z1], [x2, y2, z2], ...],
+             "faces": [[v1, v2, v3], ...],
+             "normals": [[nx1, ny1, nz1], ...],
+             "width": 400.0,
+             "length": 1000.0
+           },
+           "metadata": {
+             "id": "0_131985",
+             "floor": 0,
+             "chunk_index": 131985,
+             "version": 2
+           }
+         }
+       ],
+       "zones": [
+         {
+           "id": 123,
+           "name": "Residential Zone",
+           "zone_type": "residential",
+           "geometry": {
+             "type": "Polygon",
+             "coordinates": [[[x1, y1], [x2, y2], ...]]
+           },
+           "floor": 0
+         }
+       ]
+     }
+   }
+   ```
+   - **Purpose**: Deliver chunk and zone deltas asynchronously after pose updates
+   - **subscription_id**: Subscription ID this delta belongs to
+   - **chunks**: Array of new chunks to add (geometry may be compressed)
+   - **zones**: Array of new zones to add (GeoJSON format)
+   - **Delivery**: Sent asynchronously after `stream_pose_ack` when chunks/zones are ready
+   - **Client Handling**: Client processes deltas automatically, adding new chunks/zones and removing old ones
+   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#delta-messages) for complete details
+
+6. **chunk_data** ✅ **IMPLEMENTED** (Legacy - Still supported for compatibility)
    ```json
    {
      "type": "chunk_data",
-     "id": "req_123", // Matches request ID
+     "id": "req_123", // Matches request ID (if from legacy chunk_request)
      "data": {
        "chunks": [
          {
@@ -1051,12 +1199,13 @@ All WebSocket messages use JSON:
      }
    }
    ```
-   - Response to `chunk_request` messages
+   - **Status**: Legacy message type (still supported for compatibility)
+   - **Note**: New clients should use `stream_subscribe` and `stream_delta` instead
    - Returns chunks with basic ring floor geometry for Phase 1
    - Ring floor geometry is visible in client (gray rectangular planes)
    - Structures and zones will be populated in Phase 2
 
-2. **chunk_updated**
+7. **chunk_updated**
    ```json
    {
      "type": "chunk_updated",

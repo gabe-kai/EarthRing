@@ -1,5 +1,14 @@
 # Architecture Overview
 
+**Status**: ✅ **IMPLEMENTED** - This document describes the current system architecture as implemented.
+
+**Related Documentation**:
+- [Map System](02-map-system.md) - Ring geometry and coordinate systems
+- [Database Schema](03-database-schema.md) - Data persistence layer
+- [API Design](04-api-design.md) - Communication protocols
+- [Client Architecture](06-client-architecture.md) - Client implementation details
+- [Streaming System](07-streaming-system.md) - Chunk streaming architecture
+
 ## Table of Contents
 
 - [Overview](#overview)

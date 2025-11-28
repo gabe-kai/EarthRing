@@ -98,7 +98,14 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 
 ### Coordinate System
 
-**Status**: ✅ **MIGRATION COMPLETE** - The coordinate system has been migrated from legacy X/Y/Z to ER0/EarthRing coordinates. Legacy coordinate support is maintained for backward compatibility. See [Coordinate System Migration](../refactor/coordinate-system-migration.md) for details.
+**Status**: ✅ **MIGRATION COMPLETE** - The coordinate system has been migrated from legacy X/Y/Z to ER0/EarthRing coordinates. Legacy coordinate support is maintained for backward compatibility. 
+
+**Related Documentation**:
+- [Coordinate System Migration](../refactor/coordinate-system-migration.md) - Migration process details
+- [Coordinate System Status](../refactor/coordinate-system-status.md) - Current implementation status
+- [Database Coordinate Migration](../refactor/database-coordinate-migration.md) - Database migration details
+- Server Implementation: `server/internal/ringmap/coordinates.go`
+- Client Implementation: `client-web/src/utils/coordinates-new.js`
 
 #### New Coordinate Systems
 
@@ -1236,6 +1243,138 @@ This ensures players have similar visual experience regardless of client type, w
 - May add gameplay mechanics in the future (reduced visibility, special events)
 - Could add dynamic eclipse events (moon shadows, etc.)
 
+## Minimap System ✅ **IMPLEMENTED**
+
+### Overview
+
+The minimap provides a 2D top-down navigation view of the player's position and surrounding environment. It displays platform chunks, player facing direction, grid reference, and supports two zoom levels for different navigation needs.
+
+**Status**: ✅ **IMPLEMENTED** - Full minimap system with grid movement, platform rendering, and player-facing arrow. See `docs/minimap-system.md` for complete technical documentation.
+
+### Zoom Levels
+
+#### Full Ring View
+- **View**: Entire planetary ring (264,000 km circumference)
+- **Display**: Circular view with ring outline
+- **Features**:
+  - 12 pillar stations at 30-degree intervals (22,000 km spacing)
+  - Player position as dot on ring
+  - Station markers with names
+  - Station proximity detection (5km threshold)
+- **No platforms shown** (too small at this scale)
+
+#### Local View
+- **View**: 2km radius around player (top-down 2D map)
+- **Display**: Top-down 2D map with grid and platforms
+- **Features**:
+  - **Moving grid** (500m spacing) that moves with player position
+  - **Platform chunks** rendered as polygons (from mesh geometry) or rectangles (fallback)
+  - **Player-facing arrow** (green triangle) showing camera direction
+  - **North indicator** (text and arrow) always at top
+  - **Drawing order**: Grid → Platforms → Arrow/North (arrow and north always on top)
+- **Scale**: `scale = min(canvasWidth, canvasHeight) / 2000` (pixels per meter)
+- **Update frequency**: 200ms (5 FPS) for performance
+
+### Coordinate System Conversions
+
+The minimap performs multiple coordinate system conversions:
+
+```
+Three.js World Space → RingArc Coordinates → Local Coordinates → Screen Coordinates
+```
+
+**Key Conversions**:
+1. **Player Position**: Camera target → EarthRing legacy → RingPolar → RingArc
+2. **Chunk Position**: Chunk index → RingArc (with actual radial position from geometry)
+3. **Local Coordinates**: Relative to player (arc difference, radial difference)
+4. **Screen Coordinates**: Local coordinates × scale + center offset
+
+**Coordinate System Mapping**:
+- **Three.js**: X=east, Y=vertical, Z=radial (north/south)
+- **Minimap Screen**: X=right (east), Y=down (south), Center=player position
+- **Mapping**: Three.js X → Screen X, Three.js Z → Screen Y (no negation)
+
+### Platform Rendering
+
+**Mesh Projection** (preferred):
+- Samples ~40 vertices from Three.js mesh geometry
+- Transforms vertices to world space using `mesh.matrixWorld`
+- Converts to RingArc coordinates using `threeJSToRingArc()`
+- Sorts points by angle around center (prevents moire patterns)
+- Draws filled polygon with `evenodd` fill rule
+
+**Rectangle Fallback**:
+- Used when mesh geometry unavailable
+- Calculates platform bounds from chunk metadata or geometry vertices
+- Draws rectangle with correct width and position
+
+**Key Features**:
+- **Radial Position Calculation**: Extracts actual chunk radial position (`r`) from geometry vertices or mesh, since `chunkIndexToRingArc()` always returns `r=0`
+- **Ring Wrapping**: Handles chunk positions across ring boundaries correctly
+- **Distance Filtering**: Only renders chunks within `viewRadius + CHUNK_LENGTH`
+- **Active Floor Filtering**: Only shows platforms for the active floor
+
+### Grid System
+
+**Grid Configuration**:
+- **Spacing**: 500 meters between grid lines
+- **View Size**: 2km radius (2000 meters)
+- **Movement**: Grid moves with player position using modulo offset
+
+**Grid Offset Calculation**:
+```javascript
+offsetS = ((arc.s % gridSpacing) + gridSpacing) % gridSpacing;  // East/west
+offsetR = ((arc.r % gridSpacing) + gridSpacing) % gridSpacing;  // North/south
+```
+
+This ensures grid lines maintain correct relative positions as the player moves.
+
+### Player-Facing Arrow
+
+**Calculation**:
+1. Get camera forward direction in world space
+2. Project onto XZ plane (ignore vertical/Y component)
+3. Map Three.js XZ → Screen XY
+4. Draw triangle arrow pointing in facing direction
+
+**Arrow Properties**:
+- **Length**: 12 pixels
+- **Width**: 8 pixels
+- **Color**: Green (#00ff00)
+- **Position**: Always at center (player position)
+
+### North Indicator
+
+- **Text**: "N" at top center
+- **Arrow**: Small arrow pointing up
+- **Color**: Green (#4caf50)
+- **Position**: Always at top, above all other elements
+
+### Performance Optimizations
+
+- **Update Frequency**: 200ms intervals (5 FPS) - minimap doesn't need 60 FPS
+- **Vertex Sampling**: Samples ~40 vertices from mesh (not all vertices)
+- **Distance Filtering**: Only processes chunks within view radius
+- **Canvas Clipping**: Automatic clipping of off-screen drawing
+- **Chunk Caching**: Uses cached chunk data from GameStateManager
+
+### Implementation Details
+
+**File**: `client-web/src/ui/minimap.js`
+
+**Dependencies**:
+- `cameraController`: Player position and camera state
+- `gameStateManager`: Chunk data and active floor
+- `sceneManager`: Three.js camera for direction calculation
+- `chunkManager`: Three.js mesh geometry for platform rendering
+
+**Key Functions**:
+- `drawFullRingView()`: Renders full ring with stations
+- `drawLocalView()`: Renders local 2km view with grid, platforms, arrow
+- `update()`: Main update loop (called every 200ms)
+
+**See**: `docs/minimap-system.md` for complete technical documentation including coordinate conversions, rendering algorithms, and troubleshooting.
+
 ## Open Questions
 
 1. Should we add dynamic eclipse events (moon shadows, etc.) in addition to the continuous Earth shadow?
@@ -1249,4 +1388,5 @@ This ensures players have similar visual experience regardless of client type, w
 - Earth observation features (players can observe Earth's surface)
 - Support for ring expansion (adding new sections)
 - Dynamic interior map generation for procedural structures
+- Minimap enhancements: waypoints, labels, intermediate zoom levels
 

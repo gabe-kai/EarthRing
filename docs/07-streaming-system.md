@@ -1,5 +1,12 @@
 # Streaming System Design
 
+**Status**: ✅ **IMPLEMENTED** - Server-driven streaming system is fully implemented with compression and delta delivery.
+
+**Related Documentation**:
+- [API Design](04-api-design.md) - Streaming WebSocket messages
+- [Client Architecture](06-client-architecture.md) - Client-side streaming implementation
+- [Map System](02-map-system.md) - Chunk system details
+
 ## Table of Contents
 
 - [Overview](#overview)

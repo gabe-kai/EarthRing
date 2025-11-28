@@ -12,6 +12,7 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/performance"
 	"github.com/earthring/server/internal/streaming"
 	"github.com/earthring/server/internal/testutil"
 	"github.com/gorilla/websocket"
@@ -52,7 +53,8 @@ func NewIntegrationTestFramework(t *testing.T) *IntegrationTestFramework {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	// Override CheckOrigin to allow test server origins
 	handlers.upgrader.CheckOrigin = func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -162,7 +164,7 @@ func (f *IntegrationTestFramework) SendMessage(conn *websocket.Conn, msgType str
 
 // ReadMessage reads a WebSocket message with timeout
 func (f *IntegrationTestFramework) ReadMessage(conn *websocket.Conn, timeout time.Duration) (*WebSocketMessage, error) {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	_ = conn.SetReadDeadline(time.Now().Add(timeout)) //nolint:errcheck // Test cleanup - deadline errors are non-critical //nolint:errcheck // Test cleanup - deadline errors are non-critical
 
 	_, messageBytes, err := conn.ReadMessage()
 	if err != nil {
@@ -262,7 +264,7 @@ func (f *IntegrationTestFramework) SubscribeToStreaming(conn *websocket.Conn, po
 // UpdatePose sends a stream_update_pose message and waits for ack
 func (f *IntegrationTestFramework) UpdatePose(conn *websocket.Conn, subscriptionID string, pose streaming.CameraPose) (*streaming.ChunkDelta, error) {
 	req := struct {
-		SubscriptionID string              `json:"subscription_id"`
+		SubscriptionID string               `json:"subscription_id"`
 		Pose           streaming.CameraPose `json:"pose"`
 	}{
 		SubscriptionID: subscriptionID,
@@ -411,7 +413,7 @@ func TestIntegration_StreamingSubscription(t *testing.T) {
 
 	// Connect WebSocket
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Subscribe to streaming
 	pose := streaming.CameraPose{
@@ -439,7 +441,7 @@ func TestIntegration_PoseUpdate(t *testing.T) {
 	defer framework.Close()
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Initial subscription
 	initialPose := streaming.CameraPose{
@@ -494,7 +496,7 @@ func TestIntegration_ZoneStreaming(t *testing.T) {
 	t.Logf("Created test zone: %d", zoneID)
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Subscribe with zones enabled
 	pose := streaming.CameraPose{
@@ -513,7 +515,7 @@ func TestIntegration_ZoneStreaming(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Try to read a stream_delta message (may or may not arrive depending on async timing)
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second)) //nolint:errcheck // Test cleanup - deadline errors are non-critical
 	msg, err := framework.ReadMessage(conn, 1*time.Second)
 	if err == nil && msg.Type == "stream_delta" {
 		t.Logf("Received stream_delta message: %s", string(msg.Data))
@@ -530,7 +532,7 @@ func TestIntegration_RingWrapping(t *testing.T) {
 	defer framework.Close()
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Test position near ring boundary (just before wrap point)
 	// RingCircumference = 264,000,000m, so test near 263,999,000m
@@ -600,7 +602,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	defer framework.Close()
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	tests := []struct {
 		name        string
@@ -617,7 +619,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 					"ring_position": 10000,
 					"active_floor":  0,
 				},
-				"radius_meters": 0, // Invalid: must be positive
+				"radius_meters":  0, // Invalid: must be positive
 				"include_chunks": true,
 			},
 			expectError: true,
@@ -677,12 +679,12 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 					Message string `json:"message"`
 					Code    string `json:"code"`
 				}
-				
+
 				// Error messages are stored in Data field as raw JSON bytes
 				if len(msg.Data) == 0 {
 					t.Fatalf("Error message Data field is empty")
 				}
-				
+
 				if err := json.Unmarshal(msg.Data, &errorData); err != nil {
 					t.Fatalf("Failed to unmarshal error: %v (data length: %d, data: %s)", err, len(msg.Data), string(msg.Data))
 				}
@@ -718,7 +720,7 @@ func TestIntegration_FloorChanges(t *testing.T) {
 	t.Logf("Created test chunks: floor 0 (ID=%d), floor 1 (ID=%d)", chunkID1, chunkID2)
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Subscribe to floor 0
 	pose0 := streaming.CameraPose{
@@ -791,12 +793,12 @@ func TestIntegration_Reconnection(t *testing.T) {
 	t.Logf("Initial subscription: %s", subscriptionID1)
 
 	// Close connection
-	conn1.Close()
+	_ = conn1.Close() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 	time.Sleep(100 * time.Millisecond)
 
 	// Reconnect
 	conn2 := framework.ConnectWebSocket()
-	defer conn2.Close()
+	defer func() { _ = conn2.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	// Create new subscription (old one should be cleaned up)
 	subscriptionID2, err := framework.SubscribeToStreaming(conn2, pose, 5000, 5000, true, false)
@@ -829,7 +831,7 @@ func TestIntegration_Performance(t *testing.T) {
 	defer framework.Close()
 
 	conn := framework.ConnectWebSocket()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }() //nolint:errcheck // Test cleanup - connection close errors are non-critical
 
 	pose := streaming.CameraPose{
 		RingPosition: 10000,
@@ -874,4 +876,3 @@ func TestIntegration_Performance(t *testing.T) {
 	// Wait for async chunk loading
 	time.Sleep(500 * time.Millisecond)
 }
-

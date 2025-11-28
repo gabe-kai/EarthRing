@@ -11,6 +11,7 @@ import (
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
+	"github.com/earthring/server/internal/performance"
 	"github.com/earthring/server/internal/testutil"
 	"github.com/gorilla/websocket"
 )
@@ -23,7 +24,8 @@ func TestWebSocketHandlers_NewWebSocketHandlers(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(nil, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(nil, cfg, profiler)
 	if handlers == nil {
 		t.Fatal("NewWebSocketHandlers returned nil")
 	}
@@ -45,7 +47,8 @@ func TestWebSocketHandlers_negotiateVersion(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(nil, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(nil, cfg, profiler)
 
 	tests := []struct {
 		name      string
@@ -93,7 +96,8 @@ func TestWebSocketHandlers_extractToken(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(nil, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(nil, cfg, profiler)
 
 	tests := []struct {
 		name    string
@@ -197,7 +201,8 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 
 	// Create a test player
@@ -275,7 +280,8 @@ func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 
 	// Create a test player
@@ -379,7 +385,8 @@ func TestWebSocketHandlers_handleMessage(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 
 	// Create a mock connection
 	conn := &WebSocketConnection{
@@ -456,7 +463,8 @@ func TestWebSocketHandlers_handlePing(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 
 	conn := &WebSocketConnection{
 		userID:   1,
@@ -555,7 +563,8 @@ func TestWebSocketHandlers_HandleWebSocket_InvalidMessageFormat(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 
 	// Create a test player
@@ -671,9 +680,14 @@ func TestWebSocketHub_RegisterUnregister(t *testing.T) {
 
 // TestWebSocketHandlers_handleChunkRequest removed - chunk_request handler is legacy and has been removed
 // The entire test function has been removed as it tested the legacy chunk_request handler
+//
+//nolint:unused // Test function preserved for reference, starts with _ to prevent execution
 func _TestWebSocketHandlers_handleChunkRequest_removed(t *testing.T) {
 	// This test has been removed - chunk_request is legacy code
 	t.Skip("chunk_request handler removed")
+
+	db := testutil.SetupTestDB(t)
+	defer testutil.CloseDB(t, db)
 
 	// Create chunks table with full schema
 	_, err := db.Exec(`
@@ -771,7 +785,8 @@ func _TestWebSocketHandlers_handleChunkRequest_removed(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 	defer func() {
 		time.Sleep(10 * time.Millisecond)
@@ -907,7 +922,8 @@ func _TestWebSocketHandlers_handleChunkRequest_removed(t *testing.T) {
 				<-conn.send
 			}
 
-			handlers.handleChunkRequest(conn, tt.message)
+			// NOTE: handleChunkRequest method removed - this test is skipped
+			// handlers.handleChunkRequest(conn, tt.message)
 
 			// Wait for response
 			select {
@@ -1003,14 +1019,14 @@ func _TestWebSocketHandlers_handleChunkRequest_removed(t *testing.T) {
 		handlers.GetHub().register <- conn2
 		time.Sleep(10 * time.Millisecond)
 
+		// NOTE: handleChunkRequest method removed - this test is skipped
 		// Request the chunk via WebSocket - it should auto-regenerate
-		chunkRequest := &WebSocketMessage{
-			Type: "chunk_request",
-			ID:   "test-outdated",
-			Data: json.RawMessage(`{"chunks":["0_12380"],"lod_level":"medium"}`),
-		}
-
-		handlers.handleChunkRequest(conn2, chunkRequest)
+		// chunkRequest := &WebSocketMessage{
+		// 	Type: "chunk_request",
+		// 	ID:   "test-outdated",
+		// 	Data: json.RawMessage(`{"chunks":["0_12380"],"lod_level":"medium"}`),
+		// }
+		// handlers.handleChunkRequest(conn2, chunkRequest)
 
 		// Wait for response
 		select {
@@ -1055,7 +1071,8 @@ func TestWebSocketHandlers_handleStreamSubscribe(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 	defer func() {
 		time.Sleep(10 * time.Millisecond)
@@ -1224,7 +1241,8 @@ func TestWebSocketHandlers_handleStreamUpdatePose(t *testing.T) {
 		},
 	}
 
-	handlers := NewWebSocketHandlers(db, cfg)
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
 	go handlers.GetHub().Run()
 	defer func() {
 		time.Sleep(10 * time.Millisecond)

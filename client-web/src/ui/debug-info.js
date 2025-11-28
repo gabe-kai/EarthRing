@@ -16,6 +16,7 @@ export class DebugInfoPanel {
     this.zoneManager = zoneManager;
     this.panel = null;
     this.isVisible = false; // Start minimized
+    this.isHidden = true; // Start hidden
     this.stats = {
       fps: 0,
       frameTime: 0,
@@ -37,7 +38,10 @@ export class DebugInfoPanel {
       <div class="debug-panel-content">
         <div class="debug-header">
           <h3>Debug Info</h3>
-          <button id="debug-toggle" class="debug-toggle">−</button>
+          <div style="display: flex; gap: 4px;">
+            <button id="debug-toggle" class="debug-toggle">−</button>
+            <button id="debug-close" class="debug-close">×</button>
+          </div>
         </div>
         <div class="debug-sections">
           ${this.createSection('Performance', 'performance', [
@@ -119,6 +123,24 @@ export class DebugInfoPanel {
       .debug-toggle:hover {
         background: rgba(0, 255, 0, 0.2);
       }
+      .debug-close {
+        background: transparent;
+        border: 1px solid #ff4444;
+        color: #ff4444;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0;
+      }
+      .debug-close:hover {
+        background: rgba(255, 68, 68, 0.2);
+      }
+      #debug-info-panel.hidden {
+        display: none;
+      }
       .debug-sections {
         padding: 0;
       }
@@ -172,7 +194,7 @@ export class DebugInfoPanel {
     // Set up event listeners
     this.setupEventListeners();
     
-    // Initialize as minimized (isVisible is already false, just hide the sections)
+    // Initialize as minimized and hidden
     const sections = this.panel.querySelector('.debug-sections');
     const toggleBtn = this.panel.querySelector('#debug-toggle');
     if (sections) {
@@ -181,6 +203,8 @@ export class DebugInfoPanel {
     if (toggleBtn) {
       toggleBtn.textContent = '+';
     }
+    // Start hidden
+    this.hidePanel();
   }
 
   createSection(title, id, lines) {
@@ -203,6 +227,13 @@ export class DebugInfoPanel {
     toggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.togglePanel();
+    });
+
+    // Close panel
+    const closeBtn = this.panel.querySelector('#debug-close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hidePanel();
     });
 
     // Toggle individual sections
@@ -230,6 +261,24 @@ export class DebugInfoPanel {
     }
   }
 
+  hidePanel() {
+    this.isHidden = true;
+    if (this.panel) {
+      this.panel.classList.add('hidden');
+    }
+  }
+
+  showPanel() {
+    this.isHidden = false;
+    if (this.panel) {
+      this.panel.classList.remove('hidden');
+      // Make sure it's also expanded when shown
+      if (!this.isVisible) {
+        this.togglePanel();
+      }
+    }
+  }
+
   toggleSection(sectionId) {
     const content = this.panel.querySelector(`#debug-${sectionId}-content`);
     const icon = this.panel.querySelector(`[data-icon="${sectionId}"]`);
@@ -244,7 +293,7 @@ export class DebugInfoPanel {
   }
 
   update() {
-    if (!this.panel || !this.isVisible) return;
+    if (!this.panel || !this.isVisible || this.isHidden) return;
 
     const now = performance.now();
     const deltaTime = now - this.lastTime;
@@ -406,6 +455,123 @@ export class DebugInfoPanel {
       if (kmEl) kmEl.textContent = '-';
     }
   }
+
+  /**
+   * Get formatted performance data as string
+   */
+  getPerformanceData() {
+    const renderer = this.sceneManager?.getRenderer();
+    let drawCalls = 0;
+    let triangles = 0;
+    let geometries = 0;
+    let textures = 0;
+    
+    if (renderer && renderer.info) {
+      const info = renderer.info;
+      drawCalls = info.render.calls || 0;
+      triangles = info.render.triangles || 0;
+      geometries = info.memory.geometries || 0;
+      textures = info.memory.textures || 0;
+    }
+    
+    return `FPS: ${this.stats.fps}
+Frame Time: ${this.stats.frameTime} ms
+Draw Calls: ${drawCalls}
+Triangles: ${triangles.toLocaleString()}
+Geometries: ${geometries}
+Textures: ${textures}`;
+  }
+
+  /**
+   * Get formatted camera data as string
+   */
+  getCameraData() {
+    if (!this.cameraController) return 'Camera data unavailable';
+    
+    const erPos = this.cameraController.getEarthRingPosition();
+    const camera = this.sceneManager?.getCamera();
+    
+    let erPosStr = '';
+    try {
+      const polar = legacyPositionToRingPolar(erPos.x, erPos.y, erPos.z);
+      const arc = ringPolarToRingArc(polar);
+      const sKm = arc.s / 1000;
+      const thetaDeg = polar.theta * 180 / Math.PI;
+      erPosStr = `s:${sKm.toFixed(1)}km θ:${thetaDeg.toFixed(1)}° r:${arc.r.toFixed(1)}m z:${arc.z.toFixed(1)}m`;
+    } catch (error) {
+      erPosStr = `X:${erPos.x.toFixed(1)} Y:${erPos.y.toFixed(1)} Z:${erPos.z.toFixed(1)}`;
+    }
+    
+    let pos3JSStr = 'N/A';
+    if (camera) {
+      pos3JSStr = `X:${camera.position.x.toFixed(1)} Y:${camera.position.y.toFixed(1)} Z:${camera.position.z.toFixed(1)}`;
+    }
+    
+    let targetStr = 'N/A';
+    if (this.cameraController.getControls) {
+      const controls = this.cameraController.getControls();
+      if (controls && controls.target) {
+        targetStr = `X:${controls.target.x.toFixed(1)} Y:${controls.target.y.toFixed(1)} Z:${controls.target.z.toFixed(1)}`;
+      }
+    }
+    
+    return `Position (ER): ${erPosStr}
+Position (3JS): ${pos3JSStr}
+Target: ${targetStr}`;
+  }
+
+  /**
+   * Get formatted cursor data as string
+   */
+  getCursorData() {
+    if (!this.cameraController || !this.sceneManager) return 'Cursor data unavailable';
+    
+    const camera = this.sceneManager.getCamera();
+    const renderer = this.sceneManager.getRenderer();
+    if (!camera || !renderer) return 'Cursor data unavailable';
+    
+    const mousePos = window.earthring?.mousePosition;
+    if (!mousePos) return 'No cursor position';
+    
+    const rawEl = this.panel?.querySelector('#debug-cursor-raw');
+    const kmEl = this.panel?.querySelector('#debug-cursor-km');
+    const screenEl = this.panel?.querySelector('#debug-cursor-screen');
+    
+    const raw = rawEl?.textContent || 'N/A';
+    const km = kmEl?.textContent || 'N/A';
+    const screen = screenEl?.textContent || 'N/A';
+    
+    return `Raw (m): ${raw}
+Converted (km): ${km}
+Screen: ${screen}`;
+  }
+
+  /**
+   * Get formatted rendering data as string
+   */
+  getRenderingData() {
+    const scene = this.sceneManager?.getScene();
+    const renderer = this.sceneManager?.getRenderer();
+    
+    let sceneObjects = 0;
+    if (scene) {
+      scene.traverse(() => sceneObjects++);
+    }
+    
+    const chunksLoaded = this.chunkManager?.loadedChunks?.size || 0;
+    const zonesLoaded = this.zoneManager?.zoneMeshes?.size || 0;
+    
+    let rendererSize = 'N/A';
+    if (renderer) {
+      rendererSize = `${renderer.domElement.width}x${renderer.domElement.height}`;
+    }
+    
+    return `Scene Objects: ${sceneObjects}
+Chunks Loaded: ${chunksLoaded}
+Zones Loaded: ${zonesLoaded}
+Renderer Size: ${rendererSize}`;
+  }
+
 
   updateRendering() {
     const scene = this.sceneManager?.getScene();

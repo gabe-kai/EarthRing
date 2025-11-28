@@ -32,11 +32,11 @@ var KongoHubER0Position = ER0Point{
 // These are evenly spaced around the ring at 22,000 km intervals
 // Hub 0 is Kongo Hub (s = 0)
 var PillarHubPositions = []StationPosition{
-	{ArcLength: 0, R: 0, Z: 0},           // Hub 0: Kongo Hub
-	{ArcLength: 22000000, R: 0, Z: 0},   // Hub 1: 22,000 km
-	{ArcLength: 44000000, R: 0, Z: 0},   // Hub 2: 44,000 km
-	{ArcLength: 66000000, R: 0, Z: 0},   // Hub 3: 66,000 km
-	{ArcLength: 88000000, R: 0, Z: 0},   // Hub 4: 88,000 km
+	{ArcLength: 0, R: 0, Z: 0},         // Hub 0: Kongo Hub
+	{ArcLength: 22000000, R: 0, Z: 0},  // Hub 1: 22,000 km
+	{ArcLength: 44000000, R: 0, Z: 0},  // Hub 2: 44,000 km
+	{ArcLength: 66000000, R: 0, Z: 0},  // Hub 3: 66,000 km
+	{ArcLength: 88000000, R: 0, Z: 0},  // Hub 4: 88,000 km
 	{ArcLength: 110000000, R: 0, Z: 0}, // Hub 5: 110,000 km
 	{ArcLength: 132000000, R: 0, Z: 0}, // Hub 6: 132,000 km
 	{ArcLength: 154000000, R: 0, Z: 0}, // Hub 7: 154,000 km
@@ -54,7 +54,7 @@ func StationPositionToER0(pos StationPosition) ER0Point {
 		R: pos.R,
 		Z: pos.Z,
 	})
-	
+
 	// Convert RingPolar to ER0
 	return RingPolarToER0(polar)
 }
@@ -63,10 +63,10 @@ func StationPositionToER0(pos StationPosition) ER0Point {
 func ER0ToStationPosition(er0 ER0Point) StationPosition {
 	// Convert ER0 to RingPolar
 	polar := ER0ToRingPolar(er0)
-	
+
 	// Convert RingPolar to RingArc
 	arc := RingPolarToRingArc(polar)
-	
+
 	return StationPosition{
 		ArcLength: arc.S,
 		R:         arc.R,
@@ -99,7 +99,7 @@ func GetPillarHubRingPolar(index int) (RingPolar, error) {
 func FindNearestPillarHub(pos StationPosition) (index int, distance float64) {
 	minDistance := math.MaxFloat64
 	nearestIndex := 0
-	
+
 	for i, hub := range PillarHubPositions {
 		// Calculate arc length distance (accounting for wrapping)
 		dist := ArcLengthDistance(pos.ArcLength, hub.ArcLength)
@@ -108,7 +108,7 @@ func FindNearestPillarHub(pos StationPosition) (index int, distance float64) {
 			nearestIndex = i
 		}
 	}
-	
+
 	return nearestIndex, minDistance
 }
 
@@ -116,17 +116,16 @@ func FindNearestPillarHub(pos StationPosition) (index int, distance float64) {
 func ArcLengthDistance(s1, s2 float64) float64 {
 	wrapped1 := WrapArcLength(s1)
 	wrapped2 := WrapArcLength(s2)
-	
+
 	// Calculate direct distance
 	direct := math.Abs(wrapped2 - wrapped1)
-	
+
 	// Calculate wrapped distance (going the other way around the ring)
 	wrapped := float64(RingCircumference) - direct
-	
+
 	// Return the shorter distance
 	if direct < wrapped {
 		return direct
 	}
 	return wrapped
 }
-

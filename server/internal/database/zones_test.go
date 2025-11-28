@@ -113,7 +113,7 @@ func TestZoneStorage_UpdateZone(t *testing.T) {
 
 	newName := "NewName"
 	newType := "mixed-use"
-	newFloor := 3
+	newFloor := -1 // Valid floor range is -2 to 2
 	newGeometry := json.RawMessage(`{"type":"Polygon","coordinates":[[[0,0],[30,0],[30,10],[0,10],[0,0]]]}`)
 	props := json.RawMessage(`{"density":"medium"}`)
 
@@ -3219,7 +3219,11 @@ func TestZoneStorage_PlayerZoneCompletelyRemovesOwnZone(t *testing.T) {
 	_, err = storage.GetZoneByID(originalID)
 	if err == nil {
 		// Zone might still exist but with zero area - check that
-		remainingZone, _ := storage.GetZoneByID(originalID)
+		remainingZone, err := storage.GetZoneByID(originalID)
+		if err != nil {
+			// Zone was deleted, which is expected
+			return
+		}
 		if remainingZone != nil && remainingZone.Area > 0 {
 			t.Errorf("Expected residential zone to be completely removed, but it still exists with area %.2f m²", remainingZone.Area)
 		}

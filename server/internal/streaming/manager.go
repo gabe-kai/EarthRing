@@ -18,14 +18,14 @@ type Manager struct {
 
 // Subscription tracks an individual client's request window.
 type Subscription struct {
-	ID            string
-	UserID        int64
-	Request       SubscriptionRequest
-	ChunkIDs      []string
+	ID              string
+	UserID          int64
+	Request         SubscriptionRequest
+	ChunkIDs        []string
 	ZoneBoundingBox *ZoneBoundingBox // Track current zone query area
-	ZoneIDs       []int64            // Track current zone IDs in subscription
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ZoneIDs         []int64          // Track current zone IDs in subscription
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // ChunkDelta describes server-evaluated chunk changes for a subscription.
@@ -56,18 +56,18 @@ type CameraPose struct {
 	// Legacy coordinates (for backward compatibility)
 	RingPosition int64   `json:"ring_position,omitempty"` // Absolute X position in meters (legacy)
 	WidthOffset  float64 `json:"width_offset,omitempty"`  // Y offset (meters) (legacy)
-	
+
 	// New coordinate system (RingPolar)
-	Theta        float64 `json:"theta,omitempty"`        // Angle around ring in radians (0 at Kongo Hub)
-	R            float64 `json:"r,omitempty"`            // Radial offset from centerline in meters
-	Z            float64 `json:"z,omitempty"`            // Vertical offset from equatorial plane in meters
-	
+	Theta float64 `json:"theta,omitempty"` // Angle around ring in radians (0 at Kongo Hub)
+	R     float64 `json:"r,omitempty"`     // Radial offset from centerline in meters
+	Z     float64 `json:"z,omitempty"`     // Vertical offset from equatorial plane in meters
+
 	// Alternative: RingArc coordinates
-	ArcLength    float64 `json:"arc_length,omitempty"`    // Arc length along ring in meters (0 at Kongo Hub)
-	
+	ArcLength float64 `json:"arc_length,omitempty"` // Arc length along ring in meters (0 at Kongo Hub)
+
 	// Common fields
-	Elevation    float64 `json:"elevation"`     // Camera height in meters
-	ActiveFloor  int     `json:"active_floor"`  // Player-selected floor
+	Elevation   float64 `json:"elevation"`    // Camera height in meters
+	ActiveFloor int     `json:"active_floor"` // Player-selected floor
 }
 
 // SubscriptionRequest is sent by clients to begin receiving streaming data.
@@ -107,14 +107,14 @@ func (m *Manager) PlanSubscription(userID int64, req SubscriptionRequest) (*Subs
 	}
 
 	subscription := &Subscription{
-		ID:            subscriptionID,
-		UserID:        userID,
-		Request:       req,
-		ChunkIDs:      chunkIDs,
+		ID:              subscriptionID,
+		UserID:          userID,
+		Request:         req,
+		ChunkIDs:        chunkIDs,
 		ZoneBoundingBox: zoneBBox,
-		ZoneIDs:       []int64{}, // Will be populated when zones are loaded
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ZoneIDs:         []int64{}, // Will be populated when zones are loaded
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	m.mu.Lock()
@@ -216,7 +216,7 @@ func ComputeChunkWindow(pose CameraPose, radiusMeters int64) []string {
 	}
 
 	var centerIndex int
-	
+
 	// Use new coordinate system if available (preferred)
 	if pose.ArcLength != 0 || pose.Theta != 0 {
 		// Use RingArc if available (more direct for chunk computation)
@@ -278,14 +278,14 @@ func ComputeChunkWindow(pose CameraPose, radiusMeters int64) []string {
 // ZoneBoundingBox represents the area to query for zones.
 // Supports both legacy (X/Y) and new (theta/r or s/r) coordinate systems.
 type ZoneBoundingBox struct {
-	Floor int     // Active floor
-	
+	Floor int // Active floor
+
 	// Legacy coordinates (for backward compatibility)
-	MinX  float64 // Minimum X (ring position)
-	MinY  float64 // Minimum Y (width offset)
-	MaxX  float64 // Maximum X (ring position)
-	MaxY  float64 // Maximum Y (width offset)
-	
+	MinX float64 // Minimum X (ring position)
+	MinY float64 // Minimum Y (width offset)
+	MaxX float64 // Maximum X (ring position)
+	MaxY float64 // Maximum Y (width offset)
+
 	// New coordinate system (RingPolar)
 	MinTheta float64 // Minimum theta (angle in radians)
 	MaxTheta float64 // Maximum theta (angle in radians)
@@ -293,7 +293,7 @@ type ZoneBoundingBox struct {
 	MaxR     float64 // Maximum r (radial offset)
 	MinZ     float64 // Minimum z (vertical offset)
 	MaxZ     float64 // Maximum z (vertical offset)
-	
+
 	// Alternative: RingArc coordinates
 	MinS float64 // Minimum s (arc length)
 	MaxS float64 // Maximum s (arc length)
@@ -310,7 +310,7 @@ func ComputeZoneBoundingBox(pose CameraPose, radiusMeters int64, widthMeters flo
 	if widthMeters <= 0 {
 		widthMeters = 5000.0
 	}
-	
+
 	// Use new coordinate system if available (preferred)
 	if pose.ArcLength != 0 || pose.Theta != 0 {
 		// Use RingArc if available (more direct for bounding box)
@@ -338,7 +338,7 @@ func ComputeZoneBoundingBox(pose CameraPose, radiusMeters int64, widthMeters flo
 			bbox.MaxR = pose.R + widthMeters/2
 			bbox.MinZ = pose.Z - widthMeters/2
 			bbox.MaxZ = pose.Z + widthMeters/2
-			
+
 			// Also compute theta bounds for convenience
 			thetaRadius := float64(radiusMeters) / ringmap.RingOrbitalRadius
 			bbox.MinTheta = wrappedTheta - thetaRadius
@@ -379,7 +379,7 @@ func ComputeZoneBoundingBox(pose CameraPose, radiusMeters int64, widthMeters flo
 			bbox.MaxY = maxWidth
 		}
 	}
-	
+
 	// Handle wrapping for new coordinates (arc length)
 	if bbox.MinS < 0 {
 		bbox.MinS = ringmap.WrapArcLength(bbox.MinS)
@@ -387,7 +387,7 @@ func ComputeZoneBoundingBox(pose CameraPose, radiusMeters int64, widthMeters flo
 	if bbox.MaxS > float64(ringmap.RingCircumference) {
 		bbox.MaxS = ringmap.WrapArcLength(bbox.MaxS)
 	}
-	
+
 	// Clamp R and Z to reasonable bounds if using new coordinates
 	if bbox.MinR != 0 || bbox.MaxR != 0 {
 		const maxWidth = 2500.0

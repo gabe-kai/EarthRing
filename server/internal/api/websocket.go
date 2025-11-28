@@ -892,8 +892,8 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 				}
 			}()
 			// Compute bounding box for zone query
-		bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
-		zones := h.loadZonesForArea(bbox, req.Pose)
+			bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
+			zones := h.loadZonesForArea(bbox, req.Pose)
 			if len(zones) > 0 {
 				// Extract zone IDs and update subscription
 				zoneIDs := make([]int64, len(zones))
@@ -917,7 +917,7 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 
 // StreamUpdatePoseData represents the data payload for a stream_update_pose message
 type StreamUpdatePoseData struct {
-	SubscriptionID string              `json:"subscription_id"`
+	SubscriptionID string               `json:"subscription_id"`
 	Pose           streaming.CameraPose `json:"pose"`
 }
 
@@ -964,7 +964,7 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 	if subscription.Request.IncludeChunks {
 		if len(chunkDelta.AddedChunks) > 0 || len(chunkDelta.RemovedChunks) > 0 {
 			log.Printf("[Stream] Chunk delta: added=%d, removed=%d", len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
-			
+
 			// Load and send added chunks
 			if len(chunkDelta.AddedChunks) > 0 {
 				go func() {
@@ -980,7 +980,7 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 					}
 				}()
 			}
-			
+
 			// Note: Removed chunks are communicated via the delta structure
 			// The client should handle removal based on the delta message
 			if len(chunkDelta.RemovedChunks) > 0 {
@@ -999,18 +999,18 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 			}()
 			// Recompute bounding box (already updated in UpdatePose)
 			bbox := *subscription.ZoneBoundingBox
-			
+
 			// Load zones for new bounding box
 			op := h.profiler.Start("zone_query")
 			zones := h.loadZonesForArea(bbox, req.Pose)
 			op.End()
-			
+
 			// Extract zone IDs
 			newZoneIDs := make([]int64, len(zones))
 			for i, zone := range zones {
 				newZoneIDs[i] = zone.ID
 			}
-			
+
 			// Compute zone delta
 			op = h.profiler.Start("delta_computation")
 			zoneDelta, err := h.streamManager.ComputeZoneDelta(req.SubscriptionID, newZoneIDs)
@@ -1019,11 +1019,11 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 				log.Printf("[Stream] ComputeZoneDelta failed: %v", err)
 				return
 			}
-			
+
 			// Send zone deltas if there are changes
 			if len(zoneDelta.AddedZoneIDs) > 0 || len(zoneDelta.RemovedZoneIDs) > 0 {
 				log.Printf("[Stream] Zone delta: added=%d, removed=%d", len(zoneDelta.AddedZoneIDs), len(zoneDelta.RemovedZoneIDs))
-				
+
 				// Load and send added zones
 				if len(zoneDelta.AddedZoneIDs) > 0 {
 					addedZones := make([]database.Zone, 0, len(zoneDelta.AddedZoneIDs))
@@ -1041,7 +1041,7 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 						log.Printf("[Stream] Sent %d added zones for subscription %s", len(addedZones), req.SubscriptionID)
 					}
 				}
-				
+
 				// Note: Removed zones are communicated via the delta structure
 				if len(zoneDelta.RemovedZoneIDs) > 0 {
 					log.Printf("[Stream] Zones to remove: %v", zoneDelta.RemovedZoneIDs)
@@ -1123,6 +1123,10 @@ func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pos
 				return nil
 			}
 			zones, err = h.zoneStorage.ListZonesByArea(bbox.Floor, bbox.MinX, bbox.MinY, bbox.MaxX, bbox.MaxY)
+			if err != nil {
+				log.Printf("Failed to load zones for RingPolar area: %v", err)
+				return nil
+			}
 		}
 	} else {
 		// Use legacy coordinate system
