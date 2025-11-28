@@ -88,7 +88,7 @@ Each chunk contains:
    - Decorative elements
 
 2. **Metadata**
-   - Zone assignments
+   - Zone assignments (zones embedded in chunk data via `zone_ids` array)
    - Structure references
    - NPC population data
    - Traffic patterns
@@ -129,6 +129,7 @@ The client no longer decides which chunks/zones to fetch. Instead, it describes 
 - `radius_meters`: longitudinal range server should cover (converted to chunk IDs server-side).
 - `width_meters`: width slice to include zones/procedural objects (future use).
 - `include_chunks` / `include_zones`: opt into whichever streams the client supports.
+  - **Note**: Zones are embedded within chunk data, so `include_zones` is primarily for legacy compatibility. Zones are automatically included when chunks are streamed.
 
 #### Acknowledgement
 
@@ -213,6 +214,8 @@ Chunk and zone deltas are delivered via `stream_delta` messages:
   }
 }
 ```
+
+**Note**: Zones are now embedded within chunk data rather than being sent separately. Each chunk in the `chunks` array may contain a `zones` array with zones associated with that chunk. The client extracts zones from chunk data and passes them to the zone manager. This ensures zones appear/disappear with their associated chunks.
 
 The client processes these deltas automatically, adding new chunks/zones and removing old ones as the camera moves.
 
@@ -610,7 +613,9 @@ func CompressTexture(texture image.Image, lodLevel string) ([]byte, error) {
    - Further compressed with gzip if >1KB
 
 2. **Zone References**
-   - Zone IDs overlapping chunk
+   - Zone IDs stored in `chunk_data.zone_ids` array
+   - Zones embedded in chunk data when chunks are streamed
+   - Default zones (restricted zones) are bound to chunks and appear/disappear with chunks
    - Compressed array format
 
 3. **NPC Data**
