@@ -18,6 +18,46 @@ The minimap displays a title overlay at the bottom center showing:
 
 The title is displayed as a semi-transparent, rounded container that overlays the minimap canvas without taking up layout space.
 
+### Date and Time Display
+
+Above the minimap are three containers aligned at the top edge:
+
+#### Date Display (Left)
+- **Format**: `YYYY.MM.DD`
+- **Position**: Left side, aligned with Earth icon container top
+- **Example**: `2024.12.25`
+- Shows the local date for Earth directly below the player's position on the ring
+
+#### Time Display (Right)
+- **Format**: Two rows
+  - **Top row**: `HH:mm:ss` (24-hour format)
+  - **Bottom row**: `GMT±X` (timezone offset)
+- **Position**: Right side, aligned with Earth icon container top
+- **Example**: 
+  ```
+  14:23:45
+  GMT-3
+  ```
+- Shows the local time and timezone for Earth directly below the player's position
+
+**Timezone Calculation:**
+- Based on player's theta (ring angle) converted to longitude
+- Theta 0° = GMT+0 (Prime Meridian)
+- Theta -60° = GMT-3 (Brazil standard time)
+- Uses 20° per hour for timezone calculation
+- Updates in real-time as the player moves around the ring
+
+#### Earth Icon (Center)
+- **Visual**: Earth with orbital ring, showing real-time day/night cycle
+- **Position**: Center, overlapping the top border of the minimap (half inside, half outside)
+- **Size**: 33% of minimap width, square aspect ratio
+- **Features**:
+  - Real-time day/night terminator based on current UTC time
+  - Ring visualization matching the favicon design
+  - Marker showing Gulf of Guinea position (0° longitude, 0° latitude)
+  - Updates every second to reflect changing time of day
+- **Rendering**: Canvas-based with gradient shading for day/night transition
+
 ### Zoom Controls
 
 Zoom control buttons are positioned on the right side of the minimap, overlapping the border:

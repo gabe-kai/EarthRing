@@ -20,7 +20,10 @@ export class Minimap {
     this.container = null;
     this.canvas = null;
     this.ctx = null;
+    this.earthIconCanvas = null;
+    this.earthIconCtx = null;
     this.updateInterval = null;
+    this.earthIconUpdateInterval = null;
     this.lastPosition = null;
     this.lastDirection = null;
     this.zoomLevel = 'local'; // 'full' or 'local' - default to local (zoomed) view
@@ -53,6 +56,7 @@ export class Minimap {
         font-family: 'Courier New', monospace;
         font-size: 11px;
         color: #00ff00;
+        overflow: visible; /* Allow top container to extend outside border */
       }
 
       .minimap-title-wrapper {
@@ -89,7 +93,7 @@ export class Minimap {
       .minimap-canvas-container {
         flex: 1;
         position: relative;
-        overflow: hidden; /* Clip canvas content */
+        overflow: visible; /* Allow top container to extend outside */
         min-height: 0; /* Allow flex shrinking */
         cursor: pointer; /* Indicate minimap is clickable */
       }
@@ -98,7 +102,7 @@ export class Minimap {
         width: 100%;
         height: 100%;
         display: block;
-        overflow: hidden; /* Canvas itself can be clipped */
+        overflow: hidden; /* Canvas itself clips content */
       }
 
 
@@ -143,6 +147,74 @@ export class Minimap {
       .minimap-zoom-btn:active {
         background: rgba(76, 175, 80, 0.4);
       }
+
+      .minimap-datetime-container {
+        position: absolute;
+        top: -42px; /* Same as top container - aligns with Earth icon container top */
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start; /* Align tops with Earth icon container */
+        padding: 0 4px;
+        z-index: 10000;
+        pointer-events: none;
+        box-sizing: border-box;
+      }
+
+      .minimap-date-display,
+      .minimap-time-display {
+        padding: 4px 8px;
+        background: rgba(17, 17, 17, 0.85);
+        border: 1px solid #4caf50;
+        border-radius: 4px;
+        color: #4caf50;
+        font-family: 'Courier New', monospace;
+        font-size: 10px;
+        font-weight: bold;
+        backdrop-filter: blur(10px);
+        white-space: nowrap;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        line-height: 1.2;
+        width: 70px; /* Fixed width so both containers are the same size */
+        box-sizing: border-box;
+      }
+
+      .minimap-date-display {
+        margin-right: 4px;
+      }
+
+      .minimap-time-display {
+        margin-left: 4px;
+      }
+
+      .minimap-top-container {
+        position: absolute;
+        top: -42px; /* Move up by half height (82.5px / 2 ≈ 41px) plus border (2px) to center on border edge = 43px, rounded to 42px */
+        left: 50%;
+        transform: translateX(-50%);
+        width: 33%; /* 33% of minimap container width (250px) = 82.5px */
+        aspect-ratio: 1; /* Creates perfect square */
+        background: rgba(17, 17, 17, 0.85);
+        border: 1px solid #4caf50;
+        border-radius: 8px;
+        z-index: 10000;
+        pointer-events: none;
+        backdrop-filter: blur(10px);
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      .minimap-earth-icon {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
     `;
     document.head.appendChild(style);
 
@@ -156,6 +228,16 @@ export class Minimap {
       <div class="minimap-controls">
         <button class="minimap-zoom-btn" id="minimap-zoom-in" title="Zoom in (Local area view)">+</button>
         <button class="minimap-zoom-btn" id="minimap-zoom-out" title="Zoom out (Full ring view)">−</button>
+      </div>
+      <div class="minimap-datetime-container">
+        <div class="minimap-date-display" id="minimap-date">0000.00.00</div>
+        <div class="minimap-time-display">
+          <span id="minimap-time">00:00:00</span>
+          <span id="minimap-timezone">GMT+0</span>
+        </div>
+      </div>
+      <div class="minimap-top-container">
+        <canvas class="minimap-earth-icon" id="minimap-earth-icon"></canvas>
       </div>
     `;
 
@@ -190,6 +272,9 @@ export class Minimap {
 
     // Add click handler to copy coordinates
     this.setupClickHandler();
+
+    // Initialize Earth icon
+    this.initEarthIcon();
   }
 
   resizeCanvas() {
@@ -246,6 +331,9 @@ export class Minimap {
       const polar = legacyPositionToRingPolar(erPos.x, erPos.y, erPos.z);
       const arc = ringPolarToRingArc(polar);
       const floor = this.gameStateManager.getActiveFloor();
+
+      // Update date/time display based on current position
+      this.updateDateTime(polar.theta);
 
       // Get camera direction
       const camera = this.sceneManager?.getCamera();
@@ -958,6 +1046,215 @@ export class Minimap {
     this.ctx.stroke();
   }
 
+  updateDateTime(theta) {
+    // Convert theta (radians) to longitude (degrees)
+    // Theta 0 = 0° longitude (Prime Meridian)
+    // Theta increases eastward
+    const longitudeDegrees = (theta * 180) / Math.PI;
+
+    // Calculate timezone offset in hours
+    // Using 20° per hour to match user requirement: theta -60° = GMT-3 (Brazil)
+    // This means: offsetHours = longitudeDegrees / 20
+    const offsetHours = Math.round(longitudeDegrees / 20);
+
+    // Get current UTC time components
+    const now = new Date();
+    const utcYear = now.getUTCFullYear();
+    const utcMonth = now.getUTCMonth();
+    const utcDate = now.getUTCDate();
+    const utcMinutes = now.getUTCMinutes();
+    const utcSeconds = now.getUTCSeconds();
+    const utcHours = now.getUTCHours() + offsetHours;
+
+    // Normalize hours (handle overflow/underflow)
+    // This will also handle day/month/year rollover automatically
+    const localTime = new Date(Date.UTC(utcYear, utcMonth, utcDate, utcHours, utcMinutes, utcSeconds));
+
+    // Format date as YYYY.MM.DD
+    const year = localTime.getUTCFullYear();
+    const month = String(localTime.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(localTime.getUTCDate()).padStart(2, '0');
+    const dateStr = `${year}.${month}.${day}`;
+
+    // Format time as HH:mm:ss (24-hour format)
+    const hours = String(localTime.getUTCHours()).padStart(2, '0');
+    const minutes = String(localTime.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(localTime.getUTCSeconds()).padStart(2, '0');
+    const timeStr = `${hours}:${minutes}:${seconds}`;
+
+    // Format timezone as GMT±X
+    const tzSign = offsetHours >= 0 ? '+' : '';
+    const tzStr = `GMT${tzSign}${offsetHours}`;
+
+    // Update date display
+    const dateEl = this.container?.querySelector('#minimap-date');
+    if (dateEl) {
+      dateEl.textContent = dateStr;
+    }
+
+    // Update time display
+    const timeEl = this.container?.querySelector('#minimap-time');
+    if (timeEl) {
+      timeEl.textContent = timeStr;
+    }
+
+    // Update timezone display
+    const timezoneEl = this.container?.querySelector('#minimap-timezone');
+    if (timezoneEl) {
+      timezoneEl.textContent = tzStr;
+    }
+  }
+
+  initEarthIcon() {
+    const container = this.container?.querySelector('.minimap-top-container');
+    if (!container) return;
+
+    this.earthIconCanvas = container.querySelector('#minimap-earth-icon');
+    if (!this.earthIconCanvas) return;
+
+    // Set canvas size to match container
+    const resizeEarthIcon = () => {
+      if (!this.earthIconCanvas || !container) return;
+      const rect = container.getBoundingClientRect();
+      // Use actual size or fallback to 82.5px (33% of 250px minimap width)
+      const size = Math.max(rect.width, rect.height, 82.5);
+      this.earthIconCanvas.width = size;
+      this.earthIconCanvas.height = size;
+      this.updateEarthIcon();
+    };
+
+    // Initial resize - use setTimeout to ensure container is rendered
+    setTimeout(resizeEarthIcon, 0);
+
+    // Resize on window resize
+    window.addEventListener('resize', resizeEarthIcon);
+
+    // Get context
+    this.earthIconCtx = this.earthIconCanvas.getContext('2d');
+    
+    // Initial render
+    this.updateEarthIcon();
+  }
+
+  updateEarthIcon() {
+    if (!this.earthIconCanvas || !this.earthIconCtx) return;
+
+    const ctx = this.earthIconCtx;
+    const width = this.earthIconCanvas.width;
+    const height = this.earthIconCanvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Calculate planet size (leave room for ring)
+    const planetRadius = Math.min(width, height) * 0.35;
+    const ringOuterRadius = Math.min(width, height) * 0.45;
+    const ringInnerRadius = Math.min(width, height) * 0.38;
+
+    // Calculate current UTC time and sun position
+    const now = new Date();
+    const utcHours = now.getUTCHours();
+    const utcMinutes = now.getUTCMinutes();
+    const utcTime = utcHours + utcMinutes / 60;
+    
+    // Sun position: at noon UTC, sun is directly over 0° longitude (Prime Meridian)
+    // Earth rotates 15° per hour (360° / 24 hours)
+    // At UTC time T, the sun is directly over longitude = 15° * (12 - T)
+    const sunLongitude = (12 - utcTime) * 15; // degrees
+    const sunAngle = (sunLongitude * Math.PI) / 180; // radians
+    
+    // Draw ring (outer ring first, then inner)
+    ctx.strokeStyle = '#4caf50';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, ringOuterRadius, ringOuterRadius * 0.18, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    ctx.strokeStyle = '#66ff66';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, ringInnerRadius, ringInnerRadius * 0.15, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Draw Earth sphere with day/night terminator
+    // Create gradient for Earth (blue-green)
+    const earthGradient = ctx.createRadialGradient(
+      centerX - planetRadius * 0.3,
+      centerY - planetRadius * 0.3,
+      0,
+      centerX,
+      centerY,
+      planetRadius
+    );
+    earthGradient.addColorStop(0, '#66ff66');
+    earthGradient.addColorStop(1, '#4caf50');
+
+    // Draw day side (light)
+    ctx.fillStyle = earthGradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, planetRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw night side (dark overlay)
+    // The terminator line is perpendicular to the sun direction
+    // Day side: sunAngle to sunAngle + 180°
+    // Night side: sunAngle + 180° to sunAngle + 360°
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, planetRadius, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Create dark overlay for night side
+    const nightGradient = ctx.createLinearGradient(
+      centerX + Math.cos(sunAngle) * planetRadius,
+      centerY + Math.sin(sunAngle) * planetRadius,
+      centerX - Math.cos(sunAngle) * planetRadius,
+      centerY - Math.sin(sunAngle) * planetRadius
+    );
+    nightGradient.addColorStop(0, 'rgba(0, 20, 40, 0.0)'); // Transparent at day side
+    nightGradient.addColorStop(0.5, 'rgba(0, 20, 40, 0.6)'); // Transition at terminator
+    nightGradient.addColorStop(1, 'rgba(0, 10, 20, 0.9)'); // Dark at night side
+
+    ctx.fillStyle = nightGradient;
+    ctx.fillRect(centerX - planetRadius, centerY - planetRadius, planetRadius * 2, planetRadius * 2);
+    ctx.restore();
+
+    // Draw terminator line (optional, subtle)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(
+      centerX - Math.sin(sunAngle) * planetRadius,
+      centerY + Math.cos(sunAngle) * planetRadius
+    );
+    ctx.lineTo(
+      centerX + Math.sin(sunAngle) * planetRadius,
+      centerY - Math.cos(sunAngle) * planetRadius
+    );
+    ctx.stroke();
+
+    // Draw marker for Gulf of Guinea (0° longitude, near equator)
+    // Gulf of Guinea is at approximately 0°N, 0°E
+    const markerAngle = 0; // 0° longitude = right side of Earth (Prime Meridian)
+    const markerRadius = planetRadius * 0.85; // Slightly inside edge
+    const markerX = centerX + Math.cos(markerAngle) * markerRadius;
+    const markerY = centerY + Math.sin(markerAngle) * markerRadius;
+
+    // Draw marker (small green dot)
+    ctx.fillStyle = '#00ff00';
+    ctx.beginPath();
+    ctx.arc(markerX, markerY, 2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Add small glow
+    ctx.shadowColor = '#00ff00';
+    ctx.shadowBlur = 3;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
   startUpdates() {
     // Update every 200ms for smoother performance
     // Draw immediately on first update
@@ -966,12 +1263,24 @@ export class Minimap {
     this.updateInterval = setInterval(() => {
       this.update();
     }, 200);
+
+    // Update Earth icon every second (day/night changes slowly)
+    if (this.earthIconCanvas) {
+      this.updateEarthIcon();
+      this.earthIconUpdateInterval = setInterval(() => {
+        this.updateEarthIcon();
+      }, 1000);
+    }
   }
 
   stopUpdates() {
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
       this.updateInterval = null;
+    }
+    if (this.earthIconUpdateInterval) {
+      clearInterval(this.earthIconUpdateInterval);
+      this.earthIconUpdateInterval = null;
     }
   }
 
@@ -983,6 +1292,8 @@ export class Minimap {
     }
     this.canvas = null;
     this.ctx = null;
+    this.earthIconCanvas = null;
+    this.earthIconCtx = null;
   }
 }
 
