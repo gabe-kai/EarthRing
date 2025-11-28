@@ -36,11 +36,13 @@ jobs:
         working-directory: ./client-web
         run: |
           # Run tests and capture output
+          set +e  # Don't exit on error immediately
           npm test 2>&1 | tee test-output.log
           exit_code=${PIPESTATUS[0]}
           
-          # Check if tests passed (look for "passed" in summary)
-          if grep -q "Test Files.*passed\|Tests.*passed" test-output.log; then
+          # Check if tests actually passed (look for "passed" in summary)
+          # Pattern matches: "Test Files  9 passed" or "Tests  157 passed"
+          if grep -qE "(Test Files|Tests).*[0-9]+ passed" test-output.log && ! grep -qE "(Test Files|Tests).*[0-9]+ failed" test-output.log; then
             echo "✅ All tests passed"
             # Even if exit code is non-zero due to unhandled errors from jsdom,
             # if tests passed, we consider it a success
@@ -49,8 +51,11 @@ jobs:
               echo "These errors don't affect test results and are suppressed in vitest.setup.js"
               exit 0
             fi
+            exit 0
           else
             echo "❌ Tests failed"
+            # Show failure details
+            grep -E "(FAIL|failed|Error)" test-output.log | head -20
             exit $exit_code
           fi
 
