@@ -2,7 +2,7 @@ import { fetchZonesByArea } from '../api/zone-service.js';
 import { isAuthenticated } from '../auth/auth-service.js';
 import { wsClient } from '../network/websocket-client.js';
 import * as THREE from 'three';
-import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera } from '../utils/coordinates-new.js';
+import { toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, fromThreeJS } from '../utils/coordinates-new.js';
 import { 
   legacyPositionToRingPolar, 
   ringPolarToRingArc,
@@ -123,9 +123,17 @@ export class ZoneManager {
       }
     });
     
-    // Only log warnings - zones skipped or none rendered
-    if (renderedCount.count === 0 && zones.length > 0) {
-      console.warn(`[Zones] Chunk ${chunkID}: 0 zones rendered (all ${skippedCount.count} skipped - wrong floor)`);
+    // Log zone handling for boundary chunks
+    const chunkParts = chunkID?.split('_');
+    const chunkIndex = chunkParts?.length >= 2 ? parseInt(chunkParts[1], 10) : null;
+    const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+    
+    if (isBoundary || renderedCount.count === 0) {
+      if (renderedCount.count === 0 && zones.length > 0) {
+        console.warn(`[Zones] Chunk ${chunkID}: 0 zones rendered (all ${skippedCount.count} skipped - wrong floor)`);
+      } else if (renderedCount.count > 0 && isBoundary) {
+        console.log(`[Zones] Chunk ${chunkID}: ${renderedCount.count} zone(s) rendered, ${skippedCount.count} skipped`);
+      }
     }
   }
   
@@ -469,11 +477,22 @@ export class ZoneManager {
       return;
     }
 
-    // Get camera position for wrapping
-    // Use unwrapped camera position for normalizeRelativeToCamera - it handles wrapping internally
-    // The function expects the actual camera position (which may be negative or outside [0, NEW_RING_CIRCUMFERENCE))
-    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
-    const cameraX = cameraPos.x; // Use unwrapped camera position
+    // Get camera position for wrapping - use same logic as chunks to preserve negative values
+    // Get raw Three.js camera position and convert to EarthRing coordinates
+    // This preserves negative X values and large positive values without wrapping
+    const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
+    let cameraX = 0;
+    if (camera) {
+      // Three.js X coordinate directly maps to arc length s in RingArc coordinates
+      // Convert to EarthRing coordinates preserving raw position (including negatives)
+      const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+      const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
+      cameraX = cameraEarthRingPos.x || 0;
+    } else {
+      // Fallback: try camera controller but note it wraps the value
+      const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+      cameraX = cameraPos.x;
+    }
 
     // Check if this is a full-ring zone (spans more than half the ring)
     // For full-ring zones, we can optimize by caching geometry and only updating position
