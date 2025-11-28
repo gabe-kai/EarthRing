@@ -146,12 +146,79 @@ def generate_ring_floor_geometry(chunk_index: int, floor: int) -> dict:
     }
 
 
+def generate_chunk_restricted_zone(floor: int, chunk_index: int) -> dict:
+    """
+    Generate a default restricted zone for a chunk.
+    
+    Creates a restricted zone that spans the full chunk length (1000m) and is 20m wide
+    (Y: -10 to +10), centered on the ring. This zone reserves space for maglev transit
+    and prevents building in that area.
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        Dictionary with zone data in GeoJSON format
+    """
+    # Calculate chunk boundaries
+    # Note: These are absolute coordinates - wrapping happens during rendering, not storage
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+    
+    # For the last chunk (index 263999), chunk_end_position = 264000000
+    # This is valid - coordinates can be stored up to the ring circumference
+    # The client will wrap coordinates relative to camera during rendering
+    
+    # Zone specifications:
+    # - Width: 20m (Y: -10 to +10)
+    # - Length: Full chunk (X: chunk_start to chunk_end)
+    # - Type: Restricted (prevents building)
+    # - System zone: Yes (protected from player modifications)
+    
+    # Create polygon coordinates in GeoJSON format
+    # GeoJSON coordinates are [longitude, latitude] but we use [X, Y] for EarthRing
+    # Polygon is a closed ring, so first and last coordinates are the same
+    coordinates = [
+        [
+            [chunk_start_position, -10.0],  # Bottom-left
+            [chunk_end_position, -10.0],     # Bottom-right
+            [chunk_end_position, 10.0],       # Top-right
+            [chunk_start_position, 10.0],    # Top-left
+            [chunk_start_position, -10.0],    # Close polygon
+        ]
+    ]
+    
+    return {
+        "type": "Feature",
+        "properties": {
+            "name": f"Maglev Transit Zone (Floor {floor}, Chunk {chunk_index})",
+            "zone_type": "restricted",
+            "floor": floor,
+            "is_system_zone": True,
+            "properties": {
+                "purpose": "maglev_transit",
+                "description": "Reserved space for maglev train and loading/unloading equipment",
+            },
+            "metadata": {
+                "default_zone": True,
+                "maglev_zone": True,
+                "chunk_index": chunk_index,
+            },
+        },
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": coordinates,
+        },
+    }
+
+
 def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     """
     Generate a chunk with smooth curved ring floor geometry.
 
     Generates a chunk with smooth curved geometry that tapers based on station flares.
-    Buildings, zones, etc. will be added in later phases.
+    Includes a default restricted zone for maglev transit.
 
     Args:
         floor: Floor number
@@ -159,7 +226,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         chunk_seed: Chunk seed for deterministic generation
 
     Returns:
-        Dictionary with chunk data including geometry
+        Dictionary with chunk data including geometry and zones
     """
     # Generate smooth curved ring floor geometry
     geometry = generate_ring_floor_geometry(chunk_index, floor)
@@ -183,6 +250,9 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
 
     # Get chunk width for metadata (width at chunk center)
     chunk_width = get_chunk_width(floor, chunk_index, chunk_seed)
+    
+    # Generate default restricted zone for this chunk
+    restricted_zone = generate_chunk_restricted_zone(floor, chunk_index)
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",
@@ -191,7 +261,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "seed": chunk_seed,
         "geometry": geometry,
         "structures": [],
-        "zones": [],
+        "zones": [restricted_zone],  # Include default restricted zone
         "metadata": {
             "generated": True,
             "version": CURRENT_GEOMETRY_VERSION,

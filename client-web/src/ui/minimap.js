@@ -597,15 +597,7 @@ export class Minimap {
         const distance = Math.min(directDist, wrappedDist);
 
         if (distance > viewRadius + CHUNK_LENGTH) {
-          if (window.earthring?.debug) {
-            console.log(`[Minimap] Chunk ${chunkIndex} too far: distance=${distance.toFixed(0)}m, viewRadius=${viewRadius}m`);
-          }
           return; // Chunk is too far away
-        }
-        
-        // Debug: log that we're processing this chunk
-        if (window.earthring?.debug) {
-          console.log(`[Minimap] Processing chunk ${chunkIndex}, distance=${distance.toFixed(0)}m`);
         }
 
         // Always draw chunks that are within view distance, even if we don't have data
@@ -681,11 +673,6 @@ export class Minimap {
         // const screenY = centerY - (localY * scale); // Original - was causing reverse movement
         
         // Debug logging removed to reduce spam
-        
-        // Debug: log screen coordinates
-        if (window.earthring?.debug) {
-          console.log(`[Minimap] Chunk ${chunkIndex} screen coords: (${screenX.toFixed(0)}, ${screenY.toFixed(0)}), local: (${localX.toFixed(0)}, ${localY.toFixed(0)}), scale=${scale.toFixed(4)}`);
-        }
 
         // Don't filter by screen position here - let the platform bounds check handle it
         // This early filter was too aggressive and caused platforms to disappear

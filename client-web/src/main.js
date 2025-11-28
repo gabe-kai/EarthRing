@@ -42,15 +42,19 @@ const cameraController = new CameraController(
   gameStateManager
 );
 
-// Initialize chunk manager (pass camera controller for position wrapping)
-const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController);
+// Initialize zone manager first (needed by chunk manager)
+const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
+// Expose zone manager globally for debugging/access
+window.zoneManager = zoneManager;
+
+// Initialize chunk manager (pass camera controller for position wrapping and zone manager for zone tracking)
+const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController, zoneManager);
 const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateManager, {
   radius: 250, // 250m radius circular grid
   majorSpacing: 5,
   minorSpacing: 1,
   fadeStart: 0.7, // Start fading at 70% of radius
 });
-const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 createZonesToolbar(zoneManager, gridOverlay, gameStateManager);
 
@@ -219,11 +223,9 @@ sceneManager.onRender((deltaTime) => {
     pendingChunkLoad = false;
   }
 
-  // Only refresh zones when authenticated
+  // Zones are loaded via chunk streaming now, not separately
+  // Only re-render zones if camera moved significantly (for proper wrapping)
   if (userAuthenticated) {
-    zoneManager.loadZonesAroundCamera();
-    
-    // Re-render zones if camera moved significantly (for proper wrapping)
     if (zoneManager.shouldReRenderZones()) {
       zoneManager.reRenderAllZones();
     }

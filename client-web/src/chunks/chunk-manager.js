@@ -25,10 +25,11 @@ import * as THREE from 'three';
  * Manages chunk requests, caching, and rendering
  */
 export class ChunkManager {
-  constructor(sceneManager, gameStateManager, cameraController = null) {
+  constructor(sceneManager, gameStateManager, cameraController = null, zoneManager = null) {
     this.sceneManager = sceneManager;
     this.gameStateManager = gameStateManager;
     this.cameraController = cameraController; // Store reference for position wrapping
+    this.zoneManager = zoneManager; // Store reference to zone manager for zone cleanup
     this.scene = sceneManager.getScene();
     
     // Map of chunk IDs to Three.js meshes
@@ -164,12 +165,18 @@ export class ChunkManager {
   setupStateListeners() {
     // When a chunk is added to state, render it (if it matches active floor)
     this.gameStateManager.on('chunkAdded', ({ chunkID, chunkData }) => {
+      // Extract and handle zones from chunk before rendering
+      this.extractZonesFromChunk(chunkID, chunkData);
       this.renderChunk(chunkID, chunkData);
     });
     
-    // When a chunk is removed from state, remove its mesh
+    // When a chunk is removed from state, remove its mesh and zones
     this.gameStateManager.on('chunkRemoved', ({ chunkID }) => {
       this.removeChunkMesh(chunkID);
+      // Clean up zones for this chunk
+      if (this.zoneManager) {
+        this.zoneManager.cleanupZonesForChunk(chunkID);
+      }
     });
     
     // When active floor changes, clear chunks from other floors and reload for new floor
@@ -269,11 +276,31 @@ export class ChunkManager {
         // Go struct fields are capitalized (AddedChunks, RemovedChunks)
         const added = delta.AddedChunks || [];
         const removed = delta.RemovedChunks || [];
-        console.log(`[Chunks] Chunk delta: added=${added.length}, removed=${removed.length}`);
+        // Log chunk delta changes (especially near boundaries)
+        const cameraX = this.getCurrentCameraX();
+        const isNearBoundary = cameraX > 263990000 || cameraX < 10000;
+        if (added.length > 0 || removed.length > 0 || isNearBoundary) {
+          console.log(`[Chunks] Chunk delta at cameraX=${cameraX.toFixed(1)}: added=${added.length}, removed=${removed.length}`);
+          if (isNearBoundary && (added.length > 0 || removed.length > 0)) {
+            console.log(`[Chunks] Near boundary - added chunks: ${added.slice(0, 5).join(', ')}${added.length > 5 ? '...' : ''}`);
+            console.log(`[Chunks] Near boundary - removed chunks: ${removed.slice(0, 5).join(', ')}${removed.length > 5 ? '...' : ''}`);
+          }
+        }
         
         // Handle removed chunks immediately
         if (removed.length > 0) {
-          console.log(`[Chunks] Removing ${removed.length} chunks from pose update:`, removed);
+          const cameraX = this.getCurrentCameraX();
+          // Log only if we're removing many chunks (potential issue) or near boundaries
+          const chunkIndices = removed.map(id => {
+            const parts = id.split('_');
+            return parts.length >= 2 ? parseInt(parts[1], 10) : null;
+          }).filter(idx => idx !== null);
+          const isBoundary = chunkIndices.some(idx => idx < 10 || idx > 263990);
+          
+          if (removed.length > 5 || isBoundary) {
+            console.warn(`[Chunks] Removing ${removed.length} chunks from pose update at cameraX=${cameraX.toFixed(0)}:`, removed.slice(0, 10));
+          }
+          
           removed.forEach(chunkID => {
             this.removeChunkMesh(chunkID);
             this.gameStateManager.removeChunk(chunkID);
@@ -439,6 +466,170 @@ export class ChunkManager {
   }
   
   /**
+   * Extract zones from chunk data and pass to zone manager
+   * @param {string} chunkID - Chunk ID
+   * @param {Object} chunkData - Chunk data
+   */
+  extractZonesFromChunk(chunkID, chunkData) {
+    if (!chunkData || !chunkData.zones || !Array.isArray(chunkData.zones) || chunkData.zones.length === 0) {
+      // Log for boundary chunks to debug zone disappearance
+      const chunkParts = chunkID.split('_');
+      const chunkIndex = chunkParts.length >= 2 ? parseInt(chunkParts[1], 10) : null;
+      const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+      if (isBoundary) {
+        console.warn(`[Chunks] Chunk ${chunkID} (boundary) has no zones:`, {
+          hasZones: !!chunkData?.zones,
+          zonesType: typeof chunkData?.zones,
+          zonesLength: Array.isArray(chunkData?.zones) ? chunkData.zones.length : 'not array',
+          chunkDataKeys: chunkData ? Object.keys(chunkData) : 'no chunkData',
+        });
+      }
+      return;
+    }
+    
+    // Log zone extraction for boundary chunks
+    const chunkParts = chunkID.split('_');
+    const chunkIndex = chunkParts.length >= 2 ? parseInt(chunkParts[1], 10) : null;
+    const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+    if (isBoundary) {
+      console.log(`[Chunks] Extracting ${chunkData.zones.length} zone(s) from boundary chunk ${chunkID}`);
+    }
+    
+    // Convert chunk zones to zone format expected by zone manager
+    const zones = chunkData.zones.map((zoneFeature, idx) => {
+      // Zone feature format: { type: "Feature", properties: {...}, geometry: {...} }
+      // Geometry might be a JSON string (from database json.RawMessage) or an object (from procedural service)
+      
+      // Extract chunk index for metadata
+      const chunkIndex = this.getChunkIndexFromID(chunkID);
+      const floor = this.getFloorFromChunkID(chunkID);
+      
+      // Handle different zone formats
+      let zoneID, name, zoneType, zoneFloor, isSystemZone, geometry, properties, metadata;
+      
+      if (zoneFeature && zoneFeature.type === 'Feature' && zoneFeature.properties) {
+        // GeoJSON Feature format
+        zoneID = zoneFeature.properties.id || zoneFeature.properties.zone_id;
+        name = zoneFeature.properties.name;
+        zoneType = zoneFeature.properties.zone_type;
+        zoneFloor = zoneFeature.properties.floor !== undefined ? zoneFeature.properties.floor : floor;
+        isSystemZone = zoneFeature.properties.is_system_zone || false;
+        geometry = zoneFeature.geometry;
+        properties = zoneFeature.properties.properties;
+        metadata = zoneFeature.properties.metadata;
+      } else if (zoneFeature && typeof zoneFeature === 'object') {
+        // Might be a direct zone object (from procedural generation or database)
+        zoneID = zoneFeature.id || zoneFeature.zone_id;
+        name = zoneFeature.name;
+        zoneType = zoneFeature.zone_type || zoneFeature.zoneType;
+        zoneFloor = zoneFeature.floor !== undefined ? zoneFeature.floor : floor;
+        isSystemZone = zoneFeature.is_system_zone || zoneFeature.isSystemZone || false;
+        geometry = zoneFeature.geometry;
+        properties = zoneFeature.properties;
+        metadata = zoneFeature.metadata;
+      } else {
+        // Invalid format
+        console.warn(`[Chunks] Invalid zone format in chunk ${chunkID}:`, typeof zoneFeature, zoneFeature);
+        return null;
+      }
+      
+      // Parse geometry if it's a string (from database json.RawMessage)
+      if (typeof geometry === 'string') {
+        try {
+          geometry = JSON.parse(geometry);
+        } catch (e) {
+          console.warn(`[Chunks] Failed to parse zone geometry string from chunk ${chunkID}:`, e);
+          return null;
+        }
+      }
+      
+      // Parse metadata if it's a string
+      if (typeof metadata === 'string') {
+        try {
+          metadata = JSON.parse(metadata);
+        } catch (e) {
+          metadata = {};
+        }
+      }
+      if (!metadata || typeof metadata !== 'object') {
+        metadata = {};
+      }
+      
+      // Ensure metadata has chunk_index
+      if (metadata.chunk_index === undefined) {
+        metadata.chunk_index = chunkIndex;
+      }
+      
+      // Generate ID if missing (for zones from procedural generation that haven't been stored yet)
+      if (!zoneID) {
+        // Use metadata chunk_index and a hash of the geometry or just use chunk-based ID
+        zoneID = `chunk_${chunkID}_zone_${idx}`;
+      }
+      
+      // Validate geometry exists and is an object
+      if (!geometry) {
+        console.warn(`[Chunks] Zone from chunk ${chunkID} has no geometry:`, {
+          zoneFeature: zoneFeature,
+          hasGeometry: !!zoneFeature?.geometry,
+          geometryType: typeof zoneFeature?.geometry,
+        });
+        return null;
+      }
+      
+      if (typeof geometry !== 'object') {
+        console.warn(`[Chunks] Zone from chunk ${chunkID} has invalid geometry type:`, {
+          geometryType: typeof geometry,
+          geometry: geometry,
+          zoneFeature: zoneFeature,
+        });
+        return null;
+      }
+      
+      return {
+        id: zoneID,
+        name: name || `Zone (${chunkID})`,
+        zone_type: zoneType || 'restricted',
+        floor: zoneFloor || floor || 0,
+        is_system_zone: isSystemZone,
+        geometry: geometry,
+        properties: properties,
+        metadata: metadata,
+      };
+    }).filter(zone => zone !== null); // Filter out null zones
+    
+    if (zones.length === 0) {
+      // Log detailed info about why zones were filtered out (using already-declared chunkParts/chunkIndex/isBoundary)
+      if (isBoundary || window.earthring?.debug) {
+        console.warn(`[Chunks] No valid zones extracted from chunk ${chunkID} (had ${chunkData.zones.length} raw zones). First zone structure:`, {
+          firstZone: chunkData.zones[0],
+          firstZoneType: typeof chunkData.zones[0],
+          hasType: !!chunkData.zones[0]?.type,
+          hasProperties: !!chunkData.zones[0]?.properties,
+          hasGeometry: !!chunkData.zones[0]?.geometry,
+          geometryType: typeof chunkData.zones[0]?.geometry,
+          keys: chunkData.zones[0] ? Object.keys(chunkData.zones[0]) : null,
+        });
+      }
+      return;
+    }
+    
+    // Log successful extraction for boundary chunks (using already-declared isBoundary)
+    if (isBoundary) {
+      console.log(`[Chunks] Extracted ${zones.length} valid zone(s) from chunk ${chunkID}, passing to zone manager`);
+    }
+    
+    // Pass zones to zone manager with chunkID for tracking
+    if (this.zoneManager) {
+      this.zoneManager.handleStreamedZones(zones, chunkID);
+    } else if (window.zoneManager) {
+      // Fallback to global reference if not passed in constructor
+      window.zoneManager.handleStreamedZones(zones, chunkID);
+    } else {
+      console.error(`[Chunks] No zone manager available to handle zones from chunk ${chunkID}`);
+    }
+  }
+
+  /**
    * Handle chunk data received from server
    * @param {Object} data - Chunk data from server
    */
@@ -449,7 +640,8 @@ export class ChunkManager {
     }
 
     const chunkIDs = data.chunks.map(c => c.id).join(', ');
-    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server: [${chunkIDs}]`);
+    const chunksWithZones = data.chunks.filter(c => c.zones && Array.isArray(c.zones) && c.zones.length > 0).length;
+    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server: [${chunkIDs}] (${chunksWithZones} with zones)`);
     
     // Track statistics for summary logging
     const stats = {
@@ -539,11 +731,37 @@ export class ChunkManager {
     }
     
     // Store processed chunks in game state (this will trigger renderChunk via event listener)
+    // Zones will be extracted in the chunkAdded event handler
     processedChunks.forEach(chunkData => {
       if (chunkData) {
+        // Log if chunk has zones (especially for boundary chunks)
+        const chunkIndex = parseInt(chunkData.id?.split('_')[1], 10);
+        const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+        if (isBoundary && chunkData.zones) {
+          const zoneCount = Array.isArray(chunkData.zones) ? chunkData.zones.length : 0;
+          if (zoneCount > 0) {
+            console.log(`[Chunks] Chunk ${chunkData.id} (boundary) has ${zoneCount} zone(s) before adding to state`);
+          } else {
+            console.warn(`[Chunks] Chunk ${chunkData.id} (boundary) has empty zones array:`, chunkData.zones);
+          }
+        }
         this.gameStateManager.addChunk(chunkData.id, chunkData);
       }
     });
+  }
+  
+  /**
+   * Extract chunk index from chunk ID (format: "floor_chunk_index")
+   * @param {string} chunkID - Chunk ID
+   * @returns {number} Chunk index
+   */
+  getChunkIndexFromID(chunkID) {
+    const parts = chunkID.split('_');
+    if (parts.length >= 2) {
+      const chunkIndex = parseInt(parts[1], 10);
+      return isNaN(chunkIndex) ? 0 : chunkIndex;
+    }
+    return 0;
   }
   
   /**
@@ -663,6 +881,15 @@ export class ChunkManager {
 
         if (sameData && cameraStable) {
           // Chunk is already rendered with the same data and wrapping, skip re-rendering
+          // But ensure zones are extracted (they might not have been extracted yet)
+          // Only extract once - check if zones already exist for this chunk
+          if (this.zoneManager && chunkData.zones && Array.isArray(chunkData.zones) && chunkData.zones.length > 0) {
+            const existingZones = this.zoneManager.chunkZones.get(chunkID);
+            if (!existingZones || existingZones.size === 0) {
+              // Zones haven't been extracted yet - extract them now
+              this.extractZonesFromChunk(chunkID, chunkData);
+            }
+          }
           return;
         }
       }
@@ -670,6 +897,9 @@ export class ChunkManager {
     
     // Remove existing mesh if present
     this.removeChunkMesh(chunkID);
+    
+    // Note: Zones are already extracted in chunkAdded listener - don't extract again here
+    // to avoid duplicate processing and potential issues at boundaries
     
     // Check if chunk has geometry data
     if (chunkData.geometry && chunkData.geometry.type === 'ring_floor') {
@@ -752,11 +982,14 @@ export class ChunkManager {
     // has moved to large positive or negative X (e.g., near the far side of the ring).
     const cameraX = cameraEarthRingPos.x || 0;
     
-    // DEBUG: Log camera position for rendering
-    console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, cameraXFromScene=${cameraX.toFixed(0)}, cameraXOverride=${cameraXOverride}`);
-    
     // Determine chunk index and base position
     const chunkIndex = (chunkData.chunk_index ?? parseInt(chunkID.split('_')[1], 10)) || 0;
+    
+    // DEBUG: Only log near boundaries where issues occur
+    const isBoundary = chunkIndex < 10 || chunkIndex > 263990;
+    if (isBoundary || window.earthring?.debug) {
+      console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, chunkIndex=${chunkIndex}, cameraXOverride=${cameraXOverride}`);
+    }
     const CHUNK_LENGTH = 1000;
     const chunkBaseX = chunkIndex * CHUNK_LENGTH;
     
@@ -765,8 +998,10 @@ export class ChunkManager {
     const chunkOffset = circumferenceOffsetMultiple * NEW_RING_CIRCUMFERENCE;
     const chunkOriginX = chunkBaseX + chunkOffset;
     
-    // DEBUG: Log chunk positioning
-    console.log(`[Chunks] Chunk ${chunkID} positioning: chunkIndex=${chunkIndex}, chunkBaseX=${chunkBaseX.toFixed(0)}, cameraX=${cameraX.toFixed(0)}, offsetMultiple=${circumferenceOffsetMultiple}, chunkOffset=${chunkOffset.toFixed(0)}, chunkOriginX=${chunkOriginX.toFixed(0)}`);
+    // DEBUG: Only log near boundaries
+    if (isBoundary || window.earthring?.debug) {
+      console.log(`[Chunks] Chunk ${chunkID} positioning: chunkIndex=${chunkIndex}, chunkBaseX=${chunkBaseX.toFixed(0)}, cameraX=${cameraX.toFixed(0)}, offsetMultiple=${circumferenceOffsetMultiple}, chunkOffset=${chunkOffset.toFixed(0)}, chunkOriginX=${chunkOriginX.toFixed(0)}`);
+    }
     
     // Process vertices
     let minX = Infinity, maxX = -Infinity;

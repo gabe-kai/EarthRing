@@ -44,10 +44,13 @@ export class ZoneManager {
     this.lastError = { message: null, timestamp: 0 };
     // Track last camera position for re-rendering wrapped zones
     this.lastCameraX = null;
-    this.WRAP_RE_RENDER_THRESHOLD = 5000; // Re-render if camera moved more than 5km
+    this.WRAP_RE_RENDER_THRESHOLD = 2000; // Re-render if camera moved more than 2km (lowered from 5km for better visibility)
     // Cache for full-ring zones: Map<zoneID, { geometry, lastCameraX }>
     // Full-ring zones don't need geometry rebuilds, just position updates
     this.fullRingZoneCache = new Map();
+    // Track which zones belong to which chunks (for cleanup when chunks are removed)
+    // Map<chunkID, Set<zoneID>>
+    this.chunkZones = new Map();
     // Per-type visibility: Map<zoneType, boolean>
     this.zoneTypeVisibility = new Map([
       ['residential', true],
@@ -71,31 +74,130 @@ export class ZoneManager {
    * Set up WebSocket message handlers for zone streaming
    */
   setupWebSocketHandlers() {
-    // Handle stream_delta messages (server-driven streaming)
-    // Zones are delivered via stream_delta when include_zones is true in subscription
-    wsClient.on('stream_delta', (data) => {
-      if (data.zones && Array.isArray(data.zones)) {
-        this.handleStreamedZones(data.zones);
-      }
-    });
+    // Zones are now bound to chunks - they come with chunk data, not separately via stream_delta
+    // This ensures zones appear and disappear with their chunks
+    // We still listen for stream_delta but only process zones that come WITH chunks
+    // (zones from standalone stream_delta are ignored - they should come from chunks)
   }
 
   /**
    * Handle zones received from server-driven streaming
    * @param {Array} zones - Array of zone objects from server
    */
-  handleStreamedZones(zones) {
-    if (window.earthring?.debug) {
-      console.log(`[Zones] Received ${zones.length} zone(s) from streaming`);
+  handleStreamedZones(zones, chunkID = null) {
+    // Track zones for chunk cleanup
+    if (chunkID) {
+      if (!this.chunkZones.has(chunkID)) {
+        this.chunkZones.set(chunkID, new Set());
+      }
     }
 
     // Add zones to game state (which will trigger rendering via listeners)
+    // IMPORTANT: Always upsert zones to ensure they persist, even if camera moves
+    const renderedCount = { count: 0 };
+    const skippedCount = { count: 0 };
+    
     zones.forEach(zone => {
       // Ensure zone has required fields
       if (zone.id && zone.geometry) {
+        // Track zone for chunk cleanup
+        if (chunkID) {
+          this.chunkZones.get(chunkID).add(zone.id);
+        }
+        
+        // Upsert to game state - this ensures zones persist even if REST API is called later
         this.gameState.upsertZone(zone);
+        // Also ensure zone is rendered immediately
+        // The gameState.upsertZone will trigger zoneAdded/zoneUpdated events,
+        // which will call renderZone via the listener, but we can also call it directly
+        // to ensure immediate rendering
+        const activeFloor = this.gameState.getActiveFloor();
+        const zoneFloor = zone.floor ?? 0;
+        if (zoneFloor === activeFloor) {
+          // Only render if zone matches active floor
+          this.renderZone(zone);
+          renderedCount.count++;
+        } else {
+          skippedCount.count++;
+        }
       }
     });
+    
+    // Only log warnings - zones skipped or none rendered
+    if (renderedCount.count === 0 && zones.length > 0) {
+      console.warn(`[Zones] Chunk ${chunkID}: 0 zones rendered (all ${skippedCount.count} skipped - wrong floor)`);
+    }
+  }
+  
+  /**
+   * Clean up zones when a chunk is removed
+   * @param {string} chunkID - Chunk ID
+   */
+  cleanupZonesForChunk(chunkID) {
+    const zoneIDs = this.chunkZones.get(chunkID);
+    if (!zoneIDs || zoneIDs.size === 0) {
+      // Check if there are any zones with this chunk_index in metadata
+      // Sometimes zones might not be tracked if they were loaded via REST API
+      const allZones = this.gameState.getAllZones();
+      const chunkParts = chunkID.split('_');
+      const chunkFloor = chunkParts.length >= 2 ? parseInt(chunkParts[0], 10) : null;
+      const chunkIndex = chunkParts.length >= 2 ? parseInt(chunkParts[1], 10) : null;
+      
+      // Find zones that belong to this chunk by checking metadata
+      let removedViaMetadata = 0;
+      allZones.forEach(zone => {
+        if (zone.floor !== chunkFloor) return;
+        
+        let metadata = zone.metadata;
+        if (typeof metadata === 'string') {
+          try {
+            metadata = JSON.parse(metadata);
+          } catch (e) {
+            metadata = null;
+          }
+        }
+        
+        if (metadata && metadata.chunk_index === chunkIndex && metadata.default_zone === true) {
+          // This is a chunk-based zone, remove it
+          this.removeZone(zone.id);
+          this.gameState.removeZone(zone.id);
+          removedViaMetadata++;
+        }
+      });
+      
+      // Only log if we actually removed zones or if we're near boundaries
+      if (removedViaMetadata > 0) {
+        const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+        if (isBoundary) {
+          console.log(`[Zones] Cleanup chunk ${chunkID}: removed ${removedViaMetadata} zone(s) via metadata`);
+        }
+      }
+      return;
+    }
+    
+    // Extract chunk index from chunkID for comparison
+    const chunkParts = chunkID.split('_');
+    const chunkIndex = chunkParts.length >= 2 ? parseInt(chunkParts[1], 10) : null;
+    
+    // Check if we're near boundaries (where zones disappear)
+    const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
+    
+    // Remove zones from game state and scene
+    zoneIDs.forEach(zoneID => {
+      // Always remove tracked zones (they're guaranteed to be chunk-based)
+      this.removeZone(zoneID);
+      this.gameState.removeZone(zoneID);
+    });
+    
+    // Only log cleanup near boundaries where zones disappear
+    if (isBoundary && zoneIDs.size > 0) {
+      const cameraPos = this.cameraController?.getEarthRingPosition?.();
+      const cameraS = cameraPos ? cameraPos.x : 0;
+      console.log(`[Zones] Cleanup chunk ${chunkID} (idx=${chunkIndex}): removed ${zoneIDs.size} zone(s) at camera s=${cameraS.toFixed(1)}`);
+    }
+    
+    // Remove chunk from tracking
+    this.chunkZones.delete(chunkID);
   }
 
   setupListeners() {
@@ -103,6 +205,8 @@ export class ZoneManager {
     this.gameState.on('zoneUpdated', ({ zone }) => this.renderZone(zone));
     this.gameState.on('zoneRemoved', ({ zoneID }) => this.removeZone(zoneID));
     this.gameState.on('zonesCleared', () => this.clearAllZones());
+    // Clean up zones when chunks are removed
+    this.gameState.on('chunkRemoved', ({ chunkID }) => this.cleanupZonesForChunk(chunkID));
     // Reload zones when active floor changes
     this.gameState.on('activeFloorChanged', ({ newFloor }) => {
       // Remove all zone meshes that don't match the new floor
@@ -139,12 +243,11 @@ export class ZoneManager {
       return;
     }
 
-    // If streaming is enabled, zones will be delivered automatically via stream_delta
-    // Only use REST API as fallback
+    // Zones are now bound to chunks - they're loaded from chunk data, not via separate zone queries
+    // Don't use REST API for zones anymore - zones come from chunks
+    // This ensures zones are always bound to chunks and appear/disappear with them
     if (this.useStreaming && wsClient.isConnected()) {
-      if (window.earthring?.debug) {
-        console.log('[Zones] Using streaming subscription, skipping REST API call');
-      }
+      // Silently skip - zones come from chunks via streaming
       return;
     }
 
@@ -231,9 +334,10 @@ export class ZoneManager {
         this.gameState.upsertZone(zone);
       });
       
-      // Only remove zones that are far from camera (outside fetch range)
+      // Only remove zones that are clearly far from camera and outside fetch range
       // Keep zones that are manually added (e.g., newly created) even if outside fetch
       // Never remove system zones or zones that span a large portion of the ring
+      // IMPORTANT: Be conservative - only remove zones that are definitely not visible
       const cameraXWrapped = wrapRingPosition(cameraPos.x);
       
       existingZones.forEach(existingZone => {
@@ -255,49 +359,73 @@ export class ZoneManager {
           (typeof existingZone.geometry === 'string' ? JSON.parse(existingZone.geometry) : existingZone.geometry) : null;
         
         if (zoneGeometry && zoneGeometry.coordinates && zoneGeometry.coordinates[0]) {
-          const firstCoord = zoneGeometry.coordinates[0][0];
-          const zoneX = firstCoord[0];
-          const zoneXWrapped = wrapRingPosition(zoneX);
-          
-          // Check if zone spans a large portion of the ring (e.g., full ring zones)
-          // Calculate bounding box of zone
+          // Calculate bounding box of zone (check all coordinates, not just first)
           let minX = Infinity, maxX = -Infinity;
+          let minY = Infinity, maxY = -Infinity;
           const coords = zoneGeometry.coordinates[0];
           coords.forEach(coord => {
             const x = coord[0];
+            const y = coord[1];
             minX = Math.min(minX, x);
             maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
           });
           
+          // Check if zone spans a large portion of the ring (e.g., full ring zones)
+          const directSpan = maxX - minX;
+          const wrappedSpan = NEW_RING_CIRCUMFERENCE - directSpan;
+          const effectiveSpan = Math.min(directSpan, wrappedSpan);
+          
           // If zone spans more than half the ring, never remove it (it's always "near" the camera)
-          const zoneSpan = maxX - minX;
-          if (zoneSpan > NEW_RING_CIRCUMFERENCE / 2) {
+          if (effectiveSpan > NEW_RING_CIRCUMFERENCE / 2) {
             if (window.DEBUG_ZONE_COORDS) {
               console.log('[ZoneManager] Keeping large-span zone outside fetch range:', {
                 zoneId: existingZone.id,
-                span: zoneSpan,
+                effectiveSpan,
               });
             }
             return; // Keep large zones (e.g., full ring zones)
           }
           
-          // Calculate distance accounting for wrap-around
-          const directDistance = Math.abs(zoneXWrapped - cameraXWrapped);
-          const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
-          const distance = Math.min(directDistance, wrappedDistance);
+          // Check if zone bounding box overlaps with fetch area
+          // Calculate distance from camera to zone bounding box (accounting for wrap-around)
+          // Use the closest point of the zone bounding box to the camera
+          const zoneCenterX = (minX + maxX) / 2;
+          const zoneCenterXWrapped = wrapRingPosition(zoneCenterX);
           
-          // Only remove if zone is clearly outside fetch range (with buffer)
-          if (distance > range * 2) {
+          // Calculate distance from camera to zone center
+          const directDistance = Math.abs(zoneCenterXWrapped - cameraXWrapped);
+          const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
+          const centerDistance = Math.min(directDistance, wrappedDistance);
+          
+          // Also check if zone extends into the fetch range
+          // Zone extends into fetch range if its bounding box overlaps with [cameraX - range, cameraX + range]
+          const zoneHalfSpan = effectiveSpan / 2;
+          const zoneMinDistance = Math.max(0, centerDistance - zoneHalfSpan);
+          
+          // Only remove if zone is clearly outside fetch range
+          // Use a larger buffer (range * 3) to be more conservative and prevent zones from disappearing
+          // Also check Y coordinates to ensure zone isn't visible in width direction
+          const yDistance = Math.max(
+            Math.abs(minY - cameraPos.y),
+            Math.abs(maxY - cameraPos.y)
+          );
+          const isOutsideYRange = yDistance > DEFAULT_WIDTH_RANGE * 1.5;
+          
+          if (zoneMinDistance > range * 3 && isOutsideYRange) {
             if (window.DEBUG_ZONE_COORDS) {
               console.warn('[ZoneManager] Removing zone far from camera:', {
                 zoneId: existingZone.id,
-                distance,
+                centerDistance,
+                zoneMinDistance,
                 range,
+                yDistance,
                 isSystem: existingZone.is_system_zone,
-                span: zoneSpan,
+                effectiveSpan,
               });
             }
-            // Zone is far from camera, safe to remove
+            // Zone is far from camera in both X and Y, safe to remove
             this.gameState.removeZone(existingZone.id);
           }
           // Otherwise, keep it (might be near camera but outside fetch bounds due to wrapping)
@@ -395,8 +523,11 @@ export class ZoneManager {
         const cameraDelta = Math.abs(cameraXWrapped - lastCameraXWrapped);
         const wrappedDelta = Math.min(cameraDelta, NEW_RING_CIRCUMFERENCE - cameraDelta);
         
-        // Only update if camera moved significantly (for wrapping)
-        if (wrappedDelta < this.WRAP_RE_RENDER_THRESHOLD) {
+        // Use the same threshold as shouldReRenderZones (2km) for consistency
+        const RE_RENDER_THRESHOLD = 2000;
+        
+        // Only skip rebuild if camera hasn't moved significantly (for wrapping)
+        if (wrappedDelta < RE_RENDER_THRESHOLD) {
           // Camera hasn't moved enough to require re-wrapping
           // Just ensure visibility is correct and return
           const zoneType = (zone.zone_type?.toLowerCase() || 'default');
@@ -409,13 +540,13 @@ export class ZoneManager {
         }
         
         // Camera moved significantly - need to update wrapping
-        // But we can still reuse the geometry, just update positions
+        // Rebuild the mesh to ensure proper wrapping
         if (window.DEBUG_ZONE_COORDS) {
-          console.log('[ZoneManager] Updating position for full-ring zone:', zone.id, 'camera delta:', wrappedDelta);
+          console.log('[ZoneManager] Rebuilding full-ring zone due to camera movement:', zone.id, 'camera delta:', wrappedDelta);
         }
         // Update cached camera position
         cached.lastCameraX = cameraX;
-        // Fall through to rebuild (but we could optimize further by just updating mesh positions)
+        // Fall through to rebuild mesh with new camera position
       }
     }
 
@@ -773,7 +904,11 @@ export class ZoneManager {
     const wrappedDistance = NEW_RING_CIRCUMFERENCE - directDistance;
     const distanceMoved = Math.min(directDistance, wrappedDistance);
     
-    if (distanceMoved > this.WRAP_RE_RENDER_THRESHOLD) {
+    // Lower threshold to 2km (from 5km) to ensure zones re-render more frequently
+    // This prevents zones from appearing/disappearing as wrapping changes
+    const RE_RENDER_THRESHOLD = 2000; // 2km instead of 5km
+    
+    if (distanceMoved > RE_RENDER_THRESHOLD) {
       this.lastCameraX = currentCameraX;
       return true;
     }
