@@ -15,12 +15,16 @@ import (
 
 // ChunkStorage handles chunk storage and retrieval from the database
 type ChunkStorage struct {
-	db *sql.DB
+	db          *sql.DB
+	zoneStorage *ZoneStorage // Optional zone storage for creating zones from chunk generation
 }
 
 // NewChunkStorage creates a new chunk storage instance
 func NewChunkStorage(db *sql.DB) *ChunkStorage {
-	return &ChunkStorage{db: db}
+	return &ChunkStorage{
+		db:          db,
+		zoneStorage: NewZoneStorage(db), // Create zone storage for zone creation
+	}
 }
 
 // StoredChunkMetadata represents chunk metadata stored in the database
@@ -255,6 +259,109 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			return fmt.Errorf("PostGIS extension is not installed - cannot store geometry")
 		}
 
+		// Create zones from generation response if any (before storing chunk_data)
+		var zoneIDs []int64
+		if len(genResponse.Zones) > 0 && s.zoneStorage != nil {
+			for _, zoneData := range genResponse.Zones {
+				// Convert zone data (GeoJSON Feature) to ZoneCreateInput
+				zoneMap, ok := zoneData.(map[string]interface{})
+				if !ok {
+					log.Printf("[StoreChunk] Warning: zone data is not a map, skipping: %T", zoneData)
+					continue
+				}
+
+				// Extract zone properties
+				props, ok := zoneMap["properties"].(map[string]interface{})
+				if !ok {
+					log.Printf("[StoreChunk] Warning: zone properties not found or invalid, skipping")
+					continue
+				}
+
+				// Extract geometry
+				geometry, ok := zoneMap["geometry"].(map[string]interface{})
+				if !ok {
+					log.Printf("[StoreChunk] Warning: zone geometry not found or invalid, skipping")
+					continue
+				}
+
+				// Build zone geometry GeoJSON
+				geometryJSON, err := json.Marshal(geometry)
+				if err != nil {
+					log.Printf("[StoreChunk] Warning: failed to marshal zone geometry: %v", err)
+					continue
+				}
+
+				// Extract zone properties
+				zoneType, _ := props["zone_type"].(string)
+				if zoneType == "" {
+					zoneType = "restricted" // Default to restricted
+				}
+				name, _ := props["name"].(string)
+				if name == "" {
+					name = fmt.Sprintf("Chunk Zone (Floor %d, Chunk %d)", floor, chunkIndex)
+				}
+				isSystemZone, _ := props["is_system_zone"].(bool)
+
+				// Extract properties and metadata
+				var propertiesJSON json.RawMessage
+				if propsObj, ok := props["properties"].(map[string]interface{}); ok {
+					if propsBytes, err := json.Marshal(propsObj); err == nil {
+						propertiesJSON = propsBytes
+					}
+				}
+				var metadataJSON json.RawMessage
+				if metadataObj, ok := props["metadata"].(map[string]interface{}); ok {
+					if metadataBytes, err := json.Marshal(metadataObj); err == nil {
+						metadataJSON = metadataBytes
+					}
+				}
+
+				// Check if zone already exists for this chunk (by metadata chunk_index)
+				// If it exists, use its ID; otherwise create it
+				var zoneID int64
+				checkZoneQuery := `
+					SELECT id FROM zones
+					WHERE floor = $1 
+					  AND zone_type = $2
+					  AND is_system_zone = $3
+					  AND metadata->>'chunk_index' = $4
+					  AND metadata->>'default_zone' = 'true'
+					LIMIT 1
+				`
+				err = tx.QueryRow(checkZoneQuery, floor, zoneType, isSystemZone, fmt.Sprintf("%d", chunkIndex)).Scan(&zoneID)
+				if err == nil {
+					// Zone already exists, use it
+					zoneIDs = append(zoneIDs, zoneID)
+					continue
+				} else if err != sql.ErrNoRows {
+					log.Printf("[StoreChunk] Warning: failed to check for existing zone: %v", err)
+					continue
+				}
+
+				// Zone doesn't exist, create it
+				zoneQuery := `
+					INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
+					VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, NULL, $5, $6, $7)
+					RETURNING id
+				`
+				err = tx.QueryRow(
+					zoneQuery,
+					name,
+					zoneType,
+					string(geometryJSON),
+					floor,
+					isSystemZone,
+					nullableJSONString(propertiesJSON),
+					nullableJSONString(metadataJSON),
+				).Scan(&zoneID)
+				if err != nil {
+					log.Printf("[StoreChunk] Warning: failed to create zone for chunk %d_%d: %v", floor, chunkIndex, err)
+					continue
+				}
+				zoneIDs = append(zoneIDs, zoneID)
+			}
+		}
+
 		// Store geometry in chunk_data table
 		// For ring floor geometry, we'll store it as a POLYGON
 		// The geometry represents the chunk boundary rectangle
@@ -264,6 +371,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			ON CONFLICT (chunk_id)
 			DO UPDATE SET
 				geometry = ST_GeomFromText($2, 0),
+				zone_ids = $4,
 				terrain_data = $5,
 				last_updated = CURRENT_TIMESTAMP
 		`
@@ -275,7 +383,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			return fmt.Errorf("failed to marshal geometry: %w", err)
 		}
 
-		_, err = tx.Exec(query, chunkID, geometryWKT, pq.Array([]int64{}), pq.Array([]int64{}), string(geometryJSON))
+		_, err = tx.Exec(query, chunkID, geometryWKT, pq.Array([]int64{}), pq.Array(zoneIDs), string(geometryJSON))
 		if err != nil {
 			// Check for PostGIS-specific errors
 			errStr := err.Error()

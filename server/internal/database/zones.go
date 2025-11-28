@@ -1543,9 +1543,17 @@ func (s *ZoneStorage) CountZones() (int64, error) {
 	return count, nil
 }
 
-// RecreateDefaultZones recreates the default system zones (e.g., maglev transit zones).
-// This should be called after TRUNCATE to restore default zones.
+// RecreateDefaultZones recreates the default system zones.
+// NOTE: As of migration 000018, default restricted zones are now generated per-chunk
+// by the procedural service when chunks are created. This function is kept for backward
+// compatibility but no longer creates full-ring zones.
+// This should be called after TRUNCATE, but zones will be automatically created
+// when chunks are generated.
 func (s *ZoneStorage) RecreateDefaultZones() error {
+	// Default zones are now created per-chunk by the procedural service
+	// No need to create full-ring zones anymore
+	log.Printf("[ZoneStorage] RecreateDefaultZones: Default zones are now generated per-chunk by procedural service")
+	return nil
 	query := `
 		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
 		VALUES
@@ -1766,23 +1774,43 @@ func (s *ZoneStorage) ListZonesByRingArc(floor int, minS, minR, minZ, maxS, maxR
 
 	// Convert arc length to legacy X position using ringmap functions
 	// Legacy X = s (arc length), wrapped to [0, RingCircumference)
+	// IMPORTANT: Handle negative positions correctly by wrapping before comparison
 	minX := ringmap.WrapArcLength(minS)
 	maxX := ringmap.WrapArcLength(maxS)
 
-	// Handle wrapping: if minS > maxS (after wrapping), the bounding box wraps around
-	// Check if the bounding box crosses the ring boundary
-	if minS < 0 && maxS > 0 {
-		// Bounding box wraps around - need to handle this case
-		// For now, expand the query to cover the full visible area
-		// This is a simplified approach - a full implementation would query both sides
-		if maxX < minX {
-			// Wrapped case: query from minX to circumference and from 0 to maxX
-			// For simplicity, query the larger range
-			if (maxX + (RingCircumference - minX)) > (minX - maxX) {
-				// Wrapped range is larger, query full ring
-				minX = 0
-				maxX = RingCircumference
-			}
+	// Handle wrapping: if the bounding box wraps around the ring boundary
+	// This happens when minS is negative or when the range crosses the 0/264000000 boundary
+	if minX > maxX {
+		// Bounding box wraps around - query both sides of the ring
+		// For now, expand to cover the full visible area (simplified approach)
+		// A full implementation would query [minX, RingCircumference) and [0, maxX] separately
+		// But for zone queries, we can expand the range to ensure we get all zones
+		wrappedRange := (RingCircumference - minX) + maxX
+		directRange := minX - maxX
+		if wrappedRange < directRange {
+			// Wrapped range is smaller, but we need to query both sides
+			// For simplicity, query the full ring if wrapped
+			minX = 0
+			maxX = RingCircumference
+		} else {
+			// Direct range is smaller, but we still have wrapping
+			// Expand to ensure we get all zones
+			minX = 0
+			maxX = RingCircumference
+		}
+	} else if minS < 0 || maxS < 0 {
+		// Handle negative arc lengths (moving West)
+		// Wrap negative values correctly
+		if minS < 0 {
+			minX = ringmap.WrapArcLength(minS)
+		}
+		if maxS < 0 {
+			maxX = ringmap.WrapArcLength(maxS)
+		}
+		// If after wrapping minX > maxX, we have a wrap-around case
+		if minX > maxX {
+			minX = 0
+			maxX = RingCircumference
 		}
 	}
 
@@ -1826,6 +1854,45 @@ func (s *ZoneStorage) ListZonesByOwner(ownerID int64) ([]Zone, error) {
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
 			log.Printf("Failed to close rows in ListZonesByOwner: %v", closeErr)
+		}
+	}()
+
+	var zones []Zone
+	for rows.Next() {
+		zone, err := scanZone(rows)
+		if err != nil {
+			return nil, err
+		}
+		zones = append(zones, *zone)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate zones: %w", err)
+	}
+	return zones, nil
+}
+
+// GetZonesByIDs fetches zones by their IDs.
+func (s *ZoneStorage) GetZonesByIDs(zoneIDs []int64) ([]Zone, error) {
+	if len(zoneIDs) == 0 {
+		return []Zone{}, nil
+	}
+
+	query := `
+		SELECT id, name, zone_type, floor, owner_id, is_system_zone,
+		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
+		       created_at, updated_at
+		FROM zones
+		WHERE id = ANY($1)
+		ORDER BY id
+	`
+
+	rows, err := s.db.Query(query, pq.Array(zoneIDs))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query zones by IDs: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows in GetZonesByIDs: %v", closeErr)
 		}
 	}()
 

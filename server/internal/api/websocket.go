@@ -656,6 +656,36 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					if err != nil {
 						log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
 					}
+					
+					// Load zones from chunk_data.zone_ids
+					var zones []interface{}
+					chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
+					if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
+						zoneRecords, err := h.zoneStorage.GetZonesByIDs(chunkData.ZoneIDs)
+						if err == nil {
+							for _, zone := range zoneRecords {
+								zoneFeature := map[string]interface{}{
+									"type": "Feature",
+									"properties": map[string]interface{}{
+										"id":            zone.ID,
+										"name":          zone.Name,
+										"zone_type":     zone.ZoneType,
+										"floor":         zone.Floor,
+										"is_system_zone": zone.IsSystemZone,
+									},
+									"geometry": json.RawMessage(zone.Geometry),
+								}
+								if len(zone.Properties) > 0 {
+									zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+								}
+								if len(zone.Metadata) > 0 {
+									zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+								}
+								zones = append(zones, zoneFeature)
+							}
+						}
+					}
+					
 					metadata := ChunkMetadata{
 						ID:           chunkID,
 						Floor:        storedMetadata.Floor,
@@ -668,7 +698,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 						ID:         chunkID,
 						Geometry:   geometry,
 						Structures: []interface{}{},
-						Zones:      []interface{}{},
+						Zones:      zones,
 						Metadata:   &metadata,
 					}
 				} else {
@@ -699,6 +729,41 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
 				}
 
+				// Load zones from chunk_data.zone_ids
+				var zones []interface{}
+				chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
+				if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
+					// Load zones by IDs
+					zoneRecords, err := h.zoneStorage.GetZonesByIDs(chunkData.ZoneIDs)
+					if err == nil {
+						// Convert zones to GeoJSON Feature format for client
+						for _, zone := range zoneRecords {
+							zoneFeature := map[string]interface{}{
+								"type": "Feature",
+								"properties": map[string]interface{}{
+									"id":            zone.ID,
+									"name":          zone.Name,
+									"zone_type":     zone.ZoneType,
+									"floor":         zone.Floor,
+									"is_system_zone": zone.IsSystemZone,
+								},
+								"geometry": json.RawMessage(zone.Geometry),
+							}
+							// Add properties and metadata if present
+							if len(zone.Properties) > 0 {
+								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+							}
+							if len(zone.Metadata) > 0 {
+								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+							}
+							zones = append(zones, zoneFeature)
+						}
+						log.Printf("[Chunks] Loaded %d zones for chunk %s from database", len(zones), chunkID)
+					} else {
+						log.Printf("[Chunks] Warning: Failed to load zones for chunk %s: %v", chunkID, err)
+					}
+				}
+
 				metadata := ChunkMetadata{
 					ID:           chunkID,
 					Floor:        storedMetadata.Floor,
@@ -712,7 +777,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					ID:         chunkID,
 					Geometry:   geometry,
 					Structures: []interface{}{},
-					Zones:      []interface{}{},
+					Zones:      zones,
 					Metadata:   &metadata,
 				}
 			}
@@ -883,35 +948,11 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 		log.Printf("[Stream] Skipping chunk delivery: include_chunks=%v, chunk_count=%d", req.IncludeChunks, len(plan.ChunkIDs))
 	}
 
-	// Phase 2: Server-side zone delivery - send initial zones asynchronously
+	// Zones are now bound to chunks - they come WITH chunk data, not separately
+	// Zones are included in each chunk's zones array, so we don't need separate zone delivery
+	// This ensures zones appear and disappear with their chunks
 	if req.IncludeZones {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[Stream] Recovered from panic while sending zones for subscription %s: %v", plan.SubscriptionID, r)
-				}
-			}()
-			// Compute bounding box for zone query
-			bbox := streaming.ComputeZoneBoundingBox(req.Pose, req.RadiusMeters, req.WidthMeters)
-			zones := h.loadZonesForArea(bbox, req.Pose)
-			if len(zones) > 0 {
-				// Extract zone IDs and update subscription
-				zoneIDs := make([]int64, len(zones))
-				for i, zone := range zones {
-					zoneIDs[i] = zone.ID
-				}
-				// Update subscription with zone IDs (for delta computation)
-				if delta, err := h.streamManager.ComputeZoneDelta(plan.SubscriptionID, zoneIDs); err != nil {
-					log.Printf("Failed to update zone IDs in subscription: %v", err)
-				} else if len(delta.AddedZoneIDs) > 0 {
-					log.Printf("Initial zone subscription: %d zones added", len(delta.AddedZoneIDs))
-				}
-
-				// Send zones as stream_delta message (server-driven format)
-				h.sendZoneData(conn, zones, "stream_delta", "")
-				log.Printf("Sent %d initial zones for subscription %s", len(zones), plan.SubscriptionID)
-			}
-		}()
+		log.Printf("[Stream] Zones will be delivered with chunks (not separately) for subscription %s", plan.SubscriptionID)
 	}
 }
 
@@ -989,65 +1030,11 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		}
 	}
 
-	// Handle zone deltas if zones are included
-	if subscription.Request.IncludeZones && subscription.ZoneBoundingBox != nil {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[Stream] Recovered from panic while updating zones for subscription %s: %v", req.SubscriptionID, r)
-				}
-			}()
-			// Recompute bounding box (already updated in UpdatePose)
-			bbox := *subscription.ZoneBoundingBox
-
-			// Load zones for new bounding box
-			op := h.profiler.Start("zone_query")
-			zones := h.loadZonesForArea(bbox, req.Pose)
-			op.End()
-
-			// Extract zone IDs
-			newZoneIDs := make([]int64, len(zones))
-			for i, zone := range zones {
-				newZoneIDs[i] = zone.ID
-			}
-
-			// Compute zone delta
-			op = h.profiler.Start("delta_computation")
-			zoneDelta, err := h.streamManager.ComputeZoneDelta(req.SubscriptionID, newZoneIDs)
-			op.End()
-			if err != nil {
-				log.Printf("[Stream] ComputeZoneDelta failed: %v", err)
-				return
-			}
-
-			// Send zone deltas if there are changes
-			if len(zoneDelta.AddedZoneIDs) > 0 || len(zoneDelta.RemovedZoneIDs) > 0 {
-				log.Printf("[Stream] Zone delta: added=%d, removed=%d", len(zoneDelta.AddedZoneIDs), len(zoneDelta.RemovedZoneIDs))
-
-				// Load and send added zones
-				if len(zoneDelta.AddedZoneIDs) > 0 {
-					addedZones := make([]database.Zone, 0, len(zoneDelta.AddedZoneIDs))
-					zoneMap := make(map[int64]database.Zone)
-					for _, zone := range zones {
-						zoneMap[zone.ID] = zone
-					}
-					for _, zoneID := range zoneDelta.AddedZoneIDs {
-						if zone, ok := zoneMap[zoneID]; ok {
-							addedZones = append(addedZones, zone)
-						}
-					}
-					if len(addedZones) > 0 {
-						h.sendZoneData(conn, addedZones, "stream_delta", "")
-						log.Printf("[Stream] Sent %d added zones for subscription %s", len(addedZones), req.SubscriptionID)
-					}
-				}
-
-				// Note: Removed zones are communicated via the delta structure
-				if len(zoneDelta.RemovedZoneIDs) > 0 {
-					log.Printf("[Stream] Zones to remove: %v", zoneDelta.RemovedZoneIDs)
-				}
-			}
-		}()
+	// Zones are now bound to chunks - they come WITH chunk data, not separately
+	// Zones are included in each chunk's zones array, so we don't need separate zone delta handling
+	// This ensures zones appear and disappear with their chunks
+	if subscription.Request.IncludeZones {
+		log.Printf("[Stream] Zones are bound to chunks - no separate zone delta needed for subscription %s", req.SubscriptionID)
 	}
 
 	// Send acknowledgment
