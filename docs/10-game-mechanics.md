@@ -1,5 +1,14 @@
 # Game Mechanics
 
+**Status**: 📋 **DESIGN SPECIFICATION** - This document describes planned game mechanics. Implementation status varies by feature.
+
+**Related Documentation**:
+- [Zone System](09-zone-system.md) - Zone creation and management mechanics
+- [NPC AI and Pathfinding](12-npc-ai-pathfinding.md) - NPC system implementation details
+- [Microgravity Physics](11-microgravity-physics.md) - Physics system for racing mechanics
+- [Transportation Generation](13-transportation-generation.md) - Organic transportation infrastructure
+- [Implementation Phases](../implementation-phases.md) - Feature implementation roadmap
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -129,7 +138,7 @@ Cities require and produce various resources:
 
 ### Zone Management
 
-Players define and manage zones (see Zone System Design doc):
+Players define and manage zones. See [Zone System Documentation](09-zone-system.md) for complete details:
 
 1. **Zone Creation**
    - Draw freeform polygons
@@ -277,6 +286,7 @@ NPCs have needs that affect behavior. Complexity increases when selected:
    - Use maglev for long distances
    - Avoid congestion when possible
    - Selected NPCs show detailed pathfinding decisions
+   - See [NPC AI and Pathfinding Documentation](12-npc-ai-pathfinding.md) for implementation details
 
 3. **Decision Making** (Abstract → Detailed)
    - **Abstract**: Choose homes/work based on aggregate factors (quality, price, proximity)
@@ -366,13 +376,15 @@ Racing in EarthRing is **illegal city racing** that uses existing transportation
 
 **Microgravity Environment**: The orbital ring is in microgravity, making traditional ground vehicles impractical. Racing focuses on **precise velocity control** rather than traditional driving skills. Players must master momentum, trajectory, and microgravity physics.
 
+**Related Documentation**: See [Microgravity Physics Implementation](11-microgravity-physics.md) for complete physics system details.
+
 ### Race Route Generation
 
 Race routes are created from existing city infrastructure:
 
 1. **Route Selection**
    - Players select start and end points (or checkpoints)
-   - System generates route using existing transportation network
+   - System generates route using existing transportation network (see [Transportation Generation](13-transportation-generation.md))
    - Routes can use any transportation infrastructure:
      - Road lanes (at hubs)
      - Tram-loops
@@ -471,6 +483,8 @@ Race routes are created from existing city infrastructure:
 1. **Microgravity Physics** (Realistic Physics Model)
 
    **Design Decision**: Microgravity physics are realistic rather than arcade-style, requiring players to master actual physics principles.
+   
+   **Implementation**: See [Microgravity Physics Documentation](11-microgravity-physics.md) for complete implementation specification.
 
    - **Velocity Control**: Primary skill - managing speed and direction precisely
      - No artificial speed limits or constraints

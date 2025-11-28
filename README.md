@@ -16,14 +16,14 @@ EarthRing is set on a massive orbital ring structure:
 
 ### Coordinate System
 
-**Status**: ⚠️ **MIGRATION IN PROGRESS** - The coordinate system is being migrated to ER0/EarthRing coordinates.
+**Status**: ✅ **MIGRATION COMPLETE** - The coordinate system has been migrated to ER0/EarthRing coordinates. Legacy coordinate support is maintained for backward compatibility.
 
 - **ER0**: Earth-Centered, Earth-Fixed frame (origin at Earth's center)
 - **RingPolar**: (theta, r, z) - angle around ring, radial offset, vertical offset
 - **RingArc**: (s, r, z) - arc length along ring, radial offset, vertical offset
 - **Kongo Hub**: Anchored to ER0 at (KongoHubRadius, 0, 0) = (6,878,137 m, 0, 0)
 
-See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) for details.
+See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) and [Map System Design](docs/02-map-system.md#coordinate-system) for details.
 
 ## Current Client Features
 
@@ -47,7 +47,7 @@ See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) 
 - **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Polygon, Paintbrush, Dezone), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted, Dezone). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
 - **Active Floor System**: The player can select an active floor (-2 to +2) independent of camera elevation. All game content (chunks, zones, grid, buildings, NPCs) is loaded and rendered for the selected floor, allowing the camera to zoom out for a wider view while keeping actions on the chosen floor. The active floor can be changed using the `+`/`−` buttons in the zones toolbar (click "Z" icon to expand).
 - **Chunk mesh reuse & precision fixes**: Chunk geometry is now rendered relative to each chunk’s local origin and we cache meshes while the camera is stable. This eliminated the far-side platform flicker and prevents precision loss when working ~132,000 km away from the origin.
-- **Server-driven streaming**: The client subscribes to chunk/zone streams via `stream_subscribe` and sends `stream_update_pose` messages as the camera moves. The server computes chunk and zone deltas (added/removed) and streams them efficiently, eliminating the need for client-side chunk selection logic. Chunks automatically unload behind the camera as you move.
+- **Server-driven streaming**: The client subscribes to chunk/zone streams via `stream_subscribe` and sends `stream_update_pose` messages as the camera moves. The server computes chunk and zone deltas (added/removed) and streams them efficiently via `stream_delta` messages, eliminating the need for client-side chunk selection logic. Chunks automatically unload behind the camera as you move. See [Streaming System Documentation](docs/07-streaming-system.md) for complete details.
 - **Authentication-aware streaming**: The render loop, chunk loader, and zone manager now defer all network calls until the user is logged in. No more "Not authenticated" spam on cold starts—the client just shows the auth UI until tokens are present.
 
 ## Prerequisites
@@ -98,6 +98,8 @@ See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) 
    # - REFRESH_SECRET (generate with: openssl rand -hex 32)
    # - ENABLE_PERFORMANCE_PROFILING (optional, set to "true" to enable performance profiling)
    ```
+   
+   **Performance Profiling**: See [Performance Profiling Documentation](docs/PERFORMANCE_PROFILING.md) for details on enabling and using the performance profiling system.
    
    **Client configuration (optional):**
    ```powershell
@@ -320,6 +322,8 @@ cd server && go test ./... && python -m pytest
 cd ../client-web && npm test
 ```
 
+See [Testing Documentation](docs/tests/README.md) for comprehensive testing framework details, test utilities, and coverage information.
+
 **Lint code:**
 ```bash
 cd client-web && npm run lint
@@ -486,6 +490,8 @@ The project includes comprehensive testing utilities:
 - **JavaScript**: Test utilities in `client-web/src/test-utils.js` (mocks, fixtures)
 
 See `server/internal/testutil/README.md` and `server/tests/README.md` for detailed usage.
+
+**Test Documentation**: All test-related documentation is organized in `docs/tests/`. See `docs/tests/README.md` for details.
 
 ### Authentication and Security
 

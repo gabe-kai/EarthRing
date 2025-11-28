@@ -121,6 +121,7 @@ Handles all communication with the server.
 - Message queuing and handling
 - Reconnection logic
 - Message serialization/deserialization
+- **Authentication-aware operation**: Defers network calls until authenticated
 
 #### Implementation
 
@@ -151,6 +152,39 @@ class NetworkLayer {
   // }
 }
 ```
+
+#### Authentication-Aware Streaming ✅ **IMPLEMENTED**
+
+**Design Decision**: All network operations (chunk loading, zone fetching, streaming subscriptions) defer until the user is authenticated. This prevents "Not authenticated" error spam on cold starts and provides a cleaner user experience.
+
+**Implementation Details**:
+
+1. **Game State Manager Authentication Signal**:
+   - `gameStateManager.isUserAuthenticated()` mirrors `connectionState.api.authenticated`
+   - Provides a single source of truth for authentication status
+   - All rendering systems check this before making network calls
+
+2. **Chunk Manager Behavior**:
+   - `subscribeToStreaming()` only called after successful authentication
+   - `updateStreamingPose()` returns early if `!gameStateManager.isUserAuthenticated()`
+   - Chunk loading completely idle until login succeeds
+
+3. **Zone Manager Behavior**:
+   - `loadZonesAroundCamera()` checks authentication before making API calls
+   - `stream_delta` zone processing only occurs when authenticated
+   - No zone fetch attempts until tokens are present
+
+4. **Render Loop Behavior**:
+   - Render loop continues running (for UI, camera controls)
+   - Network operations (chunk/zone loading) are deferred
+   - Client shows auth UI until tokens are present
+   - Once authenticated, streaming automatically begins
+
+**Benefits**:
+- No "Not authenticated" error spam on cold starts
+- Cleaner console output
+- Better user experience (auth UI shown immediately)
+- Automatic streaming start after login (no manual intervention needed)
 
 ### Layer 2: Game State Manager ✅ **IMPLEMENTED**
 
@@ -388,6 +422,41 @@ Manages chunk loading and unloading based on viewport.
 - Seam-aware rendering with chunk wrapping
 - **Server-driven streaming required**: Uses `stream_subscribe` and `stream_update_pose` exclusively (legacy `chunk_request` removed)
 
+**Server-Driven Streaming Implementation** ✅ **IMPLEMENTED**:
+
+The client implements server-driven streaming for efficient chunk and zone loading:
+
+1. **Initial Subscription** (`subscribeToStreaming()`):
+   - Called after WebSocket connection and authentication
+   - Sends `stream_subscribe` message with current camera pose
+   - Includes `include_chunks: true` and `include_zones: true` flags
+   - Receives `stream_ack` response with `subscription_id` and initial `chunk_ids`
+   - Stores `subscription_id` for future pose updates
+
+2. **Pose Updates** (`updateStreamingPose()`):
+   - Called when camera moves (throttled to prevent excessive updates)
+   - Sends `stream_update_pose` message with `subscription_id` and new pose
+   - Supports both legacy coordinates (`ring_position`, `width_offset`) and new coordinates (`arc_length`, `theta`, `r`, `z`)
+   - Receives `stream_pose_ack` response with chunk deltas (`AddedChunks`, `RemovedChunks`)
+   - Immediately removes chunks listed in `RemovedChunks`
+   - Added chunks are delivered asynchronously via `stream_delta` messages
+
+3. **Delta Message Handling** (`stream_delta` event handler):
+   - Listens for `stream_delta` messages from WebSocket client
+   - Processes `chunks` array: decompresses geometry, adds to game state, renders meshes
+   - Processes `zones` array: adds to game state (ZoneManager handles rendering)
+   - Filters chunks/zones by active floor before processing
+   - Handles compressed geometry automatically (transparent decompression)
+
+4. **Authentication-Aware Streaming**:
+   - All streaming operations check `gameStateManager.isUserAuthenticated()` before executing
+   - `subscribeToStreaming()` is only called after successful authentication
+   - `updateStreamingPose()` returns early if not authenticated
+   - Prevents "Not authenticated" errors on cold starts
+   - Client shows auth UI until tokens are present, then automatically subscribes
+
+**See**: [Streaming System Documentation](docs/07-streaming-system.md) for complete server-side implementation details.
+
 **Chunk UI** (`client-web/src/ui/chunk-ui.js`):
 - Chunk metadata retrieval interface
 - Chunk deletion interface (with confirmation dialog)
@@ -395,10 +464,11 @@ Manages chunk loading and unloading based on viewport.
 - Quick example chunk buttons
 
 **Key Features**:
-- **Server-driven streaming**: Subscribes to chunk/zone streams via `stream_subscribe` on initial connection
+- **Server-driven streaming**: Subscribes to chunk/zone streams via `stream_subscribe` on initial connection (after authentication)
 - **Pose updates**: Sends `stream_update_pose` messages when camera moves (instead of re-subscribing)
 - **Delta consumption**: Receives and processes chunk/zone deltas via `stream_delta` messages
 - **Server-driven streaming required**: Streaming is required (legacy `chunk_request` removed)
+- **Authentication-aware**: All streaming operations defer until user is authenticated
 - Position-based chunk loading (converts ring position to chunk indices)
 - **Active Floor filtering**: Chunks are requested and rendered only for the active floor (from `gameStateManager.getActiveFloor()`)
 - Automatic chunk rendering when added to game state (only if chunk matches active floor)
@@ -415,13 +485,17 @@ Manages chunk loading and unloading based on viewport.
 #### Zone Rendering & Management ✅ **IMPLEMENTED**
 
 **Zone Manager** (`client-web/src/zones/zone-manager.js`):
-- Throttled bounding-box fetches (`GET /api/zones/area`) based on camera position
+- **Server-driven streaming**: Zones are delivered via `stream_delta` messages when `include_zones: true` in subscription
+- **Dual loading strategy**: Uses both streaming (via `stream_delta`) and REST API (`GET /api/zones/area`) for zone loading
+- Throttled bounding-box fetches (`GET /api/zones/area`) based on camera position (4-second throttle)
 - Renders zones as world-anchored Three.js meshes (not camera-relative) with ring wrapping support
 - Converts GeoJSON polygons/multipolygons to `THREE.ShapeGeometry` meshes with translucent fills and colored outlines
 - Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
 - Keeps zone meshes in sync with `GameStateManager` events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`, `zonesCleared`)
 - Zone colors: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
 - Exposes `loadZonesAroundCamera()`, `setVisibility()`, `setZoneTypeVisibility()` for UI control
+- **Authentication-aware**: Defers all API calls until user is authenticated (prevents "Not authenticated" spam)
+- **Stream delta handling**: Listens for `stream_delta` messages and processes `zones` array automatically
 
 **Grid Overlay** (`client-web/src/rendering/grid-overlay.js`):
 - Circular 250m radius grid overlay centered on camera target
@@ -1031,11 +1105,22 @@ class GraphicsAbstraction {
 
 1. **HUD (Heads-Up Display)**
    - Player info (level, currency) - Top-right "Logged In As" panel
-   - Minimap (`client-web/src/ui/minimap.js`) - Bottom-left, shows player position and direction
-     - Two zoom levels: full ring view (all 12 stations) and local area (2km top-down view)
-     - Displays chunk platforms in local view with correct width and positioning
-     - Player facing arrow shows direction of movement
-     - Title shows station name (if on station) or "Ring" with current s-coordinate and floor
+   - **Minimap** (`client-web/src/ui/minimap.js`) ✅ **IMPLEMENTED** - Bottom-left, shows player position and direction
+     - **Two zoom levels**:
+       - **Full ring view**: Entire 264,000 km ring with 12 pillar stations at 30-degree intervals
+       - **Local view**: 2km radius top-down 2D map with grid, platforms, and navigation aids
+     - **Local view features**:
+       - **Moving grid** (500m spacing) that moves with player position using modulo offset calculation
+       - **Platform chunks** rendered as polygons (from Three.js mesh geometry) or rectangles (fallback)
+       - **Mesh projection**: Samples ~40 vertices, transforms to world space, converts to RingArc coordinates, sorts by angle to prevent moire patterns
+       - **Player-facing arrow** (green triangle) showing camera direction, projected onto XZ plane
+       - **North indicator** (text and arrow) always at top
+       - **Drawing order**: Grid → Platforms → Arrow/North (arrow and north always rendered last, on top)
+     - **Coordinate conversions**: Three.js World → RingArc → Local → Screen coordinates
+     - **Performance**: Updates every 200ms (5 FPS), distance filtering, vertex sampling
+     - **Active floor filtering**: Only shows platforms for the active floor
+     - **Title**: Shows station name (if within 5km of station) or "Ring" with current s-coordinate and floor
+     - **See**: `docs/minimap-system.md` for complete technical documentation
    - Notifications - Future
 
 2. **Debug Info Panel** (`client-web/src/ui/debug-info.js`):

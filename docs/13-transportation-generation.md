@@ -1,5 +1,14 @@
 # Transportation Generation Algorithm Specification
 
+**Status**: 📋 **DESIGN SPECIFICATION** - This document specifies the planned organic transportation generation system.
+
+**Related Documentation**:
+- [Zone System](09-zone-system.md) - Zones that transportation connects
+- [NPC AI and Pathfinding](12-npc-ai-pathfinding.md) - NPCs that generate traffic patterns
+- [Game Mechanics](10-game-mechanics.md) - Transportation used for racing and NPC movement
+- [Database Schema](03-database-schema.md) - Traffic data storage
+- [Implementation Phases](../implementation-phases.md) - Feature implementation roadmap
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -135,7 +144,7 @@ class TrafficPathRecorder {
 
 ### Traffic Data Storage
 
-**Database Schema** (from `03-database-schema.md`):
+**Database Schema**: See [Database Schema Documentation](03-database-schema.md) for complete schema details:
 ```sql
 CREATE TABLE npc_traffic (
     id SERIAL PRIMARY KEY,

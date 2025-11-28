@@ -1,5 +1,13 @@
 # Database Schema
 
+**Status**: ✅ **IMPLEMENTED** - Database schema is fully implemented with all core tables, indexes, and spatial queries.
+
+**Related Documentation**:
+- [Architecture Overview](01-architecture-overview.md) - System architecture context
+- [Map System](02-map-system.md) - Coordinate system used in database
+- [API Design](04-api-design.md) - API endpoints that use this schema
+- [Zone System](09-zone-system.md) - Zone table usage
+
 ## Table of Contents
 
 - [Overview](#overview)

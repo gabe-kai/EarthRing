@@ -1,5 +1,11 @@
 # Authentication and Security Specification
 
+**Status**: ✅ **IMPLEMENTED** - Authentication and security systems are fully implemented.
+
+**Related Documentation**:
+- [API Design](04-api-design.md) - Authentication endpoints
+- [Client Architecture](06-client-architecture.md) - Client-side authentication handling
+
 ## Table of Contents
 
 - [Overview](#overview)
