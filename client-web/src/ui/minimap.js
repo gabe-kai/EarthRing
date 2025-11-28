@@ -795,7 +795,8 @@ export class Minimap {
           this.ctx.fillRect(simpleRectX, simpleRectY, chunkLengthScreen, chunkLengthScreen);
           this.ctx.strokeRect(simpleRectX, simpleRectY, chunkLengthScreen, chunkLengthScreen);
           
-          console.log(`[Minimap] Drawing fallback rectangle for chunk ${chunkIndex} at screen (${screenX.toFixed(0)}, ${screenY.toFixed(0)}), size=${chunkLengthScreen.toFixed(0)}`);
+          // Debug logging removed to reduce spam - uncomment if needed
+          // console.log(`[Minimap] Drawing fallback rectangle for chunk ${chunkIndex} at screen (${screenX.toFixed(0)}, ${screenY.toFixed(0)}), size=${chunkLengthScreen.toFixed(0)}`);
           return; // Skip the detailed drawing below
         }
         
