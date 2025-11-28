@@ -97,10 +97,19 @@ jobs:
           MIGRATION_COUNT=0
           for file in $FILES; do
             echo "Applying: $(basename $file)"
-            psql -v ON_ERROR_STOP=1 -f "$file" || exit 1
+            if ! psql -v ON_ERROR_STOP=1 -f "$file"; then
+              echo "ERROR: Migration $(basename $file) failed!"
+              exit 1
+            fi
             MIGRATION_COUNT=$((MIGRATION_COUNT + 1))
           done
           echo "✅ All $MIGRATION_COUNT migrations applied successfully"
+          
+          # Verify critical indexes were created
+          echo ""
+          echo "Verifying indexes were created..."
+          psql -c "\d chunks" | grep -q "idx_chunks_floor_index" && echo "✓ idx_chunks_floor_index exists" || echo "✗ idx_chunks_floor_index missing"
+          psql -c "\d chunk_data" | grep -q "idx_chunk_data_geometry" && echo "✓ idx_chunk_data_geometry exists" || echo "✗ idx_chunk_data_geometry missing"
 
       - name: Run tests with failure summary
         working-directory: ./server
@@ -142,8 +151,10 @@ jobs:
                   echo '```' >> $GITHUB_STEP_SUMMARY
                   
                   # Extract failure context for this package
+                  # Escape dots in package name for regex matching
+                  pkg_escaped=$(echo "$pkg" | sed 's/\./\\./g')
                   # Find the package section and extract failures
-                  awk "/^=== RUN.*$pkg/,/^FAIL[[:space:]]+$pkg/" test-output.log | \
+                  awk "/^=== RUN.*${pkg_escaped}/,/^FAIL[[:space:]]+${pkg_escaped}/" test-output.log | \
                     grep -A 20 "FAIL\|Error\|panic\|expected\|got" | head -n 30 >> $GITHUB_STEP_SUMMARY
                   
                   echo '```' >> $GITHUB_STEP_SUMMARY
