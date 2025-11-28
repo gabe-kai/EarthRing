@@ -12,10 +12,9 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
-      '/favicon.ico': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
+      // Note: /favicon.ico is not proxied to avoid ECONNREFUSED errors when backend isn't ready
+      // Browsers handle missing favicons gracefully (they'll just show no favicon)
+      // The backend's favicon handler is still available if accessed directly
     },
   },
   build: {
