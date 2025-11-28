@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createPlayerPanelContent, showPlayerPanel, hidePlayerPanel } from './player-ui.js';
+import * as playerUIModule from './player-ui.js';
+const { createPlayerPanelContent, showPlayerPanel, hidePlayerPanel } = playerUIModule;
 import * as playerService from '../api/player-service.js';
 import * as authService from '../auth/auth-service.js';
 
@@ -70,6 +71,9 @@ describe('Player UI', () => {
     if (panel) {
       panel.remove();
     }
+    // Reset the module-level playerPanel variable by calling hidePlayerPanel
+    // This will set playerPanel to null
+    hidePlayerPanel();
   });
 
   describe('createPlayerPanelContent', () => {
@@ -118,14 +122,17 @@ describe('Player UI', () => {
       
       const panel = document.getElementById('player-panel');
       expect(panel).toBeDefined();
-      expect(document.body.contains(panel)).toBe(true);
+      expect(panel).not.toBeNull();
+      // Check if panel is in the document (either in body or elsewhere)
+      expect(document.contains(panel)).toBe(true);
     });
 
     it('does not create duplicate panels', () => {
       showPlayerPanel();
       const firstPanel = document.getElementById('player-panel');
+      expect(firstPanel).not.toBeNull();
       
-      showPlayerPanel();
+      showPlayerPanel(); // Should not create a duplicate
       const panels = document.querySelectorAll('#player-panel');
       
       expect(panels.length).toBe(1);

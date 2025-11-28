@@ -75,7 +75,34 @@ jobs:
         run: |
           psql -c "CREATE EXTENSION IF NOT EXISTS postgis;" || echo "PostGIS extension already exists"
 
-      - name: Run tests
+      - name: Run database migrations
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: earthring_test
+        run: |
+          echo "=========================================="
+          echo "Running Database Migrations"
+          echo "=========================================="
+          # Get all migration files in order
+          FILES=$(find database/migrations -name "*.up.sql" -type f | sort)
+          if [ -z "$FILES" ]; then
+            echo "ERROR: No migration files found!"
+            exit 1
+          fi
+          echo "Found $(echo "$FILES" | wc -l) migration files"
+          # Apply migrations
+          MIGRATION_COUNT=0
+          for file in $FILES; do
+            echo "Applying: $(basename $file)"
+            psql -v ON_ERROR_STOP=1 -f "$file" || exit 1
+            MIGRATION_COUNT=$((MIGRATION_COUNT + 1))
+          done
+          echo "✅ All $MIGRATION_COUNT migrations applied successfully"
+
+      - name: Run tests with failure summary
         working-directory: ./server
         env:
           DB_HOST: localhost
@@ -87,14 +114,66 @@ jobs:
           JWT_SECRET: test_jwt_secret_for_ci
           REFRESH_SECRET: test_refresh_secret_for_ci
         run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Run all tests and capture output
           go test -v -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.log
           exit_code=${PIPESTATUS[0]}
+          
           if [ $exit_code -ne 0 ]; then
-            echo "Tests failed with exit code $exit_code"
-            echo "Last 100 lines of test output:"
-            tail -n 100 test-output.log
+            echo ""
+            echo "========================================="
+            echo "TEST FAILURE SUMMARY"
+            echo "========================================="
+            echo ""
+            
+            # Extract failed packages
+            failed_packages=$(grep "^FAIL" test-output.log | sed 's/^FAIL[[:space:]]*//' | sed 's/[[:space:]].*//' || echo "")
+            
+            if [ -n "$failed_packages" ]; then
+              echo "### ❌ Failed Packages" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              # For each failed package, extract its failure details
+              echo "$failed_packages" | while read -r pkg; do
+                if [ -n "$pkg" ]; then
+                  echo "#### \`$pkg\`" >> $GITHUB_STEP_SUMMARY
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                  
+                  # Extract failure context for this package
+                  # Find the package section and extract failures
+                  awk "/^=== RUN.*$pkg/,/^FAIL[[:space:]]+$pkg/" test-output.log | \
+                    grep -A 20 "FAIL\|Error\|panic\|expected\|got" | head -n 30 >> $GITHUB_STEP_SUMMARY
+                  
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  
+                  # Also print to console
+                  echo "FAILED: $pkg"
+                fi
+              done
+            fi
+            
+            echo ""
+            echo "### 📋 All Failures (extracted)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            # Extract all FAIL lines with context
+            grep -B 2 -A 15 "FAIL:" test-output.log | head -n 200 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            
+            echo ""
+            echo "Console output: Failed packages:"
+            echo "$failed_packages"
+            echo ""
+            echo "Showing first 50 lines of failures:"
+            grep -B 2 -A 10 "FAIL:" test-output.log | head -n 50
+            
             exit $exit_code
           fi
+          
+          echo "### ✅ All Tests Passed" >> $GITHUB_STEP_SUMMARY
+          echo "All tests passed! ✓"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

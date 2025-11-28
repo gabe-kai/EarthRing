@@ -70,26 +70,10 @@ export class ChunkManager {
     // Wrapping breaks chunk rendering when camera is at negative positions
     const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
     if (camera) {
-      // Get Three.js position directly (preserves negative values)
-      const threeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
-      
-      // Convert Three.js to RingArc (preserves sign)
-      const ringArc = threeJSToRingArc(threeJSPos);
-      
-      // Convert RingArc to legacy position WITHOUT wrapping
-      // We need to preserve the sign of the arc length to handle negative positions correctly
-      const polar = ringArcToRingPolar(ringArc);
-      
-      // Convert to legacy X: X = (theta / 2π) * RingCircumference
-      // Preserve sign by NOT wrapping theta first
-      let theta = polar.theta;
-      // If theta is negative, we want negative X
-      // If theta is positive, we want positive X
-      // Convert directly: X = (theta / 2π) * RingCircumference
-      let legacyX = (theta / (2 * Math.PI)) * NEW_RING_CIRCUMFERENCE;
-      
-      // Return RAW position (not wrapped) for correct chunk rendering
-      return legacyX;
+      // Three.js X coordinate directly maps to arc length s in RingArc coordinates
+      // Since arc length s maps 1:1 to legacy X coordinate, we can return it directly
+      // This preserves both negative values and large positive values without wrapping
+      return camera.position.x;
     }
     // Fallback: try camera controller but note it wraps the value
     if (this.cameraController?.getEarthRingPosition) {

@@ -11,6 +11,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to update zone updated_at on zone updates
+DROP TRIGGER IF EXISTS zone_updated_at ON zones;
 CREATE TRIGGER zone_updated_at
 BEFORE UPDATE ON zones
 FOR EACH ROW
@@ -30,6 +31,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to mark chunk dirty on structure insert/update
+DROP TRIGGER IF EXISTS structure_chunk_dirty ON structures;
 CREATE TRIGGER structure_chunk_dirty
 AFTER INSERT OR UPDATE ON structures
 FOR EACH ROW

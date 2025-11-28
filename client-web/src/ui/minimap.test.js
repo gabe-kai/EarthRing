@@ -70,6 +70,10 @@ class MockCanvasRenderingContext2D {
     this.calls.push({ method: 'arc', args: [x, y, radius, startAngle, endAngle] });
   }
 
+  ellipse(x, y, radiusX, radiusY, rotation, startAngle, endAngle) {
+    this.calls.push({ method: 'ellipse', args: [x, y, radiusX, radiusY, rotation, startAngle, endAngle] });
+  }
+
   fillText(text, x, y) {
     this.calls.push({ method: 'fillText', args: [text, x, y] });
   }
@@ -92,6 +96,34 @@ class MockCanvasRenderingContext2D {
 
   rect(x, y, w, h) {
     this.calls.push({ method: 'rect', args: [x, y, w, h] });
+  }
+
+  createRadialGradient(x0, y0, r0, x1, y1, r1) {
+    const gradient = {
+      addColorStop: vi.fn(),
+    };
+    this.calls.push({ method: 'createRadialGradient', args: [x0, y0, r0, x1, y1, r1], gradient });
+    return gradient;
+  }
+
+  createLinearGradient(x0, y0, x1, y1) {
+    const gradient = {
+      addColorStop: vi.fn(),
+    };
+    this.calls.push({ method: 'createLinearGradient', args: [x0, y0, x1, y1], gradient });
+    return gradient;
+  }
+
+  translate(x, y) {
+    this.calls.push({ method: 'translate', args: [x, y] });
+  }
+
+  rotate(angle) {
+    this.calls.push({ method: 'rotate', args: [angle] });
+  }
+
+  scale(x, y) {
+    this.calls.push({ method: 'scale', args: [x, y] });
   }
 }
 
