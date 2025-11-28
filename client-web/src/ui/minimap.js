@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { legacyPositionToRingPolar, ringPolarToRingArc, chunkIndexToRingArc, threeJSToRingArc, CHUNK_LENGTH, CHUNK_COUNT } from '../utils/coordinates-new.js';
 import { findNearestStation, PILLAR_HUB_POSITIONS } from '../utils/stations.js';
 import { RING_CIRCUMFERENCE } from '../utils/coordinates-new.js';
+import { addNotification } from './info-box.js';
 
 const STATION_PROXIMITY_THRESHOLD = 5000; // 5km - consider player "on" station platform
 
@@ -55,33 +56,42 @@ export class Minimap {
       }
 
       .minimap-title-wrapper {
-        width: 100%;
+        position: absolute;
+        bottom: 8px;
+        left: 0;
+        right: 0;
         display: flex;
         justify-content: center;
         align-items: center;
-        flex-shrink: 0;
-        padding: 0;
-        margin: 0;
+        z-index: 10; /* Above canvas content */
+        pointer-events: none; /* Allow clicks through to canvas */
+        padding: 0 8px;
+        box-sizing: border-box;
+        width: 100%;
       }
 
       .minimap-title {
-        padding: 6px 10px;
-        background: rgba(0, 0, 0, 0.3);
-        border-top: 1px solid rgba(76, 175, 80, 0.3);
+        padding: 4px 10px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(76, 175, 80, 0.3);
+        border-radius: 8px;
         color: #4caf50;
         font-weight: bold;
-        font-size: 11px;
+        font-size: 12px;
         text-align: center;
-        width: 70%;
-        max-width: 90%;
+        max-width: calc(100% - 16px);
         box-sizing: border-box;
-        display: inline-block;
+        line-height: 1.3;
+        word-wrap: break-word;
+        white-space: normal;
       }
 
       .minimap-canvas-container {
         flex: 1;
         position: relative;
         overflow: hidden; /* Clip canvas content */
+        min-height: 0; /* Allow flex shrinking */
+        cursor: pointer; /* Indicate minimap is clickable */
       }
 
       #minimap-canvas {
@@ -139,13 +149,13 @@ export class Minimap {
     this.container.innerHTML = `
       <div class="minimap-canvas-container">
         <canvas id="minimap-canvas"></canvas>
+        <div class="minimap-title-wrapper">
+          <div class="minimap-title" id="minimap-title">Ring - Floor: 0<br>s: 0.0 km; r: 0 m</div>
+        </div>
       </div>
       <div class="minimap-controls">
         <button class="minimap-zoom-btn" id="minimap-zoom-in" title="Zoom in (Local area view)">+</button>
         <button class="minimap-zoom-btn" id="minimap-zoom-out" title="Zoom out (Full ring view)">−</button>
-      </div>
-      <div class="minimap-title-wrapper">
-        <div class="minimap-title" id="minimap-title">Ring: 0 km, Floor 0</div>
       </div>
     `;
 
@@ -177,6 +187,9 @@ export class Minimap {
     window.addEventListener('resize', () => {
       this.resizeCanvas();
     });
+
+    // Add click handler to copy coordinates
+    this.setupClickHandler();
   }
 
   resizeCanvas() {
@@ -187,6 +200,40 @@ export class Minimap {
       this.canvas.width = containerRect.width;
       this.canvas.height = containerRect.height;
     }
+  }
+
+  setupClickHandler() {
+    if (!this.canvas || !this.container) return;
+
+    const canvasContainer = this.container.querySelector('.minimap-canvas-container');
+
+    canvasContainer.addEventListener('click', async (e) => {
+      // Don't copy if clicking on zoom control buttons
+      if (e.target.closest('.minimap-zoom-btn') || e.target.closest('.minimap-controls')) {
+        return;
+      }
+
+      // Don't copy if clicking on title (title has pointer-events: none but check anyway)
+      if (e.target.closest('.minimap-title-wrapper')) {
+        return;
+      }
+
+      try {
+        // Get current camera target coordinates
+        const erPos = this.cameraController.getTargetEarthRingPosition();
+        const coordinates = `${erPos.x.toFixed(2)}, ${erPos.y.toFixed(2)}, ${erPos.z.toFixed(2)}`;
+
+        // Copy to clipboard
+        await navigator.clipboard.writeText(coordinates);
+
+        // Show notification in Info box
+        addNotification(`Coordinates copied to clipboard: ${coordinates}`, 'info');
+      } catch (error) {
+        console.error('[Minimap] Failed to copy coordinates:', error);
+        // Fallback: show error notification
+        addNotification('Failed to copy coordinates to clipboard', 'error');
+      }
+    });
   }
 
   update() {
@@ -224,12 +271,16 @@ export class Minimap {
       // Update title
       const titleEl = this.container.querySelector('#minimap-title');
       if (titleEl) {
+        const sKm = (arc.s / 1000).toFixed(1);
+        const rM = arc.r.toFixed(0);
+        let locationName;
         if (isOnStation) {
-          const stationName = nearestStation.index === 0 ? 'Kongo Hub' : `Hub ${nearestStation.index}`;
-          titleEl.textContent = `${stationName}: ${(arc.s / 1000).toFixed(1)} km, Floor ${floor}`;
+          locationName = nearestStation.index === 0 ? 'Kongo Hub' : `Hub ${nearestStation.index}`;
         } else {
-          titleEl.textContent = `Ring: ${(arc.s / 1000).toFixed(1)} km, Floor ${floor}`;
+          locationName = 'Ring';
         }
+        // Use compact format to fit in two lines
+        titleEl.innerHTML = `${locationName} - F: ${floor}<br>s: ${sKm}km; r: ${rM}m`;
       }
 
       // Ensure canvas is properly sized

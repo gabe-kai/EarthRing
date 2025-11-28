@@ -4,6 +4,39 @@
 
 The minimap system provides a 2D top-down view of the player's position and surrounding environment. It displays platform chunks, player facing direction, and supports two zoom levels: full ring view and local area view.
 
+## User Interface
+
+### Title Display
+
+The minimap displays a title overlay at the bottom center showing:
+- **First line**: Location name (Ring or Hub name) and Floor number
+  - Format: `"{Location} - F: {Floor}"`
+  - Example: `"Kongo Hub - F: 0"` or `"Ring - F: 0"`
+- **Second line**: Current coordinates
+  - Format: `"s: {s}km; r: {r}m"`
+  - Example: `"s: 125.5km; r: 200m"`
+
+The title is displayed as a semi-transparent, rounded container that overlays the minimap canvas without taking up layout space.
+
+### Zoom Controls
+
+Zoom control buttons are positioned on the right side of the minimap, overlapping the border:
+- **Plus button (+)**: Zooms in to local area view (2km radius)
+- **Minus button (−)**: Zooms out to full ring view
+- Buttons are centered vertically and half-inside/half-outside the minimap border
+
+### Click to Copy Coordinates
+
+Clicking anywhere on the minimap canvas (excluding zoom controls and title) copies the current camera target coordinates to the clipboard. The coordinates are formatted as `"x.xx, y.yy, z.zz"` in EarthRing legacy coordinates.
+
+A notification appears in the Info box confirming the coordinates were copied. This feature allows players to quickly share or record their position.
+
+**Implementation details:**
+- Click handler is attached to the canvas container
+- Excludes clicks on zoom buttons and title overlay
+- Uses `navigator.clipboard.writeText()` API
+- Shows notification via `addNotification()` in Info box
+
 ## Architecture
 
 ### Components
