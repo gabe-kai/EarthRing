@@ -394,7 +394,7 @@ function setupZonesToolbarListeners() {
         }
       };
       
-      // Define delete action
+      // Define delete action (only for non-system zones)
       const deleteAction = async () => {
         if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
           return;
@@ -420,13 +420,17 @@ function setupZonesToolbarListeners() {
         }
       };
       
+      // Build actions object - only include delete for non-system zones
+      const actions = {};
+      if (!(zone.is_system_zone === true)) {
+        actions['Delete Zone'] = deleteAction;
+      }
+      
       // Update info box with zone information
       updateInfoBox(zoneInfo, {
         title: `${zoneTypeDisplay} Zone Details`,
         tooltip: tooltip,
-        actions: {
-          'Delete Zone': deleteAction
-        },
+        actions: actions,
         editableFields: {
           'Name': { onSave: saveName }
         }

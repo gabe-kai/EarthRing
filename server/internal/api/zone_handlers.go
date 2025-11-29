@@ -32,13 +32,14 @@ func NewZoneHandlers(db *sql.DB, cfg *config.Config) *ZoneHandlers {
 }
 
 type createZoneRequest struct {
-	Name       string          `json:"name"`
-	ZoneType   string          `json:"zone_type"`
-	Floor      int             `json:"floor"`
-	OwnerID    *int64          `json:"owner_id,omitempty"`
-	Geometry   json.RawMessage `json:"geometry"`
-	Properties json.RawMessage `json:"properties,omitempty"`
-	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	Name              string          `json:"name"`
+	ZoneType          string          `json:"zone_type"`
+	Floor             int             `json:"floor"`
+	OwnerID           *int64          `json:"owner_id,omitempty"`
+	Geometry          json.RawMessage `json:"geometry"`
+	Properties        json.RawMessage `json:"properties,omitempty"`
+	Metadata          json.RawMessage `json:"metadata,omitempty"`
+	ConflictResolution *string        `json:"conflict_resolution,omitempty"` // "new_wins" or "existing_wins"
 }
 
 type updateZoneRequest struct {
@@ -114,23 +115,60 @@ func (h *ZoneHandlers) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := &database.ZoneCreateInput{
-		Name:       req.Name,
-		ZoneType:   req.ZoneType,
-		Floor:      req.Floor,
-		OwnerID:    &ownerID,
-		Geometry:   req.Geometry,
-		Properties: req.Properties,
-		Metadata:   req.Metadata,
+		Name:              req.Name,
+		ZoneType:          req.ZoneType,
+		Floor:             req.Floor,
+		OwnerID:           &ownerID,
+		Geometry:          req.Geometry,
+		Properties:        req.Properties,
+		Metadata:          req.Metadata,
+		ConflictResolution: req.ConflictResolution,
 	}
 
-	zone, err := h.storage.CreateZone(input)
+	result, err := h.storage.CreateZoneWithComponents(input)
 	if err != nil {
-		log.Printf("CreateZone error: %v", err)
+		// Check if this is a conflict error that needs user resolution
+		if conflictErr, ok := err.(*database.ZoneConflictError); ok {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"error":         "zone_conflict",
+				"message":       conflictErr.Error(),
+				"conflicts":      conflictErr.Conflicts,
+				"new_zone_type": conflictErr.NewZoneType,
+			})
+			return
+		}
+		log.Printf("CreateZoneWithComponents error: %v", err)
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, toZoneResponse(zone))
+	// Build response with both created and updated zones
+	createdResponses := make([]zoneResponse, len(result.Created))
+	for i, zone := range result.Created {
+		createdResponses[i] = *toZoneResponse(zone)
+	}
+
+	updatedResponses := make([]zoneResponse, len(result.Updated))
+	for i, zone := range result.Updated {
+		updatedResponses[i] = *toZoneResponse(zone)
+	}
+
+	// If multiple zones were created (bisection) or zones were updated, return structured response
+	if len(result.Created) > 1 || len(result.Updated) > 0 {
+		response := map[string]interface{}{
+			"zones": createdResponses,
+			"count": len(createdResponses),
+		}
+		if len(result.Updated) > 0 {
+			response["updated_zones"] = updatedResponses
+			response["updated_count"] = len(updatedResponses)
+		}
+		writeJSON(w, http.StatusCreated, response)
+		return
+	}
+
+	// Single zone created, no updates - return it directly for backward compatibility
+	writeJSON(w, http.StatusCreated, toZoneResponse(result.Created[0]))
 }
 
 // GetZone handles GET /api/zones/{zone_id}

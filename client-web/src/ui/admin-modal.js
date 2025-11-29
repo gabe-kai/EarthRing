@@ -407,6 +407,64 @@ export function showAdminModal() {
     .admin-zone-action-btn:hover {
       background: rgba(0, 255, 0, 0.3);
     }
+
+    .admin-zone-category {
+      margin-top: 0.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid #333;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .admin-zone-category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      user-select: none;
+      background: rgba(0, 0, 0, 0.3);
+      border-bottom: 1px solid #333;
+      transition: background 0.2s;
+    }
+
+    .admin-zone-category-header:hover {
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .admin-zone-category-title {
+      color: #4caf50;
+      font-weight: 600;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .admin-zone-category-count {
+      color: #888;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
+    .admin-zone-category-toggle {
+      color: #888;
+      font-size: 1rem;
+      transition: transform 0.2s;
+    }
+
+    .admin-zone-category.expanded .admin-zone-category-toggle {
+      transform: rotate(90deg);
+    }
+
+    .admin-zone-category-list {
+      display: none;
+      padding: 0.25rem;
+    }
+
+    .admin-zone-category.expanded .admin-zone-category-list {
+      display: block;
+    }
   `;
   document.head.appendChild(style);
   
@@ -1193,9 +1251,16 @@ function createFloorSection(floor, zones, container) {
   if (zones.length === 0) {
     zoneList.innerHTML = '<p style="color: #888; padding: 0.5rem; margin: 0;">No zones on this floor</p>';
   } else {
-    zones.forEach(zone => {
-      const zoneItem = createZoneItem(zone, container);
-      zoneList.appendChild(zoneItem);
+    // Group zones by category
+    const categorizedZones = categorizeZones(zones);
+    
+    // Create category sections
+    Object.keys(categorizedZones).forEach(categoryName => {
+      const categoryZones = categorizedZones[categoryName];
+      if (categoryZones.length > 0) {
+        const categorySection = createZoneCategory(categoryName, categoryZones, container);
+        zoneList.appendChild(categorySection);
+      }
     });
   }
   
@@ -1203,6 +1268,135 @@ function createFloorSection(floor, zones, container) {
   section.appendChild(zoneList);
   
   return section;
+}
+
+/**
+ * Categorize zones by type
+ */
+function categorizeZones(zones) {
+  const categories = {
+    'Default Zones': [],
+    'Residential': [],
+    'Commercial': [],
+    'Industrial': [],
+    'Mixed-Use': [],
+    'Park': [],
+    'Restricted': [],
+    'Other': [],
+  };
+  
+  zones.forEach(zone => {
+    // System zones go into "Default Zones"
+    if (zone.is_system_zone === true) {
+      categories['Default Zones'].push(zone);
+      return;
+    }
+    
+    // Categorize by zone_type
+    const zoneType = zone.zone_type || 'unknown';
+    const categoryName = formatZoneTypeCategory(zoneType);
+    
+    if (categories[categoryName]) {
+      categories[categoryName].push(zone);
+    } else {
+      categories['Other'].push(zone);
+    }
+  });
+  
+  // Remove empty categories
+  Object.keys(categories).forEach(key => {
+    if (categories[key].length === 0) {
+      delete categories[key];
+    }
+  });
+  
+  return categories;
+}
+
+/**
+ * Format zone type to category name
+ */
+function formatZoneTypeCategory(zoneType) {
+  const typeMap = {
+    'residential': 'Residential',
+    'commercial': 'Commercial',
+    'industrial': 'Industrial',
+    'mixed-use': 'Mixed-Use',
+    'park': 'Park',
+    'restricted': 'Restricted',
+  };
+  
+  const normalized = zoneType.toLowerCase().replace(/_/g, '-');
+  return typeMap[normalized] || 'Other';
+}
+
+/**
+ * Create a collapsible zone category section
+ */
+function createZoneCategory(categoryName, zones, container) {
+  const category = document.createElement('div');
+  category.className = 'admin-zone-category';
+  category.dataset.category = categoryName;
+  
+  // Default to expanded for Default Zones, collapsed for others
+  if (categoryName === 'Default Zones') {
+    category.classList.add('expanded');
+  }
+  
+  const header = document.createElement('div');
+  header.className = 'admin-zone-category-header';
+  header.onclick = () => {
+    category.classList.toggle('expanded');
+  };
+  
+  const title = document.createElement('span');
+  title.className = 'admin-zone-category-title';
+  
+  // Add icon based on category
+  const icon = getCategoryIcon(categoryName);
+  title.innerHTML = `${icon} ${categoryName}`;
+  
+  const count = document.createElement('span');
+  count.className = 'admin-zone-category-count';
+  count.textContent = `(${zones.length})`;
+  
+  const toggle = document.createElement('span');
+  toggle.className = 'admin-zone-category-toggle';
+  toggle.textContent = '▶';
+  
+  header.appendChild(title);
+  header.appendChild(count);
+  header.appendChild(toggle);
+  
+  const categoryList = document.createElement('div');
+  categoryList.className = 'admin-zone-category-list';
+  
+  zones.forEach(zone => {
+    const zoneItem = createZoneItem(zone, container);
+    categoryList.appendChild(zoneItem);
+  });
+  
+  category.appendChild(header);
+  category.appendChild(categoryList);
+  
+  return category;
+}
+
+/**
+ * Get icon for category
+ */
+function getCategoryIcon(categoryName) {
+  const icons = {
+    'Default Zones': '⚙️',
+    'Residential': '🏠',
+    'Commercial': '🏪',
+    'Industrial': '🏭',
+    'Mixed-Use': '🏢',
+    'Park': '🌳',
+    'Restricted': '🚫',
+    'Other': '📦',
+  };
+  return icons[categoryName] || '📦';
 }
 
 /**

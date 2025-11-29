@@ -77,11 +77,19 @@ export function showZoneInfoWindow(zone, onDelete) {
         </div>
         ` : ''}
       </div>
+      ${!(zone.is_system_zone === true) ? `
       <div class="zone-info-actions">
         <button class="zone-info-button dezone-button" id="zone-info-dezone">
           Dezone
         </button>
       </div>
+      ` : `
+      <div class="zone-info-actions">
+        <div class="zone-info-system-note" style="color: #888; font-size: 0.85rem; font-style: italic; text-align: center; padding: 0.5rem;">
+          System zones cannot be deleted
+        </div>
+      </div>
+      `}
     </div>
   `;
   
@@ -186,22 +194,28 @@ export function showZoneInfoWindow(zone, onDelete) {
     hideZoneInfoWindow();
   });
   
-  document.getElementById('zone-info-dezone').addEventListener('click', async () => {
-    if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
-      return;
+  // Only add delete button listener if this is not a system zone
+  if (!(zone.is_system_zone === true)) {
+    const dezoneButton = document.getElementById('zone-info-dezone');
+    if (dezoneButton) {
+      dezoneButton.addEventListener('click', async () => {
+        if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
+          return;
+        }
+        
+        try {
+          await deleteZone(zone.id);
+          if (onDelete) {
+            onDelete(zone.id);
+          }
+          hideZoneInfoWindow();
+        } catch (error) {
+          console.error('Failed to delete zone:', error);
+          alert(`Failed to delete zone: ${error.message}`);
+        }
+      });
     }
-    
-    try {
-      await deleteZone(zone.id);
-      if (onDelete) {
-        onDelete(zone.id);
-      }
-      hideZoneInfoWindow();
-    } catch (error) {
-      console.error('Failed to delete zone:', error);
-      alert(`Failed to delete zone: ${error.message}`);
-    }
-  });
+  }
 }
 
 export function hideZoneInfoWindow() {

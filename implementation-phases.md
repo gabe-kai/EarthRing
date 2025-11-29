@@ -42,7 +42,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Project structure initialized (directories created)
 
 **In Progress:**
-- ⏳ Phase 3: Zone System implementation (database layer, REST API, client rendering, and toolbar UI complete; advanced editor + overlap rules pending)
+- ⏳ Phase 3: Zone System implementation (database layer, REST API, client rendering, toolbar UI, conflict resolution, user prompts, and persistence complete; advanced editor pending)
 
 **Status Summary:**
 - **Design Phase**: ✅ Complete (13 documents)
@@ -50,7 +50,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - **Foundation Phase**: ✅ Complete (Phase 0 - all setup tasks done)
 - **Phase 1 (Core Infrastructure)**: ✅ Complete
 - **Phase 2 (Map System Foundation)**: ✅ Complete
-- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI + conflict resolution complete; advanced editor upcoming)
+- **Phase 3 (Zone System)**: ⏳ In Progress (storage + API + rendering + toolbar UI + conflict resolution + user prompts + persistence complete; advanced editor upcoming)
 
 ## Implementation Phases
 
@@ -172,7 +172,11 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 10. ✅ Comprehensive documentation (technical implementation details, troubleshooting guide, expansion guide)
 11. ✅ Authentication improvements (automatic token refresh, rate limiting, graceful error handling)
 12. ✅ Camera control improvements (elevation-based speed scaling, refined keyboard/mouse controls)
-13. ✅ Zone conflict resolution (player zones claim space from own zones of different types, system zones and other players' zones protected, comprehensive test coverage)
+13. ✅ Zone conflict resolution with new overlap rules (default zones win, different types: new zone wins, same types: merge, bisection creates multiple zones, comprehensive test coverage)
+14. ✅ User-prompted conflict resolution for player-placed zones (prompt asks which zone should win when overlapping different types)
+15. ✅ System zones made non-editable (delete button hidden for system zones in info window and zone UI)
+16. ✅ Admin panel zone categorization (collapsible sections: Default Zones, Residential, Industrial, Commercial, Mixed-Use, Park, Restricted)
+17. ✅ Player-placed zones persist across refresh (zones now loaded via spatial overlap query in addition to chunk_data.zone_ids)
 
 **In Progress / Upcoming:**
 10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
@@ -183,7 +187,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 - ✅ Zones are stored and rendered correctly (PostGIS storage, client visualization) - **COMPLETE**
 - ✅ Zones toolbar with visibility controls (grid and per-type toggles) - **COMPLETE**
 - ✅ Zone types supported (residential, commercial, industrial, mixed-use, park, restricted) - **COMPLETE**
-- ✅ Zone conflicts are resolved (player zones claim space from own zones of different types, system zones and other players' zones protected) - **COMPLETE**
+- ✅ Zone conflicts are resolved with new overlap rules (default zones win, different types: new zone wins, same types: merge, bisection creates multiple zones) - **COMPLETE**
 - ✅ Zone delete functionality (delete buttons in zone list) - **COMPLETE**
 - ⏳ Zone editor enhancements (draw, edit vertices, advanced editing) - **PENDING**
 - ✅ Zones span chunks correctly (multi-chunk zones work seamlessly via ring wrapping) - **COMPLETE**

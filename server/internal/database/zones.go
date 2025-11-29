@@ -18,12 +18,92 @@ const (
 	RingCircumference = 264000000.0
 )
 
+// ConflictZoneInfo represents a zone that conflicts with a new zone
+type ConflictZoneInfo struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	ZoneType string `json:"zone_type"`
+}
+
+// ZoneConflictError is returned when zone creation conflicts with existing zones
+// and requires user resolution
+type ZoneConflictError struct {
+	Conflicts   []ConflictZoneInfo `json:"conflicts"`
+	NewZoneType string             `json:"new_zone_type"`
+}
+
+func (e *ZoneConflictError) Error() string {
+	return fmt.Sprintf("zone conflicts with %d existing zone(s) - resolution required", len(e.Conflicts))
+}
+
+// ZoneCreateResult contains both created and updated zones from zone creation
+type ZoneCreateResult struct {
+	Created []*Zone
+	Updated []*Zone
+}
+
 // wrapCoordinate wraps a single X coordinate to [0, RingCircumference)
 func wrapCoordinate(x float64) float64 {
 	// Use modulo arithmetic to wrap coordinate
 	// Add RingCircumference before modulo to handle negative values correctly
 	wrapped := math.Mod(math.Mod(x, RingCircumference)+RingCircumference, RingCircumference)
 	return wrapped
+}
+
+// unionZoneGeometries unions multiple GeoJSON geometries into a single geometry
+func (s *ZoneStorage) unionZoneGeometries(geometries []json.RawMessage) (json.RawMessage, error) {
+	if len(geometries) == 0 {
+		return nil, fmt.Errorf("no geometries to union")
+	}
+	if len(geometries) == 1 {
+		return geometries[0], nil
+	}
+
+	// Build a query to union all geometries
+	// Use UNION ALL to combine all geometries, then union them
+	unionParts := make([]string, len(geometries))
+	args := make([]interface{}, len(geometries))
+	for i, geom := range geometries {
+		unionParts[i] = fmt.Sprintf("SELECT ST_SetSRID(ST_GeomFromGeoJSON($%d), 0) AS geom", i+1)
+		args[i] = string(geom)
+	}
+
+	unionQuery := fmt.Sprintf(`
+		WITH 
+		geoms AS (
+			%s
+		),
+		valid_geoms AS (
+			SELECT ST_MakeValid(geom) AS geom
+			FROM geoms
+			WHERE geom IS NOT NULL
+			  AND ST_IsValid(geom)
+			  AND NOT ST_IsEmpty(geom)
+		),
+		unioned AS (
+			SELECT ST_Union(geom) AS geom
+			FROM valid_geoms
+		),
+		validated AS (
+			SELECT ST_MakeValid(geom) AS geom
+			FROM unioned
+			WHERE geom IS NOT NULL
+		)
+		SELECT ST_AsGeoJSON(geom, 15, 0)::TEXT
+		FROM validated
+		WHERE ST_IsValid(geom) AND NOT ST_IsEmpty(geom)
+	`, strings.Join(unionParts, " UNION ALL "))
+
+	var result sql.NullString
+	err := s.db.QueryRow(unionQuery, args...).Scan(&result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to union geometries: %w", err)
+	}
+	if !result.Valid || result.String == "" {
+		return nil, fmt.Errorf("union resulted in empty geometry")
+	}
+
+	return json.RawMessage(result.String), nil
 }
 
 // wrapGeoJSONCoordinates wraps all X coordinates in a GeoJSON geometry to [0, RingCircumference)
@@ -90,14 +170,15 @@ type Zone struct {
 
 // ZoneCreateInput contains the fields required to create a zone.
 type ZoneCreateInput struct {
-	Name         string
-	ZoneType     string
-	Floor        int
-	OwnerID      *int64
-	IsSystemZone bool
-	Geometry     json.RawMessage
-	Properties   json.RawMessage
-	Metadata     json.RawMessage
+	Name              string
+	ZoneType          string
+	Floor             int
+	OwnerID           *int64
+	IsSystemZone      bool
+	Geometry          json.RawMessage
+	Properties        json.RawMessage
+	Metadata          json.RawMessage
+	ConflictResolution *string // "new_wins" or "existing_wins", nil means return conflict info
 }
 
 // ZoneUpdateInput describes the fields that can be updated on a zone.
@@ -125,18 +206,42 @@ func NewZoneStorage(db *sql.DB) *ZoneStorage {
 }
 
 // CreateZone inserts a new zone and returns the stored record.
-// If the new zone overlaps with existing zones of the same type and floor,
-// it merges them using PostGIS ST_Union and deletes the old zones.
+// Zone overlap resolution rules:
+// 1. Default zones (system zones) always win - if new zone overlaps a default zone,
+//    the default zone's area is subtracted from the new zone (default zone keeps its area).
+// 2. Different type zones - new zone wins (new zone area is subtracted from old zones).
+// 3. Same type zones - they merge (zones of the same type are merged together).
 //
-// IMPORTANT: Player-created zones always claim the space the player selected,
-// even if that area overlaps with other zones. The newly created zone takes
-// precedence in overlap areas, ensuring player intent is respected.
+// NOTE: These rules apply to player-created zones. Procedural zones will have
+// different conflict resolution rules in the future.
+// CreateZone inserts a new zone and returns the stored record.
+// When a zone is bisected, multiple zones may be created.
+// Use CreateZoneWithComponents to get all created zones.
 func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
+	result, err := s.CreateZoneWithComponents(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Created) == 0 {
+		return nil, fmt.Errorf("no zones created")
+	}
+	// Return first zone for backward compatibility
+	return result.Created[0], nil
+}
+
+// CreateZoneWithComponents inserts a new zone and returns all created zones.
+// When a zone is bisected by default zones, multiple zones are created (one for each component).
+func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCreateResult, error) {
 	if input == nil {
 		return nil, fmt.Errorf("input cannot be nil")
 	}
 	if err := validateZoneInput(*input); err != nil {
 		return nil, err
+	}
+
+	result := &ZoneCreateResult{
+		Created: []*Zone{},
+		Updated: []*Zone{},
 	}
 
 	geometryString := string(input.Geometry)
@@ -239,13 +344,21 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 
 	log.Printf("[ZoneConflict] Found %d total overlapping zones (any type/owner)", len(allOverlappingZones))
 
-	// STEP 2: Separate overlapping zones into merge candidates and conflict zones
-	// Merge candidates: same type AND same owner (will be merged with new zone)
-	// Conflict zones: different type OR different owner (will have new zone subtracted from them)
+	// STEP 2: Separate overlapping zones into three categories:
+	// 1. Default zones (system zones) - they win, subtract their area from new zone
+	// 2. Merge candidates: same type (will be merged with new zone)
+	// 3. Conflict zones: different type (will have new zone subtracted from them)
+	var defaultZoneIDs []int64
 	var mergeCandidateIDs []int64
 	var conflictZoneIDs []int64
 
 	for _, oz := range allOverlappingZones {
+		// Default zones (system zones) always win - subtract their area from new zone
+		if oz.IsSystemZone {
+			defaultZoneIDs = append(defaultZoneIDs, oz.ID)
+			continue
+		}
+		
 		sameType := oz.ZoneType == input.ZoneType
 		sameOwner := (oz.OwnerID.Valid == (input.OwnerID != nil)) &&
 			(!oz.OwnerID.Valid || (input.OwnerID != nil && oz.OwnerID.Int64 == *input.OwnerID))
@@ -258,57 +371,217 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		}
 	}
 
+	log.Printf("[ZoneConflict] Default zones (system zones, win): %d zones", len(defaultZoneIDs))
 	log.Printf("[ZoneConflict] Merge candidates (same type/owner): %d zones", len(mergeCandidateIDs))
 	log.Printf("[ZoneConflict] Conflict zones (different type/owner): %d zones", len(conflictZoneIDs))
 
-	// STEP 3: Subtract new zone from conflict zones (different type/owner)
-	// This implements the "player zones always claim their space" rule
-	if len(conflictZoneIDs) > 0 {
-		// Only subtract from zones owned by the same user (players can't claim space from other players' zones)
-		// System zones are protected and cannot be claimed
-		if input.OwnerID != nil {
-			for _, conflictZoneID := range conflictZoneIDs {
-				conflictZone, err := s.GetZoneByID(conflictZoneID)
-				if err != nil {
-					log.Printf("[ZoneConflict] WARNING: Failed to get conflict zone %d: %v", conflictZoneID, err)
-					continue
-				}
-				if conflictZone == nil {
-					log.Printf("[ZoneConflict] WARNING: Conflict zone %d not found", conflictZoneID)
-					continue
-				}
-
-				// Skip system zones - they cannot be claimed
-				if conflictZone.IsSystemZone {
-					log.Printf("[ZoneConflict] Skipping system zone %d - system zones cannot be claimed", conflictZoneID)
-					continue
-				}
-
-				// Only subtract if the conflict zone is owned by the same user
-				// (Players can claim space from their own zones of different types)
-				if conflictZone.OwnerID != nil && *conflictZone.OwnerID == *input.OwnerID {
-					log.Printf("[ZoneConflict] Subtracting new zone from conflict zone %d (same owner, different type)", conflictZoneID)
-					_, err := s.subtractDezoneFromZone(conflictZoneID, input.Geometry)
-					if err != nil {
-						log.Printf("[ZoneConflict] WARNING: Failed to subtract new zone from conflict zone %d: %v", conflictZoneID, err)
-						// Continue with other zones even if one fails
-						continue
-					}
-					log.Printf("[ZoneConflict] Successfully subtracted new zone from conflict zone %d", conflictZoneID)
-				} else {
-					log.Printf("[ZoneConflict] Skipping conflict zone %d - owned by different user (cannot claim space from other players)", conflictZoneID)
-				}
-			}
+	// STEP 3: Subtract default zone geometries from new zone (default zones win)
+	// This ensures default zones always keep their area
+	// May result in multiple geometries if zone is bisected
+	modifiedGeometries := []json.RawMessage{input.Geometry}
+	if len(defaultZoneIDs) > 0 {
+		log.Printf("[ZoneConflict] Subtracting %d default zone(s) from new zone geometry", len(defaultZoneIDs))
+		subtractedGeometries, err := s.subtractZonesFromGeometry(input.Geometry, defaultZoneIDs, input.Floor)
+		if err != nil {
+			log.Printf("[ZoneConflict] WARNING: Failed to subtract default zones from new zone: %v", err)
+			// Continue with original geometry if subtraction fails
+		} else if len(subtractedGeometries) > 0 {
+			modifiedGeometries = subtractedGeometries
+			log.Printf("[ZoneConflict] Successfully subtracted default zones from new zone geometry (resulted in %d components)", len(modifiedGeometries))
 		} else {
-			log.Printf("[ZoneConflict] New zone has no owner - skipping conflict resolution (only player zones can claim space)")
+			// Geometry was completely removed by default zones
+			log.Printf("[ZoneConflict] New zone geometry completely removed by default zones - rejecting zone creation")
+			return nil, fmt.Errorf("zone overlaps with default zones and would have no remaining area")
+		}
+		
+		// Validate all modified geometries
+		for i, geom := range modifiedGeometries {
+			if len(geom) > 0 {
+				var testGeom map[string]interface{}
+				if err := json.Unmarshal(geom, &testGeom); err != nil {
+					log.Printf("[ZoneConflict] WARNING: Modified geometry %d is invalid JSON: %v", i+1, err)
+					return nil, fmt.Errorf("zone geometry component %d became invalid after subtracting default zones: %w", i+1, err)
+				}
+				
+				// Validate geometry in database to ensure it's valid PostGIS geometry
+				var isValid bool
+				var geomArea float64
+				validateQuery := `SELECT ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)), ST_Area(normalize_zone_geometry_for_area(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)))`
+				if err := s.db.QueryRow(validateQuery, string(geom)).Scan(&isValid, &geomArea); err == nil {
+					if !isValid {
+						log.Printf("[ZoneConflict] ERROR: Modified geometry %d is not valid PostGIS geometry", i+1)
+						return nil, fmt.Errorf("zone geometry component %d is not valid after subtracting default zones", i+1)
+					}
+					if geomArea <= 0 {
+						log.Printf("[ZoneConflict] ERROR: Modified geometry %d has zero or negative area: %.2f", i+1, geomArea)
+						return nil, fmt.Errorf("zone geometry component %d has no area after subtracting default zones", i+1)
+					}
+					log.Printf("[ZoneConflict] Modified geometry %d validated: area=%.2f m², valid=%v", i+1, geomArea, isValid)
+				} else {
+					log.Printf("[ZoneConflict] WARNING: Could not validate geometry %d in database: %v", i+1, err)
+				}
+			} else {
+				return nil, fmt.Errorf("zone geometry component %d is empty after subtracting default zones", i+1)
+			}
 		}
 	}
 
-	// STEP 4: Continue with existing merge logic for same type/owner zones
-	// Start with the merge candidates we found, then find transitive overlaps
-	// (If A overlaps B and B overlaps C, all three should merge together)
-	var overlappingIDs []int64
-	if len(mergeCandidateIDs) > 0 {
+	// STEP 4: Check for conflicts that need user resolution (before processing)
+	// Filter conflict zones to only those owned by the same player (we can't resolve conflicts with other players' zones)
+	playerConflictZoneIDs := []int64{}
+	for _, conflictZoneID := range conflictZoneIDs {
+		conflictZone, err := s.GetZoneByID(conflictZoneID)
+		if err != nil || conflictZone == nil {
+			continue
+		}
+		// Only include conflicts with zones owned by the same player
+		if input.OwnerID != nil && conflictZone.OwnerID != nil && *conflictZone.OwnerID == *input.OwnerID {
+			playerConflictZoneIDs = append(playerConflictZoneIDs, conflictZoneID)
+		}
+	}
+
+	// If we have player-owned conflict zones and no resolution provided, return conflict info
+	if len(playerConflictZoneIDs) > 0 && (input.ConflictResolution == nil || (*input.ConflictResolution != "new_wins" && *input.ConflictResolution != "existing_wins")) {
+		// Get conflict zone details for the response
+		conflictZones := make([]ConflictZoneInfo, 0, len(playerConflictZoneIDs))
+		for _, conflictZoneID := range playerConflictZoneIDs {
+			conflictZone, err := s.GetZoneByID(conflictZoneID)
+			if err == nil && conflictZone != nil {
+				conflictZones = append(conflictZones, ConflictZoneInfo{
+					ID:       conflictZone.ID,
+					Name:     conflictZone.Name,
+					ZoneType: conflictZone.ZoneType,
+				})
+			}
+		}
+		return nil, &ZoneConflictError{
+			Conflicts: conflictZones,
+			NewZoneType: input.ZoneType,
+		}
+	}
+
+	// STEP 5: Handle conflict zones (different type/owner)
+	// Apply conflict resolution based on user choice
+	// Only process conflicts with zones owned by the same player
+	if len(playerConflictZoneIDs) > 0 {
+		// Process each conflict zone
+		for _, conflictZoneID := range playerConflictZoneIDs {
+			conflictZone, err := s.GetZoneByID(conflictZoneID)
+			if err != nil {
+				log.Printf("[ZoneConflict] WARNING: Failed to get conflict zone %d: %v", conflictZoneID, err)
+				continue
+			}
+			if conflictZone == nil {
+				log.Printf("[ZoneConflict] WARNING: Conflict zone %d not found", conflictZoneID)
+				continue
+			}
+
+			// Skip system zones - they were already handled in STEP 3
+			if conflictZone.IsSystemZone {
+				log.Printf("[ZoneConflict] Skipping system zone %d - already handled", conflictZoneID)
+				continue
+			}
+
+			// Only claim space from zones owned by the same player
+			// Protect other players' zones and unowned zones (NULL owner_id)
+			if input.OwnerID == nil {
+				// New zone has no owner - cannot claim space from any zones
+				log.Printf("[ZoneConflict] Skipping conflict zone %d - new zone has no owner (cannot claim space)", conflictZoneID)
+				continue
+			}
+			if conflictZone.OwnerID == nil {
+				// Conflict zone has no owner - protect it
+				log.Printf("[ZoneConflict] Skipping conflict zone %d - unowned zones are protected", conflictZoneID)
+				continue
+			}
+			if *conflictZone.OwnerID != *input.OwnerID {
+				// Conflict zone owned by different player - protect it
+				log.Printf("[ZoneConflict] Skipping conflict zone %d - owned by different player (cannot claim from other players)", conflictZoneID)
+				continue
+			}
+
+			// Same owner, different type - apply conflict resolution
+			resolution := "new_wins" // Default: new zone wins
+			if input.ConflictResolution != nil {
+				resolution = *input.ConflictResolution
+			}
+
+			if resolution == "existing_wins" {
+				// Existing zone wins - subtract existing zone from new zone geometries
+				log.Printf("[ZoneConflict] Existing zone %d wins - subtracting existing zone from new zone", conflictZoneID)
+				// Subtract existing zone from each component of the new zone
+				newModifiedGeometries := []json.RawMessage{}
+				for i, geom := range modifiedGeometries {
+					subtracted, err := s.subtractZonesFromGeometry(geom, []int64{conflictZoneID}, input.Floor)
+					if err != nil {
+						log.Printf("[ZoneConflict] WARNING: Failed to subtract existing zone from new zone component %d: %v", i+1, err)
+						// Keep original geometry if subtraction fails
+						newModifiedGeometries = append(newModifiedGeometries, geom)
+					} else if len(subtracted) > 0 {
+						newModifiedGeometries = append(newModifiedGeometries, subtracted...)
+					}
+					// If subtraction results in empty geometry, skip this component
+				}
+				if len(newModifiedGeometries) > 0 {
+					modifiedGeometries = newModifiedGeometries
+				} else {
+					// All components were removed - zone creation will be rejected
+					log.Printf("[ZoneConflict] New zone completely removed by existing zone %d", conflictZoneID)
+				}
+			} else {
+				// New zone wins (default) - subtract new zone from existing zone
+				// Subtract all components at once by unioning them first
+				// This avoids issues where the first subtraction splits the zone into MultiPolygon
+				if len(modifiedGeometries) > 0 {
+					// Union all components into a single geometry for subtraction
+					unionGeometry, err := s.unionZoneGeometries(modifiedGeometries)
+					if err != nil {
+						log.Printf("[ZoneConflict] WARNING: Failed to union zone components for subtraction from conflict zone %d: %v", conflictZoneID, err)
+						// Fall back to subtracting components one by one
+						for i, geom := range modifiedGeometries {
+							log.Printf("[ZoneConflict] Subtracting new zone component %d from conflict zone %d (same owner, different type, new zone wins)", i+1, conflictZoneID)
+							updatedZones, err := s.subtractDezoneFromZone(conflictZoneID, geom)
+							if err != nil {
+								log.Printf("[ZoneConflict] WARNING: Failed to subtract new zone component %d from conflict zone %d: %v", i+1, conflictZoneID, err)
+								// Continue with other zones even if one fails
+								continue
+							}
+							log.Printf("[ZoneConflict] Successfully subtracted new zone component %d from conflict zone %d", i+1, conflictZoneID)
+							// Add updated zones to result
+							result.Updated = append(result.Updated, updatedZones...)
+						}
+					} else {
+						// Subtract unioned geometry from conflict zone
+						log.Printf("[ZoneConflict] Subtracting unioned new zone geometry from conflict zone %d (same owner, different type, new zone wins)", conflictZoneID)
+						updatedZones, err := s.subtractDezoneFromZone(conflictZoneID, unionGeometry)
+						if err != nil {
+							log.Printf("[ZoneConflict] WARNING: Failed to subtract unioned geometry from conflict zone %d: %v", conflictZoneID, err)
+						} else {
+							log.Printf("[ZoneConflict] Successfully subtracted unioned geometry from conflict zone %d", conflictZoneID)
+							// Add updated zones to result
+							result.Updated = append(result.Updated, updatedZones...)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// STEP 5: Create zones for each modified geometry component
+	// If there are merge candidates, merge the first component with existing zones
+	// Additional components from bisection are created as separate new zones
+	var createdZones []*Zone
+	
+	// Process each geometry component
+	for geomIdx, modifiedGeometry := range modifiedGeometries {
+		geometryString := string(modifiedGeometry)
+		isFirstComponent := geomIdx == 0
+		
+		// STEP 6: Continue with existing merge logic for same type/owner zones
+		// Only merge the first component with existing zones
+		// Additional components from bisection are created as new zones
+		var overlappingIDs []int64
+		if len(mergeCandidateIDs) > 0 && isFirstComponent {
 		// Start with the merge candidates we already found
 		overlappingIDs = make([]int64, 0, len(mergeCandidateIDs)*2) // Pre-allocate with headroom for transitive overlaps
 		overlappingIDs = append(overlappingIDs, mergeCandidateIDs...)
@@ -418,11 +691,11 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			log.Printf("[ZoneMerge] Expanded overlap set: initial candidates=%d, full connected set=%d",
 				len(mergeCandidateIDs), len(overlappingIDs))
 		}
-	} else {
-		// No merge candidates - new zone will be created without merging
-		overlappingIDs = []int64{}
-		log.Printf("[ZoneMerge] No merge candidates - new zone will be created without merging")
-	}
+		} else {
+			// No merge candidates for this component - new zone will be created without merging
+			overlappingIDs = []int64{}
+			log.Printf("[ZoneMerge] No merge candidates for component %d - new zone will be created without merging", geomIdx+1)
+		}
 
 	if len(overlappingIDs) > 0 {
 		log.Printf("[ZoneMerge] Found %d overlapping zones to merge: %v", len(overlappingIDs), overlappingIDs)
@@ -496,6 +769,8 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 			}
 		}()
 
+		// Use the current geometry component for merging
+		
 		// Build query to merge new geometry with all overlapping zones using ST_Union
 		//
 		// WRAPPING APPROACH - Per-geometry normalization with hole detection
@@ -978,10 +1253,14 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		}
 		committed = true
 
-		return zone, nil
-	}
+		createdZones = append(createdZones, zone)
+		continue // Move to next component
+		}
 
-	// No overlapping zones, create normally
+		// No overlapping zones for this component, create normally
+		// Use current geometry component (with default zones subtracted if any)
+		geometryString = string(modifiedGeometry)
+	
 	// DEBUG: Log geometry structure before insert
 	var geomDebug map[string]interface{}
 	if err := json.Unmarshal([]byte(geometryString), &geomDebug); err == nil {
@@ -996,27 +1275,60 @@ func (s *ZoneStorage) CreateZone(input *ZoneCreateInput) (*Zone, error) {
 		}
 	}
 
-	query := `
-		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
-		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
-		RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
-		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
-		          created_at, updated_at
-	`
+		query := `
+			INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
+			VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
+			RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
+			          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
+			          created_at, updated_at
+		`
 
-	row := s.db.QueryRow(
-		query,
-		input.Name,
-		input.ZoneType,
-		geometryString,
-		input.Floor,
-		owner,
-		input.IsSystemZone,
-		nullableJSONString(input.Properties),
-		nullableJSONString(input.Metadata),
-	)
+		// For additional components, append component number to name
+		zoneName := input.Name
+		if !isFirstComponent {
+			zoneName = fmt.Sprintf("%s (Part %d)", input.Name, geomIdx+1)
+		}
+		
+		row := s.db.QueryRow(
+			query,
+			zoneName,
+			input.ZoneType,
+			geometryString,
+			input.Floor,
+			owner,
+			input.IsSystemZone,
+			nullableJSONString(input.Properties),
+			nullableJSONString(input.Metadata),
+		)
 
-	return scanZone(row)
+		createdZone, err := scanZone(row)
+		if err != nil {
+			log.Printf("[ZoneCreate] Failed to create zone component %d: %v", geomIdx+1, err)
+			// Continue with other components even if one fails
+			continue
+		}
+		
+		createdZones = append(createdZones, createdZone)
+		log.Printf("[ZoneCreate] Created zone component %d: ID=%d, name=%s", geomIdx+1, createdZone.ID, zoneName)
+	}
+	
+	// Add created zones to result
+	result.Created = createdZones
+	
+	// Return all created zones (or nil if all failed)
+	if len(result.Created) == 0 {
+		return nil, fmt.Errorf("failed to create any zone components")
+	}
+	
+	if len(result.Created) > 1 {
+		log.Printf("[ZoneCreate] Created %d zone components from bisected geometry", len(result.Created))
+	}
+	
+	if len(result.Updated) > 0 {
+		log.Printf("[ZoneCreate] Updated %d zone(s) during conflict resolution", len(result.Updated))
+	}
+	
+	return result, nil
 }
 
 // SubtractDezoneFromAllOverlapping finds all zones that overlap with the dezone geometry
@@ -1136,6 +1448,405 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 	return updatedZones, nil
 }
 
+// subtractZonesFromGeometry subtracts multiple zone geometries from a new geometry.
+// This is used when default zones win - their area is subtracted from the new zone.
+// Returns all resulting geometries (may be multiple if zone is bisected), or empty slice if result is empty/invalid.
+func (s *ZoneStorage) subtractZonesFromGeometry(newGeometry json.RawMessage, zoneIDs []int64, floor int) ([]json.RawMessage, error) {
+	if len(zoneIDs) == 0 {
+		return []json.RawMessage{newGeometry}, nil
+	}
+	
+	newGeometryString := string(newGeometry)
+	
+	// Build placeholders for zone IDs
+	placeholders := make([]string, len(zoneIDs))
+	args := make([]interface{}, len(zoneIDs)+2)
+	args[0] = newGeometryString
+	args[1] = floor
+	for i, id := range zoneIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+3) // $3, $4, $5, ...
+		args[i+2] = id
+	}
+	
+	// Subtract all default zone geometries from the new geometry
+	// This uses ST_Difference iteratively or in a single query
+	// For multiple zones, we'll union them first, then subtract
+	differenceQuery := fmt.Sprintf(`
+		WITH 
+		constants AS (
+			SELECT 264000000.0 AS ring_circ, 132000000.0 AS half_ring
+		),
+		-- Step 1: Load and validate new geometry
+		new_geom AS (
+			SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
+		),
+		-- Step 2: Load and union all default zone geometries
+		default_zones AS (
+			SELECT ST_MakeValid(geometry) AS geom
+			FROM zones
+			WHERE id IN (%s)
+			  AND floor = $2
+		),
+		-- Step 3: Union all default zones into a single geometry
+		-- Handle case where union might create MultiPolygon or invalid geometry
+		unioned_defaults_raw AS (
+			SELECT ST_Union(geom) AS geom
+			FROM default_zones
+			WHERE geom IS NOT NULL
+			  AND ST_IsValid(geom)
+			  AND NOT ST_IsEmpty(geom)
+		),
+		unioned_defaults AS (
+			SELECT 
+				CASE 
+					WHEN geom IS NULL THEN NULL
+					WHEN NOT ST_IsValid(geom) THEN ST_MakeValid(geom)
+					WHEN ST_IsEmpty(geom) THEN NULL
+					ELSE geom
+				END AS geom
+			FROM unioned_defaults_raw
+		),
+		-- Step 4: Normalize both geometries for wrap-point handling
+		new_normalized AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMax(geom) - ST_XMin(geom) > (SELECT half_ring FROM constants) 
+					     OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+						CASE
+							WHEN normalize_for_intersection(geom) IS NULL THEN geom
+							WHEN NOT ST_IsValid(normalize_for_intersection(geom)) THEN geom
+							WHEN ST_IsEmpty(normalize_for_intersection(geom)) THEN geom
+							ELSE normalize_for_intersection(geom)
+						END
+					ELSE
+						geom
+				END AS geom
+			FROM new_geom
+		),
+		-- Step 4a: Dump MultiPolygon into individual polygons for normalization
+		dumped_defaults AS (
+			SELECT 
+				(ST_Dump(geom)).geom AS geom
+			FROM unioned_defaults
+			WHERE geom IS NOT NULL
+		),
+		-- Step 4b: Normalize each polygon individually
+		normalized_default_parts AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMax(geom) - ST_XMin(geom) > (SELECT half_ring FROM constants) 
+					     OR ST_XMax(geom) > (SELECT half_ring FROM constants) THEN
+						CASE
+							WHEN normalize_for_intersection(geom) IS NULL THEN geom
+							WHEN NOT ST_IsValid(normalize_for_intersection(geom)) THEN geom
+							WHEN ST_IsEmpty(normalize_for_intersection(geom)) THEN geom
+							ELSE normalize_for_intersection(geom)
+						END
+					ELSE
+						geom
+				END AS geom
+			FROM dumped_defaults
+		),
+		-- Step 4c: Union normalized parts back together
+		default_normalized AS (
+			SELECT ST_Union(geom) AS geom
+			FROM normalized_default_parts
+			WHERE geom IS NOT NULL
+		),
+		-- Step 5: Align both geometries to common coordinate space
+		all_bounds AS (
+			SELECT 
+				LEAST(
+					COALESCE((SELECT ST_XMin(geom) FROM new_normalized WHERE geom IS NOT NULL), 999999999),
+					COALESCE((SELECT ST_XMin(geom) FROM default_normalized WHERE geom IS NOT NULL), 999999999)
+				) AS global_min_x
+		),
+		aligned_new AS (
+			SELECT 
+				ST_Translate(
+					geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM new_normalized
+			CROSS JOIN all_bounds
+		),
+		aligned_default AS (
+			SELECT 
+				ST_Translate(
+					geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM default_normalized
+			CROSS JOIN all_bounds
+		),
+		-- Step 6: Perform difference operation (subtract default zones from new zone)
+		-- Only perform difference if both geometries are valid polygons/MultiPolygons
+		-- ST_Difference can handle MultiPolygon inputs, but we need to ensure both are valid
+		differenced AS (
+			SELECT 
+				CASE 
+					WHEN (SELECT geom FROM aligned_new) IS NULL THEN NULL
+					WHEN (SELECT geom FROM aligned_default) IS NULL THEN (SELECT geom FROM aligned_new)
+					WHEN NOT ST_IsValid((SELECT geom FROM aligned_new)) THEN NULL
+					WHEN NOT ST_IsValid((SELECT geom FROM aligned_default)) THEN (SELECT geom FROM aligned_new)
+					WHEN ST_IsEmpty((SELECT geom FROM aligned_new)) THEN NULL
+					WHEN ST_IsEmpty((SELECT geom FROM aligned_default)) THEN (SELECT geom FROM aligned_new)
+					WHEN ST_GeometryType((SELECT geom FROM aligned_new)) NOT IN ('ST_Polygon', 'ST_MultiPolygon') THEN NULL
+					WHEN ST_GeometryType((SELECT geom FROM aligned_default)) NOT IN ('ST_Polygon', 'ST_MultiPolygon') THEN 
+						-- Default zones might be a different geometry type - log and return new zone as-is
+						(SELECT geom FROM aligned_new)
+					ELSE 
+						-- Both are valid Polygon or MultiPolygon - perform difference
+						ST_Difference(
+							(SELECT geom FROM aligned_new),
+							(SELECT geom FROM aligned_default)
+						)
+				END AS geom
+		),
+		-- Step 7: Shift back to original coordinate space
+		shifted_back AS (
+			SELECT 
+				ST_Translate(
+					geom,
+					(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0.0
+				) AS geom
+			FROM differenced
+			CROSS JOIN all_bounds
+		),
+		-- Step 8: Wrap coordinates to [0, 264000000) range
+		wrapped AS (
+			SELECT 
+				CASE 
+					WHEN ST_XMin(geom) < 0 THEN
+						ST_Translate(geom, 264000000.0, 0.0)
+					WHEN ST_XMax(geom) >= 264000000 THEN
+						ST_Translate(geom, -264000000.0, 0.0)
+					ELSE
+						geom
+				END AS geom
+			FROM shifted_back
+		),
+		-- Step 9: Validate result
+		validated AS (
+			SELECT ST_MakeValid(geom) AS geom
+			FROM wrapped
+		),
+		-- Step 10: Dump all polygons from result (handles both Polygon and MultiPolygon)
+		-- If the zone is bisected, ST_Difference returns MultiPolygon with multiple components
+		-- We want to return all components as separate geometries
+		dumped_polygons AS (
+			SELECT 
+				(ST_Dump(geom)).geom AS geom
+			FROM validated
+			WHERE ST_IsValid(geom)
+				AND NOT ST_IsEmpty(geom)
+				AND ST_GeometryType(geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+		),
+		-- Step 11: Filter to only valid polygons and convert to GeoJSON
+		valid_polygons AS (
+			SELECT 
+				ST_AsGeoJSON(geom, 15, 0)::TEXT AS geom_json
+			FROM dumped_polygons
+			WHERE ST_IsValid(geom)
+				AND NOT ST_IsEmpty(geom)
+				AND ST_GeometryType(geom) = 'ST_Polygon'
+			ORDER BY ST_Area(geom) DESC  -- Largest first
+		)
+		-- Return all polygons (may be multiple rows if zone was bisected)
+		SELECT geom_json FROM valid_polygons
+	`, strings.Join(placeholders, ","))
+	
+	// Query may return multiple rows if the zone was bisected into multiple components
+	rows, err := s.db.Query(differenceQuery, args...)
+	if err != nil {
+		// Log detailed error information for debugging
+		log.Printf("[ZoneConflict] Subtraction query failed: %v", err)
+		
+		// Try to diagnose the issue by checking the input geometries
+		var newGeomType, defaultGeomType sql.NullString
+		diagnosticQuery := fmt.Sprintf(`
+			WITH 
+			new_geom AS (
+				SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
+			),
+			default_zones AS (
+				SELECT ST_MakeValid(geometry) AS geom
+				FROM zones
+				WHERE id IN (%s) AND floor = $2
+			),
+			unioned_defaults AS (
+				SELECT ST_Union(geom) AS geom
+				FROM default_zones
+			)
+			SELECT 
+				ST_GeometryType((SELECT geom FROM new_geom))::TEXT,
+				ST_GeometryType((SELECT geom FROM unioned_defaults))::TEXT
+		`, strings.Join(placeholders, ","))
+		if diagErr := s.db.QueryRow(diagnosticQuery, args...).Scan(&newGeomType, &defaultGeomType); diagErr == nil {
+			newGeomTypeStr := "NULL"
+			if newGeomType.Valid {
+				newGeomTypeStr = newGeomType.String
+			}
+			defaultGeomTypeStr := "NULL"
+			if defaultGeomType.Valid {
+				defaultGeomTypeStr = defaultGeomType.String
+			}
+			log.Printf("[ZoneConflict] Diagnostic: new geometry type=%s, default zones union type=%s", 
+				newGeomTypeStr, defaultGeomTypeStr)
+		}
+		
+		return nil, fmt.Errorf("failed to subtract default zones from new zone: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Error closing rows: %v", closeErr)
+		}
+	}()
+	
+	// Collect all resulting geometries
+	var resultGeometries []json.RawMessage
+	for rows.Next() {
+		var geomJSON sql.NullString
+		if err := rows.Scan(&geomJSON); err != nil {
+			log.Printf("[ZoneConflict] Failed to scan geometry result: %v", err)
+			continue
+		}
+		if !geomJSON.Valid || geomJSON.String == "" {
+			continue
+		}
+		resultGeometries = append(resultGeometries, json.RawMessage(geomJSON.String))
+	}
+	
+	// Log geometry analysis - check the original result before dumping
+	if len(resultGeometries) > 0 {
+		var resultType sql.NullString
+		var componentCount sql.NullInt64
+		var numHoles sql.NullInt64
+		// Query the original result geometry type before ST_Dump
+		checkQuery := `
+			WITH 
+			constants AS (
+				SELECT 264000000.0 AS ring_circ, 132000000.0 AS half_ring
+			),
+			new_geom AS (
+				SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) AS geom
+			),
+			default_zones AS (
+				SELECT ST_MakeValid(geometry) AS geom
+				FROM zones
+				WHERE id IN (%s) AND floor = $2
+			),
+			unioned_defaults AS (
+				SELECT ST_Union(geom) AS geom
+				FROM default_zones
+			),
+			differenced AS (
+				SELECT ST_Difference(
+					(SELECT geom FROM new_geom),
+					(SELECT geom FROM unioned_defaults)
+				) AS geom
+			),
+			validated AS (
+				SELECT ST_MakeValid(geom) AS geom
+				FROM differenced
+			)
+			SELECT 
+				ST_GeometryType(geom)::TEXT,
+				CASE WHEN ST_GeometryType(geom) = 'ST_MultiPolygon' 
+					THEN (SELECT COUNT(*) FROM ST_Dump(geom))
+					ELSE 1
+				END,
+				CASE WHEN ST_GeometryType(geom) = 'ST_Polygon'
+					THEN ST_NumInteriorRings(geom)
+					ELSE 0
+				END
+			FROM validated
+			WHERE ST_IsValid(geom) AND NOT ST_IsEmpty(geom)
+		`
+		checkArgs := append([]interface{}{newGeometryString, floor}, args[2:]...)
+		if err := s.db.QueryRow(fmt.Sprintf(checkQuery, strings.Join(placeholders, ",")), checkArgs...).Scan(&resultType, &componentCount, &numHoles); err == nil {
+			resultTypeStr := "unknown"
+			if resultType.Valid {
+				resultTypeStr = resultType.String
+			}
+			componentCountVal := int64(0)
+			if componentCount.Valid {
+				componentCountVal = componentCount.Int64
+			}
+			numHolesVal := int64(0)
+			if numHoles.Valid {
+				numHolesVal = numHoles.Int64
+			}
+			log.Printf("[ZoneConflict] Result geometry type: %s, expected components: %d, holes: %d, actual components returned: %d", 
+				resultTypeStr, componentCountVal, numHolesVal, int64(len(resultGeometries)))
+			if resultType.Valid && resultType.String == "ST_MultiPolygon" && componentCount.Valid && componentCount.Int64 > 1 && len(resultGeometries) == 1 {
+				log.Printf("[ZoneConflict] WARNING: MultiPolygon with %d components but only 1 geometry returned - ST_Dump may have failed", componentCount.Int64)
+			}
+			if numHoles.Valid && numHoles.Int64 > 0 {
+				log.Printf("[ZoneConflict] WARNING: Result has %d holes - zone may not be bisected, just has holes subtracted", numHoles.Int64)
+			}
+		}
+	}
+	
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating geometry results: %w", err)
+	}
+	
+	if len(resultGeometries) == 0 {
+		// No result - geometry was completely subtracted
+		log.Printf("[ZoneConflict] New zone geometry completely removed by default zones")
+		return nil, nil
+	}
+	
+	if len(resultGeometries) > 1 {
+		log.Printf("[ZoneConflict] New zone was bisected by default zones into %d components", len(resultGeometries))
+	} else if len(resultGeometries) == 1 {
+		// Check if the single result is actually a MultiPolygon that wasn't properly dumped
+		var geomType sql.NullString
+		var numComponents sql.NullInt64
+		checkQuery := `SELECT ST_GeometryType(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))::TEXT, 
+			CASE WHEN ST_GeometryType(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) = 'ST_MultiPolygon' 
+				THEN (SELECT COUNT(*) FROM ST_Dump(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)))
+				ELSE 1
+			END`
+		if err := s.db.QueryRow(checkQuery, string(resultGeometries[0])).Scan(&geomType, &numComponents); err == nil {
+			if geomType.Valid && geomType.String == "ST_MultiPolygon" && numComponents.Valid && numComponents.Int64 > 1 {
+				log.Printf("[ZoneConflict] WARNING: Result is MultiPolygon with %d components but only 1 geometry returned - dumping issue?", numComponents.Int64)
+			}
+		}
+	}
+	
+	// Validate all result geometries
+	for i, geom := range resultGeometries {
+		var geomType sql.NullString
+		var geomArea sql.NullFloat64
+		var numHoles sql.NullInt64
+		validateQuery := `SELECT 
+			ST_GeometryType(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))::TEXT, 
+			ST_Area(normalize_zone_geometry_for_area(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))),
+			CASE WHEN ST_GeometryType(ST_SetSRID(ST_GeomFromGeoJSON($1), 0)) = 'ST_Polygon'
+				THEN ST_NumInteriorRings(ST_SetSRID(ST_GeomFromGeoJSON($1), 0))
+				ELSE 0
+			END`
+		if err := s.db.QueryRow(validateQuery, string(geom)).Scan(&geomType, &geomArea, &numHoles); err == nil {
+			if geomArea.Valid && geomArea.Float64 > 0 {
+				if numHoles.Valid && numHoles.Int64 > 0 {
+					log.Printf("[ZoneConflict] Component %d area: %.2f m² (has %d holes - may indicate bisection issue)", i+1, geomArea.Float64, numHoles.Int64)
+				} else {
+					log.Printf("[ZoneConflict] Component %d area: %.2f m²", i+1, geomArea.Float64)
+				}
+			} else {
+				log.Printf("[ZoneConflict] WARNING: Component %d has zero or invalid area", i+1)
+			}
+		}
+	}
+	
+	return resultGeometries, nil
+}
+
 // subtractDezoneFromZone subtracts a dezone geometry from a specific zone using ST_Difference.
 // Returns a slice of zones: the first is the updated original zone, and any additional ones
 // are new zones created from split components (when a zone is bisected).
@@ -1161,8 +1872,39 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			SELECT 264000000.0 AS ring_circ, 132000000.0 AS half_ring
 		),
 		-- Step 1: Load and validate both geometries
+		-- Handle case where target zone might be a MultiPolygon (after previous subtraction)
+		target_geom_raw AS (
+			SELECT geometry AS geom FROM zones WHERE id = $1
+		),
+		-- Dump MultiPolygon into individual polygons if needed
+		target_geom_dumped_raw AS (
+			SELECT 
+				geom,
+				ST_GeometryType(geom) AS geom_type
+			FROM target_geom_raw
+		),
+		target_geom_dumped AS (
+			SELECT 
+				(ST_Dump(geom)).geom AS geom
+			FROM target_geom_dumped_raw
+			WHERE geom_type = 'ST_MultiPolygon'
+			UNION ALL
+			SELECT 
+				geom
+			FROM target_geom_dumped_raw
+			WHERE geom_type != 'ST_MultiPolygon'
+		),
 		target_geom AS (
-			SELECT ST_MakeValid(geometry) AS geom FROM zones WHERE id = $1
+			-- Take the largest component if it's a MultiPolygon, otherwise use as-is
+			SELECT 
+				ST_MakeValid(geom) AS geom
+			FROM (
+				SELECT geom, ST_Area(geom) AS area
+				FROM target_geom_dumped
+				WHERE geom IS NOT NULL
+				ORDER BY ST_Area(geom) DESC
+				LIMIT 1
+			) AS largest
 		),
 		dezone_geom AS (
 			SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($2), 0)) AS geom
@@ -1893,6 +2635,99 @@ func (s *ZoneStorage) GetZonesByIDs(zoneIDs []int64) ([]Zone, error) {
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
 			log.Printf("Failed to close rows in GetZonesByIDs: %v", closeErr)
+		}
+	}()
+
+	var zones []Zone
+	for rows.Next() {
+		zone, err := scanZone(rows)
+		if err != nil {
+			return nil, err
+		}
+		zones = append(zones, *zone)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate zones: %w", err)
+	}
+	return zones, nil
+}
+
+// GetZonesOverlappingChunk finds all zones on a given floor that overlap with a chunk's geometry.
+// This includes player-placed zones that may not be in chunk_data.zone_ids.
+func (s *ZoneStorage) GetZonesOverlappingChunk(chunkID int64, floor int) ([]Zone, error) {
+	// Query to find zones that intersect with the chunk's geometry
+	// Use ST_Intersects with normalized geometries to handle wrap-around
+	query := `
+		WITH 
+		chunk_geom AS (
+			SELECT geometry AS geom
+			FROM chunk_data
+			WHERE chunk_id = $1
+		),
+		chunk_normalized AS (
+			SELECT normalize_for_intersection(geom) AS normalized_geom
+			FROM chunk_geom
+			WHERE geom IS NOT NULL
+		),
+		zone_normalized AS (
+			SELECT 
+				id,
+				normalize_for_intersection(geometry) AS normalized_geom
+			FROM zones
+			WHERE floor = $2
+			  AND normalize_for_intersection(geometry) IS NOT NULL
+		),
+		all_bounds AS (
+			SELECT 
+				LEAST(
+					COALESCE((SELECT ST_XMin(normalized_geom) FROM chunk_normalized WHERE normalized_geom IS NOT NULL), 999999999),
+					COALESCE((SELECT MIN(ST_XMin(normalized_geom)) FROM zone_normalized WHERE normalized_geom IS NOT NULL), 999999999)
+				) AS global_min_x
+		),
+		aligned_chunk AS (
+			SELECT 
+				ST_Translate(
+					normalized_geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_geom
+			FROM chunk_normalized
+			CROSS JOIN all_bounds
+		),
+		aligned_zones AS (
+			SELECT 
+				zn.id,
+				ST_Translate(
+					zn.normalized_geom,
+					-(SELECT COALESCE(global_min_x, 0) FROM all_bounds),
+					0
+				) AS aligned_geom
+			FROM zone_normalized zn
+			CROSS JOIN all_bounds
+		),
+		overlapping_zone_ids AS (
+			SELECT DISTINCT az.id
+			FROM aligned_zones az
+			CROSS JOIN aligned_chunk ac
+			WHERE az.aligned_geom IS NOT NULL
+			  AND ac.aligned_geom IS NOT NULL
+			  AND ST_Intersects(az.aligned_geom, ac.aligned_geom)
+		)
+		SELECT id, name, zone_type, floor, owner_id, is_system_zone,
+		       properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
+		       created_at, updated_at
+		FROM zones
+		WHERE id IN (SELECT id FROM overlapping_zone_ids)
+		ORDER BY id
+	`
+
+	rows, err := s.db.Query(query, chunkID, floor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query zones overlapping chunk: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows in GetZonesOverlappingChunk: %v", closeErr)
 		}
 	}()
 

@@ -657,13 +657,18 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 						log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
 					}
 					
-					// Load zones from chunk_data.zone_ids
+					// Load zones that overlap with this chunk
+					// This includes zones from chunk_data.zone_ids AND player-placed zones that overlap
 					var zones []interface{}
+					zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
+					
+					// First, load zones from chunk_data.zone_ids (system zones)
 					chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
 					if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
 						zoneRecords, err := h.zoneStorage.GetZonesByIDs(chunkData.ZoneIDs)
 						if err == nil {
 							for _, zone := range zoneRecords {
+								zoneIDMap[zone.ID] = true
 								zoneFeature := map[string]interface{}{
 									"type": "Feature",
 									"properties": map[string]interface{}{
@@ -683,6 +688,36 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								}
 								zones = append(zones, zoneFeature)
 							}
+						}
+					}
+					
+					// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
+					overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(storedMetadata.ID, storedMetadata.Floor)
+					if err == nil {
+						for _, zone := range overlappingZones {
+							// Skip if we already added this zone from zone_ids
+							if zoneIDMap[zone.ID] {
+								continue
+							}
+							zoneIDMap[zone.ID] = true
+							zoneFeature := map[string]interface{}{
+								"type": "Feature",
+								"properties": map[string]interface{}{
+									"id":            zone.ID,
+									"name":          zone.Name,
+									"zone_type":     zone.ZoneType,
+									"floor":         zone.Floor,
+									"is_system_zone": zone.IsSystemZone,
+								},
+								"geometry": json.RawMessage(zone.Geometry),
+							}
+							if len(zone.Properties) > 0 {
+								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+							}
+							if len(zone.Metadata) > 0 {
+								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+							}
+							zones = append(zones, zoneFeature)
 						}
 					}
 					
@@ -729,8 +764,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
 				}
 
-				// Load zones from chunk_data.zone_ids
+				// Load zones that overlap with this chunk
+				// This includes zones from chunk_data.zone_ids AND player-placed zones that overlap
 				var zones []interface{}
+				zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
+				
+				// First, load zones from chunk_data.zone_ids (system zones)
 				chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
 				if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
 					// Load zones by IDs
@@ -738,6 +777,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					if err == nil {
 						// Convert zones to GeoJSON Feature format for client
 						for _, zone := range zoneRecords {
+							zoneIDMap[zone.ID] = true
 							zoneFeature := map[string]interface{}{
 								"type": "Feature",
 								"properties": map[string]interface{}{
@@ -758,10 +798,44 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							}
 							zones = append(zones, zoneFeature)
 						}
-						log.Printf("[Chunks] Loaded %d zones for chunk %s from database", len(zones), chunkID)
 					} else {
-						log.Printf("[Chunks] Warning: Failed to load zones for chunk %s: %v", chunkID, err)
+						log.Printf("[Chunks] Warning: Failed to load zones by IDs for chunk %s: %v", chunkID, err)
 					}
+				}
+				
+				// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
+				overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(storedMetadata.ID, storedMetadata.Floor)
+				if err == nil {
+					for _, zone := range overlappingZones {
+						// Skip if we already added this zone from zone_ids
+						if zoneIDMap[zone.ID] {
+							continue
+						}
+						zoneIDMap[zone.ID] = true
+						zoneFeature := map[string]interface{}{
+							"type": "Feature",
+							"properties": map[string]interface{}{
+								"id":            zone.ID,
+								"name":          zone.Name,
+								"zone_type":     zone.ZoneType,
+								"floor":         zone.Floor,
+								"is_system_zone": zone.IsSystemZone,
+							},
+							"geometry": json.RawMessage(zone.Geometry),
+						}
+						// Add properties and metadata if present
+						if len(zone.Properties) > 0 {
+							zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+						}
+						if len(zone.Metadata) > 0 {
+							zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+						}
+						zones = append(zones, zoneFeature)
+					}
+					log.Printf("[Chunks] Loaded %d zones for chunk %s from database (%d from zone_ids, %d overlapping)", 
+						len(zones), chunkID, len(chunkData.ZoneIDs), len(overlappingZones))
+				} else {
+					log.Printf("[Chunks] Warning: Failed to load overlapping zones for chunk %s: %v", chunkID, err)
 				}
 
 				metadata := ChunkMetadata{

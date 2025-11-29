@@ -629,12 +629,12 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 	return structures, nil
 }
 
-// Constants for coordinate bounds
+// Constants for coordinate bounds.
+// NOTE: RingCircumference is defined once in zones.go and shared across the package.
 const (
-	RingCircumference = 264000000.0 // meters (264,000 km)
-	MaxWidthOffset     = 2500.0      // meters (±2.5 km)
-	MinFloor           = -2
-	MaxFloor           = 15
+	MaxWidthOffset = 2500.0 // meters (±2.5 km)
+	MinFloor       = -2
+	MaxFloor       = 15
 )
 
 // validateStructureInput validates structure creation input.
@@ -677,11 +677,6 @@ func validatePosition(pos Position) error {
 		return fmt.Errorf("y coordinate out of bounds: %f (allowed ±%f)", pos.Y, MaxWidthOffset)
 	}
 	return nil
-}
-
-// isFinite checks if a float64 is finite (not NaN, not Inf).
-func isFinite(f float64) bool {
-	return !(f != f || f == 1.0/0.0 || f == -1.0/0.0)
 }
 
 // validateStructureUpdate validates structure update input.

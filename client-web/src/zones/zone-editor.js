@@ -563,7 +563,7 @@ export class ZoneEditor {
     try {
       const currentUser = getCurrentUser();
       
-      const zone = await createZone({
+      let response = await createZone({
         name: `${this.currentZoneType} Zone`,
         zone_type: this.currentZoneType,
         floor: this.currentFloor,
@@ -575,14 +575,46 @@ export class ZoneEditor {
         },
       });
       
-      // DEBUG: Log created zone
+      // Check if response indicates a conflict (HTTP 409)
+      if (response && response.error === 'zone_conflict') {
+        // Show prompt asking which zone should win
+        const conflictResolution = await this.promptConflictResolution(response.conflicts, response.new_zone_type);
+        if (!conflictResolution) {
+          // User cancelled
+          this.isDrawing = false;
+          this.paintbrushPath = [];
+          this.startPoint = null;
+          return;
+        }
+        
+        // Retry zone creation with conflict resolution
+        response = await createZone({
+          name: `${this.currentZoneType} Zone`,
+          zone_type: this.currentZoneType,
+          floor: this.currentFloor,
+          geometry,
+          conflict_resolution: conflictResolution,
+          properties: {
+            created_by: 'zone-editor',
+            tool: this.currentTool,
+            owner_id: currentUser?.id,
+          },
+        });
+      }
+      
+      // Handle response: can be single zone or multiple zones (when bisected)
+      const zones = response.zones ? response.zones : [response];
+      
+      // DEBUG: Log created zones
       if (window.DEBUG_ZONE_COORDS) {
-        const parsedGeometry = typeof zone.geometry === 'string' ? JSON.parse(zone.geometry) : zone.geometry;
-        console.log('[ZoneEditor] finishDrawing - zone created:', {
-          id: zone.id,
-          geometry: parsedGeometry,
-          firstCoordinate: parsedGeometry?.coordinates?.[0]?.[0],
-          allCoordinates: parsedGeometry?.coordinates?.[0],
+        zones.forEach((zone, idx) => {
+          const parsedGeometry = typeof zone.geometry === 'string' ? JSON.parse(zone.geometry) : zone.geometry;
+          console.log(`[ZoneEditor] finishDrawing - zone ${idx + 1} created:`, {
+            id: zone.id,
+            geometry: parsedGeometry,
+            firstCoordinate: parsedGeometry?.coordinates?.[0]?.[0],
+            allCoordinates: parsedGeometry?.coordinates?.[0],
+          });
         });
       }
       
@@ -590,14 +622,14 @@ export class ZoneEditor {
       if (this.currentZoneType === 'dezone') {
         // Server returns a list of updated zones (with holes cut out)
         // Dezone itself is not created - it's just used for subtraction
-        if (zone && zone.updated_zones) {
-          zone.updated_zones.forEach(updatedZone => {
+        if (response && response.updated_zones) {
+          response.updated_zones.forEach(updatedZone => {
             this.gameStateManager.upsertZone(updatedZone);
             this.zoneManager.renderZone(updatedZone);
           });
-        } else if (zone && Array.isArray(zone)) {
+        } else if (response && Array.isArray(response)) {
           // Handle case where server returns array directly
-          zone.forEach(updatedZone => {
+          response.forEach(updatedZone => {
             this.gameStateManager.upsertZone(updatedZone);
             this.zoneManager.renderZone(updatedZone);
           });
@@ -605,31 +637,48 @@ export class ZoneEditor {
         // Deselect any selected zone after dezone operation
         this.deselectZone();
       } else {
-        // Normal zone creation
-        this.gameStateManager.upsertZone(zone);
-        this.zoneManager.renderZone(zone);
+        // Normal zone creation - handle single or multiple zones (bisection)
+        // Check for existing zones BEFORE upserting (to detect merges)
+        const existingZoneIDs = new Set();
+        if (zones.length === 1) {
+          const existingZone = this.gameStateManager.getZone(zones[0].id);
+          if (existingZone) {
+            existingZoneIDs.add(zones[0].id);
+          }
+        }
         
-        // If zones were merged, the server returns the merged zone (which may have an existing ID)
-        // We need to remove any other zones from local state that were merged into this zone
-        // The server only merges zones with the same type, floor, and owner
-        const allZones = this.gameStateManager.getAllZones();
-        const zonesToRemove = allZones.filter(existingZone => 
-          existingZone.id !== zone.id && // Not the returned merged zone
-          existingZone.zone_type === zone.zone_type && // Same type
-          existingZone.floor === zone.floor && // Same floor
-          existingZone.owner_id === zone.owner_id // Same owner (handles null/undefined)
-        );
-        
-        // Remove merged zones from local state
-        zonesToRemove.forEach(mergedZone => {
-          console.log(`[ZoneEditor] Removing merged zone ${mergedZone.id} (merged into zone ${zone.id})`);
-          this.gameStateManager.removeZone(mergedZone.id);
-          this.zoneManager.removeZone(mergedZone.id);
+        zones.forEach(zone => {
+          this.gameStateManager.upsertZone(zone);
+          this.zoneManager.renderZone(zone);
+          
+          // Notify callbacks
+          this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
         });
+        
+        // Handle updated zones (from conflict resolution)
+        if (response.updated_zones && Array.isArray(response.updated_zones)) {
+          response.updated_zones.forEach(updatedZone => {
+            this.gameStateManager.upsertZone(updatedZone);
+            this.zoneManager.renderZone(updatedZone);
+            console.log(`[ZoneEditor] Updated zone ${updatedZone.id} after conflict resolution`);
+          });
+        }
+        
+        // If multiple zones were created (bisection), log it
+        if (zones.length > 1) {
+          console.log(`[ZoneEditor] Zone was bisected into ${zones.length} parts`);
+        } else if (zones.length === 1) {
+          // Single zone returned - might be a merge
+          const zone = zones[0];
+          
+          // If this zone already existed, it was merged with other zones
+          // The server handles deletion of merged zones, so we don't need to clean up here
+          // The client will receive zone updates via WebSocket chunks
+          if (existingZoneIDs.has(zone.id)) {
+            console.log(`[ZoneEditor] Zone ${zone.id} was merged with other zones - server will handle deletions`);
+          }
+        }
       }
-      
-      // Notify callbacks
-      this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
       
     } catch (error) {
       console.error('Failed to create zone:', error);
@@ -642,6 +691,39 @@ export class ZoneEditor {
     this.paintbrushPath = [];
     this.startPoint = null;
     this.currentPoint = null;
+  }
+
+  /**
+   * Prompt user to resolve zone conflicts
+   * @param {Array} conflicts - Array of conflicting zones
+   * @param {string} newZoneType - Type of the new zone being created
+   * @returns {Promise<string|null>} "new_wins" or "existing_wins", or null if cancelled
+   */
+  async promptConflictResolution(conflicts, newZoneType) {
+    return new Promise((resolve) => {
+      // Format zone type names for display
+      const formatZoneType = (type) => {
+        return type.split('-').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1)
+        ).join(' ');
+      };
+      
+      const existingZoneTypes = [...new Set(conflicts.map(c => c.zone_type))];
+      const existingZoneTypeStr = existingZoneTypes.length === 1 
+        ? formatZoneType(existingZoneTypes[0])
+        : existingZoneTypes.map(t => formatZoneType(t)).join(', ');
+      const newZoneTypeStr = formatZoneType(newZoneType);
+      
+      const message = `Zone conflict detected!\n\n` +
+        `Your new ${newZoneTypeStr} zone overlaps with existing ${existingZoneTypeStr} zone(s).\n\n` +
+        `Which zone should keep the overlapping area?`;
+      
+      const choice = confirm(`${message}\n\n` +
+        `Click OK to keep the NEW ${newZoneTypeStr} zone (existing zones will lose the overlapping area).\n` +
+        `Click Cancel to keep the EXISTING ${existingZoneTypeStr} zone(s) (new zone will lose the overlapping area).`);
+      
+      resolve(choice ? 'new_wins' : 'existing_wins');
+    });
   }
   
   /**
@@ -688,7 +770,7 @@ export class ZoneEditor {
     
     try {
       const currentUser = getCurrentUser();
-      const zone = await createZone({
+      const response = await createZone({
         name: `${this.currentZoneType} Zone`,
         zone_type: this.currentZoneType,
         floor: this.currentFloor,
@@ -700,9 +782,19 @@ export class ZoneEditor {
         },
       });
       
-      this.gameStateManager.upsertZone(zone);
-      this.zoneManager.renderZone(zone);
-      this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
+      // Handle response: can be single zone or multiple zones (when bisected)
+      const zones = response.zones ? response.zones : [response];
+      
+      zones.forEach(zone => {
+        this.gameStateManager.upsertZone(zone);
+        this.zoneManager.renderZone(zone);
+        this.onZoneCreatedCallbacks.forEach(cb => cb(zone));
+      });
+      
+      // If multiple zones were created (bisection), log it
+      if (zones.length > 1) {
+        console.log(`[ZoneEditor] Zone was bisected into ${zones.length} parts`);
+      }
       
     } catch (error) {
       console.error('Failed to create polygon zone:', error);
