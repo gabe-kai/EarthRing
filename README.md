@@ -512,7 +512,7 @@ See `server/internal/auth/README.md` and `server/internal/api/README.md` for det
 
 ## Known Issues
 
-- **Maglev default zones still invisible**: After a clean reset the five system `restricted` zones (one per floor, spanning the entire ring) are recreated in the database but remain invisible in the client. The mesh caching work removed flicker once the zone renders, but the initial fetch/render path still skips these full-ring zones. Tracking issue: finish render pipeline for system zones that span > 50% of the ring so the maglev stripe shows up immediately after reset.
+None currently. All previously documented issues have been resolved.
 
 ## Documentation
 

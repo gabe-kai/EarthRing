@@ -75,6 +75,7 @@ func main() {
 	// Set up chunk metadata routes
 	api.SetupChunkRoutes(mux, db, cfg)
 	api.SetupZoneRoutes(mux, db, cfg)
+	api.SetupStructureRoutes(mux, db, cfg)
 
 	// Set up admin routes
 	api.SetupAdminRoutes(mux, db, cfg)

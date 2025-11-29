@@ -387,6 +387,68 @@ Response: {
 }
 ```
 
+#### Get Structures by Area
+
+```
+GET /api/structures/area?floor={floor}&min_x={min_x}&max_x={max_x}&min_y={min_y}&max_y={max_y}
+Headers: Authorization
+Response: [
+  {
+    "id": 789,
+    "structure_type": "building",
+    "position": {"x": 12345, "y": 100},
+    "floor": 0,
+    "rotation": 45,
+    "scale": 1.0,
+    "owner_id": 123,
+    "zone_id": 456,
+    "is_procedural": false,
+    "procedural_seed": null,
+    "properties": {...},
+    "model_data": {...},
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+
+- Returns all structures within a rectangular area on a given floor.
+- `min_x`, `max_x`, `min_y`, `max_y` are in EarthRing meters.
+
+#### Get Structures by Owner
+
+```
+GET /api/structures/owner/{owner_id}
+Headers: Authorization
+Response: [
+  {
+    "id": 789,
+    "structure_type": "building",
+    "position": {"x": 12345, "y": 100},
+    "floor": 0,
+    "rotation": 45,
+    "scale": 1.0,
+    "owner_id": 123,
+    "zone_id": 456,
+    "is_procedural": false,
+    "procedural_seed": null,
+    "properties": {...},
+    "model_data": {...},
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+
+- Restricted to the authenticated owner's ID (users can only view their own structures unless they have admin privileges).
+- Useful for overlays and tooling that need a player's personal structure list.
+
+**Validation Notes:**
+- `structure_type` required, max 50 characters.
+- `position.x` and `position.y` must be within global bounds (ring circumference and width limits).
+- `floor` must be within allowed range (currently -2 to 15).
+- If `zone_id` is provided, the server validates that the structure lies within that zone's geometry and floor.
+
 ### Chunk Management
 
 **Implementation Status:** ✅ **FULLY IMPLEMENTED** (metadata endpoint, deletion, version management, bulk operations, batch regeneration, automatic version detection)
@@ -1163,8 +1225,9 @@ All WebSocket messages use JSON:
    - **subscription_id**: Subscription ID this delta belongs to
    - **chunks**: Array of new chunks to add (geometry may be compressed)
    - **zones**: Array of new zones to add (GeoJSON format)
+   - **Zone-Chunk Binding**: Zones are embedded within chunk data in the `chunks` array, not sent separately. Each chunk object may contain a `zones` array with zones associated with that chunk.
    - **Delivery**: Sent asynchronously after `stream_pose_ack` when chunks/zones are ready
-   - **Client Handling**: Client processes deltas automatically, adding new chunks/zones and removing old ones
+   - **Client Handling**: Client processes deltas automatically, extracting zones from chunk data and adding them to the zone manager. Zones are removed when their associated chunks are removed.
    - **See**: [Streaming System Documentation](docs/07-streaming-system.md#delta-messages) for complete details
 
 6. **chunk_data** ✅ **IMPLEMENTED** (Legacy - Still supported for compatibility)

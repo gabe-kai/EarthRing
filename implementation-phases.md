@@ -200,21 +200,27 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 ### Phase 4: Structure System (Weeks 13-16)
 **Goal**: Implement structure placement and management.
 
-**Priority Order:**
-1. Structure placement API (validation, collision detection, zone checks)
-2. Structure validation (zones, collisions, height limits, access requirements)
-3. Structure storage (database with PostGIS, structure metadata)
-4. Structure rendering in client (3D models, LOD system)
-5. Structure placement UI (selection, placement, rotation, preview)
-6. Procedural structure generation integration (buildings, parks, decorations)
+**Priority Order (Updated Status):**
+1. Structure placement API (validation, collision detection, zone checks) — ✅ **PARTIALLY IMPLEMENTED** (CRUD + validation + zone checks; collision/height/access rules pending)
+2. Structure validation (zones, collisions, height limits, access requirements) — ✅ **PARTIALLY IMPLEMENTED** (coordinate bounds, floor range, zone membership; collisions/height/access pending)
+3. Structure storage (database with PostGIS, structure metadata) — ✅ **IMPLEMENTED** (PostGIS `GEOMETRY(POINT, 0)`, indexes, metadata fields)
+4. Structure rendering in client (3D models, LOD system) — ✅ **PARTIALLY IMPLEMENTED** (placeholder meshes + correct EarthRing placement + wrapping; real models/LOD pending)
+5. Structure placement UI (selection, placement, rotation, preview) — ✅ **PARTIALLY IMPLEMENTED** (toolbar tab + placement mode hooks; full click-to-place flow pending)
+6. Procedural structure generation integration (buildings, parks, decorations) — ⏳ **PENDING**
 
-**Deliverables:**
+**Deliverables (Current Status):**
 - Players can place structures (validation, collision detection)
+  - ✅ **PARTIALLY COMPLETE**: Server-side create/update/delete + validation + streaming integration; client-side placement hooks in toolbar; click-to-place flow and collision checks still to be implemented.
 - Structures are validated and stored (database persistence)
+  - ✅ **COMPLETE**: PostGIS-backed storage, coordinate bounds, floor range, zone membership checks, and tests.
 - Structures render correctly (3D models, appropriate LOD)
+  - ✅ **PARTIALLY COMPLETE**: Placeholder meshes with correct EarthRing positioning, floor height, and ring-boundary wrapping; real models and LOD system still pending.
 - Procedural generation creates buildings in zones (city grid, buildings, parks)
+  - ⏳ **PENDING**
 - Player structures override procedural generation (priority system)
+  - ⏳ **PENDING**
 - Building complexity levels work (abstract mass → standard detail → high detail)
+  - ⏳ **PENDING**
 
 **Dependencies**: Phase 3 complete, procedural generation spec (`08-procedural-generation.md`)
 

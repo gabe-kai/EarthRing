@@ -201,6 +201,8 @@ Manages local game state and synchronization with server.
 
 **Game State Manager** (`client-web/src/state/game-state.js`):
 - Chunk cache management (Map-based storage)
+- Zone cache management (Map-based storage)
+- **Structure cache management** (Map-based storage)
 - Player state management (ID, username, position, authentication)
 - Connection state tracking (WebSocket and API status)
 - **Active Floor management** (independent of camera elevation)
@@ -209,11 +211,13 @@ Manages local game state and synchronization with server.
 
 **Key Features**:
 - Chunk caching with add/remove/get operations
+- Zone caching and events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`, `zonesCleared`)
+- **Structure caching and events** (`structureAdded`, `structureUpdated`, `structureRemoved`, `structuresCleared`)
 - Player state updates with event notifications
 - Connection state tracking (WebSocket and API)
 - **Active Floor**: Player-selected floor (-2 to +2) that determines which floor's content is loaded and where actions occur, independent of camera elevation
-- **Authentication signal**: `gameStateManager.isUserAuthenticated()` mirrors `connectionState.api.authenticated`, allowing rendering systems to completely idle chunk/zone streaming until a login succeeds. This prevents the unauthenticated fetch loops we previously saw on cold starts.
-- Event listeners for state changes (chunkAdded, chunkRemoved, playerStateChanged, connectionStateChanged, activeFloorChanged)
+- **Authentication signal**: `gameStateManager.isUserAuthenticated()` mirrors `connectionState.api.authenticated`, allowing rendering systems to completely idle chunk/zone/structure streaming until a login succeeds. This prevents the unauthenticated fetch loops we previously saw on cold starts.
+- Event listeners for state changes (chunkAdded, chunkRemoved, zoneAdded/Updated/Removed, structureAdded/Updated/Removed, playerStateChanged, connectionStateChanged, activeFloorChanged)
 - State reset for logout/cleanup
 
 **Active Floor System**:
@@ -240,6 +244,12 @@ gameStateManager.setActiveFloor(1); // Switch to floor +1
 // Add chunk to cache
 gameStateManager.addChunk('0_12345', chunkData);
 
+// Upsert a zone
+gameStateManager.upsertZone({ id: 42, zone_type: 'residential', floor: 0, geometry: {...} });
+
+// Upsert a structure
+gameStateManager.upsertStructure({ id: 7, structure_type: 'building', floor: 0, position: { x: 1000, y: 50 } });
+
 // Update player state
 gameStateManager.updatePlayerState({ 
   id: 'player123', 
@@ -258,6 +268,40 @@ gameStateManager.on('activeFloorChanged', ({ oldFloor, newFloor }) => {
   // All systems automatically handle the floor change
 });
 ```
+
+### Structure Rendering System ✅ **IMPLEMENTED**
+
+**Structure Manager** (`client-web/src/structures/structure-manager.js`):
+- Manages client-side representation of structures (player-placed and procedural).
+- Integrates with `GameStateManager`, `CameraController`, and `SceneManager`.
+- Tracks structure meshes and their association with chunks for cleanup.
+
+**Key Responsibilities**:
+- Render structures as world-positioned meshes in EarthRing coordinates:
+  - Uses `position.x` (ring position), `position.y` (width offset), and `floor` to compute 3D position.
+  - Converts EarthRing coordinates to Three.js space via `toThreeJS`.
+- Handle coordinate wrapping at ring boundaries:
+  - Uses raw camera X from `CameraController` plus `wrapRingPosition` to ensure structures always appear at the closest copy to the camera.
+  - Stores `lastCameraXUsed` on each mesh group to detect when to re-wrap.
+- Filter by active floor:
+  - Renders only structures on `gameStateManager.getActiveFloor()`.
+  - Updates visibility when the active floor changes.
+- Manage lifecycle with chunks:
+  - `chunkStructures: Map<chunkID, Set<structureID>>` maps structures to source chunks.
+  - `cleanupStructuresForChunk(chunkID)` removes all structures for a chunk when it unloads.
+- Type-based and global visibility:
+  - `structureTypeVisibility: Map<type, boolean>` (e.g., buildings, decorations, vehicles).
+  - `setStructuresVisible()` toggles all structure meshes on/off.
+  - `setStructureTypeVisibility(type, visible)` toggles per-type visibility.
+- Highlighting support:
+  - `highlightStructure(structureID)` and `unhighlightStructure(structureID)` adjust emissive color for selection/debugging.
+
+**Streaming Integration**:
+- `ChunkManager` calls `extractStructuresFromChunk(chunkID, chunkData)` for each chunk that has `chunkData.structures`:
+  - Supports server-sent structures in GeoJSON Feature format and direct JSON object format.
+  - Validates that each structure has `id`, `structure_type`, and a valid `position`.
+  - Passes valid structures to `StructureManager.handleStreamedStructures(structures, chunkID)`.
+- The server embeds structures in chunk data, so they appear and disappear with chunks as the camera moves around the ring.
 
 #### Implementation (Original Example)
 

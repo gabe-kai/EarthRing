@@ -17,8 +17,14 @@
 - [Zone Creation](#zone-creation)
   - [Polygon Definition](#polygon-definition)
   - [Zone Constraints](#zone-constraints)
-- [Transportation System](#transportation-system)
+- [Zone Coordinate Wrapping](#zone-coordinate-wrapping)
   - [Overview](#overview-1)
+  - [Coordinate Storage](#coordinate-storage)
+  - [Rendering Wrapping](#rendering-wrapping)
+  - [Boundary Conditions](#boundary-conditions)
+  - [Implementation Details](#implementation-details)
+- [Transportation System](#transportation-system)
+  - [Overview](#overview-2)
   - [Transportation Hierarchy](#transportation-hierarchy)
   - [Transportation Generation Algorithm](#transportation-generation-algorithm)
   - [Transportation Infrastructure Types](#transportation-infrastructure-types)
@@ -222,674 +228,107 @@ The zone editor provides multiple tools for creating zones:
 - **Floor Spanning**: Special case - some buildings can span multiple floors, but each is a special case (see Floor Spanning Zones section)
 - **Zone-Chunk Binding**: Default zones (restricted zones) are bound to specific chunks and appear/disappear with their associated chunks (see Zone-Chunk Binding section)
 
-## Transportation System
+## Zone Coordinate Wrapping
 
 ### Overview
 
-EarthRing emphasizes pedestrian-friendly, compact city design with minimal personal autos. The transportation system grows organically based on NPC traffic patterns, prioritizing walking and public transit over private vehicles.
+Zone coordinates are stored as absolute values in the database, but must be wrapped relative to the camera during rendering to ensure zones always appear at the copy closest to the camera. This prevents gaps and ensures seamless rendering at ring boundaries.
 
-### Transportation Hierarchy
+### Coordinate Storage
 
-1. **Foot Traffic** (Default)
-   - Primary mode of transportation in city areas
-   - Compact city design optimized for walking
-   - No infrastructure required
+- **Database Storage**: Zone coordinates are stored as absolute values in the range `[0, 264,000,000)` meters
+- **Coordinate System**: EarthRing coordinates (X = ring position, Y = width offset, Z = floor)
+- **No Wrapping in Database**: Coordinates are stored without wrapping - a zone at position 263,999,000 is stored as-is, not wrapped to 0
+- **Boundary Zones**: Zones at the ring boundary (chunk 0 and chunk 263999) are stored with their actual coordinates
 
-2. **Conveyor Sidewalks** (Short Distance, Heavy Traffic)
-   - Moving walkways for high-traffic short routes
-   - Generated automatically based on traffic density
-   - Width: 3-5 meters
-   - Speed: Walking speed × 1.5-2
+### Rendering Wrapping
 
-3. **Tram-Loops** (Very Heavy Traffic, Medium Distance)
-   - Circular/loop transit routes for medium-distance travel
-   - Generated for high-traffic corridors
-   - Width: 6-8 meters (tram tracks + platform)
-   - Speed: Medium
-   - Stops at regular intervals
+During rendering, zone coordinates are wrapped relative to the camera position:
 
-4. **Maglev** (Long Distance Between Stations)
-   - High-speed transit between stations
-   - Continuous zone running full ring length
-   - System-defined infrastructure
+1. **Unwrapped Camera Position**: The client uses the raw Three.js camera position (preserving negative values) converted to EarthRing coordinates
+2. **Wrapping Function**: `normalizeRelativeToCamera(x, cameraX)` wraps zone coordinates relative to the camera:
+   - Calculates the shortest path around the ring from camera to zone
+   - Ensures zones always render at the copy closest to the camera
+   - Handles negative camera positions (west of origin)
+   - Handles positions beyond ring circumference
 
-5. **Road Lanes** (Hub and Regional Stations Only)
-   - Personal autos, buses, short-distance cargo carriers
-   - Only at pillar/elevator hubs and regional hubs
-   - Not in general city areas
-   - Width: Variable based on vehicle type
-
-6. **Bike/Skate Lanes**
-   - Dedicated lanes for bicycles and personal mobility devices
-   - Integrated into transportation network
-   - Width: 2-3 meters
-
-## Transportation Generation Algorithm
-
-### Overview
-
-Transportation infrastructure is not manually placed by players. Instead, it grows organically based on NPC traffic patterns. The system analyzes where NPCs frequently travel and generates appropriate transportation infrastructure along those paths.
-
-### Traffic Analysis
-
-1. **Data Collection**
-   - Track NPC movement paths over time
-   - Store paths in `npc_traffic` table
-   - Aggregate by frequency and recency
-   - Weight recent traffic more heavily
-
-2. **Traffic Density Calculation**
-   ```python
-   def calculate_traffic_density(path_segments, time_window):
-       """Calculate traffic density for path segments"""
-       recent_paths = filter_by_time(path_segments, time_window)
-       density_map = {}
-       for path in recent_paths:
-           for segment in path.segments:
-               density_map[segment] += path.frequency
-       return density_map
+3. **Implementation**:
+   ```javascript
+   const wrapZoneX = (x) => {
+     const wrapped = normalizeRelativeToCamera(x, cameraX);
+     return wrapped;
+   };
    ```
 
-3. **Transportation Generation Thresholds**
-   - **Very High Traffic, Medium Distance**: Generate tram-loop
-   - **High Traffic, Short Distance**: Generate conveyor sidewalk
-   - **Medium Traffic**: Generate bike/skate lane
-   - **Low Traffic**: Foot traffic only (no infrastructure)
-   - **Hub/Regional Stations**: Generate road lanes (autos, buses, cargo)
-   - **Note**: See `13-transportation-generation.md` for detailed threshold values and implementation specifications
+### Boundary Conditions
 
-### Transportation Growth Process
+#### Ring Start (X = 0)
 
-1. **Initial Generation**
-   - Analyze existing NPC traffic data
-   - Identify high-traffic corridors and distances
-   - Generate appropriate transportation infrastructure:
-     - Tram-loops for very heavy, medium-distance routes
-     - Conveyor sidewalks for heavy, short-distance routes
-     - Bike/skate lanes for medium traffic
-     - Road lanes only at hub/regional stations
-   - Connect to existing transportation network
+- Zones at position 0 render correctly when camera is at position 0
+- Zones at position 0 also render when camera is at position 264,000,000 (wrapped)
+- The wrapping function ensures the zone appears at the copy closest to the camera
 
-2. **Continuous Growth and Adaptation**
-   - Monitor NPC traffic patterns
-   - Update traffic density periodically: **In-game week** (not daily)
-   - Traffic patterns require sustained activity over a week to trigger changes
-   - Prevents temporary events (like ball games) from causing infrastructure changes
-   - **Lane Widening**: Existing infrastructure widens as traffic increases
-   - **Infrastructure Upgrading**: When traffic exceeds capacity, upgrade to next level:
-     - Foot traffic → Bike/skate lane (narrow) → Bike/skate lane (wider) → Conveyor sidewalk → Tram-loop
-     - Road lanes widen, then upgrade to tram/conveyor if traffic very high
-   - **Downgrading**: Infrastructure downgrades or narrows when traffic decreases
-   - Remove unused infrastructure
+#### Ring End (X = 264,000,000)
 
-3. **Network Connectivity**
-   - Ensure transportation connects zones
-   - Connect to maglev stations
-   - Connect to hub/regional stations (where road lanes exist)
-   - Maintain network connectivity
-   - Prioritize pedestrian connectivity
+- Zones at position 264,000,000 (chunk 263999) render correctly
+- These zones wrap to position 0 when camera is near the start
+- The wrapping ensures seamless transition at the boundary
 
-### Transportation Infrastructure Types
+#### Negative Camera Positions
 
-1. **Foot Traffic** (Default)
-   - No infrastructure required
-   - Primary mode in city areas
-   - Compact, walkable design
+- Camera can be at negative positions (west of origin) when moving west
+- Zones are wrapped relative to the unwrapped camera position
+- This ensures zones render correctly even when camera is at negative positions
 
-2. **Conveyor Sidewalks**
-   - Width: 3-5 meters (can widen up to 6-8 meters with multiple parallel conveyors)
-   - Speed: Walking speed × 1.5-2
-   - Use: Short distance, heavy traffic routes
-   - Generated when: High traffic density over short distances
-   - Upgrades from: Bike/skate lanes at maximum width
-   - Upgrades to: Tram-loop when traffic exceeds capacity
-   - **Direction**: Single direction
-   - **Bidirectional**: If both directions needed, add another conveyor on opposite side of road
+#### Zones Spanning Wrap Boundary
 
-3. **Tram-Loops**
-   - Width: 6-8 meters (can widen up to 10-12 meters with wider platforms/multiple tracks)
-   - Speed: Medium (faster than walking/conveyor)
-   - Use: Very heavy traffic, medium distance routes
-   - Generated when: Very high traffic density over medium distances
-   - Upgrades from: Conveyor sidewalks at maximum width, or road lanes at hubs
-   - **Route Type**: Linear loops - back and forth along two lanes of a single stretch of road
-   - **Future**: Can expand to more complex routes later if necessary
-   - Stops: Regular intervals along route
+- Zones that span the wrap boundary (e.g., from 263,999,000 to 1,000) are handled correctly
+- The wrapping function ensures all parts of the zone render at the copy closest to the camera
+- Full-ring zones (spanning > 50% of ring) are cached and repositioned as camera moves
 
-4. **Bike/Skate Lanes**
-   - Width: 2-3 meters (can widen up to 4-5 meters with multiple lanes)
-   - Speed: Low-medium
-   - Use: Medium traffic routes, personal mobility
-   - Generated when: Moderate traffic density
-   - Upgrades from: Foot traffic
-   - Upgrades to: Conveyor sidewalk when traffic exceeds capacity
-   - Integrated: Can run alongside other infrastructure
+### Implementation Details
 
-5. **Road Lanes** (Hub/Regional Stations Only)
-   - Width: Variable (3-4 meters per lane, can add more lanes as traffic increases)
-   - Lanes: Multiple lanes for different vehicle types
-   - Speed: Variable (low to medium)
-   - Use: Personal autos, buses, short-distance cargo carriers
-   - Location: Only at pillar/elevator hubs and regional hubs
-   - Types:
-     - **Auto Lanes**: Personal vehicles (minimal use)
-     - **Bus Lanes**: Public transit buses
-     - **Cargo Lanes**: Short-distance cargo carriers
-   - **Upgrades**: When traffic exceeds road capacity, can upgrade to tram-loop or conveyor sidewalk
-   - **Widening**: Lanes widen by adding more parallel lanes as traffic increases
+#### Client-Side (zone-manager.js)
 
-6. **Maglev** (System-Defined)
-   - Width: ~100 meters (centered on ring)
-   - Speed: Very high
-   - Use: Long-distance travel between stations
-   - Continuous zone running full ring length
+1. **Camera Position Retrieval**:
+   ```javascript
+   // Get raw Three.js camera position (preserves negative values)
+   const camera = this.sceneManager?.getCamera();
+   const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+   const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
+   const cameraX = cameraEarthRingPos.x || 0;
+   ```
 
-### Dynamic Infrastructure Adaptation
+2. **Zone Coordinate Wrapping**:
+   ```javascript
+   const wrapZoneX = (x) => {
+     const wrapped = normalizeRelativeToCamera(x, cameraX);
+     return wrapped;
+   };
+   ```
 
-**Lane Widening Mechanism**:
-- Infrastructure starts at minimum width for its type
-- As traffic increases, lanes widen incrementally
-- Width increases in steps (e.g., 0.5m increments)
-- Maximum width before upgrade depends on infrastructure type:
-  - Bike/skate lanes: Up to 4-5 meters (2-3 lanes)
-  - Conveyor sidewalks: Up to 6-8 meters (multiple parallel conveyors)
-  - Tram-loops: Up to 10-12 meters (wider platforms, multiple tracks)
-  - Road lanes: Up to 4 meters per lane (multiple lanes)
+3. **Full-Ring Zone Optimization**:
+   - Zones spanning > 50% of ring are cached
+   - Mesh geometry is reused, only position is updated
+   - Reduces rendering overhead for large zones
 
-**Infrastructure Upgrade Progression**:
-- When traffic exceeds capacity of current infrastructure type, upgrade to next level:
-  1. **Foot Traffic** → **Bike/Skate Lane** (narrow, 2m)
-  2. **Bike/Skate Lane** (narrow) → **Bike/Skate Lane** (wider, up to 4-5m)
-  3. **Bike/Skate Lane** (at max width) → **Conveyor Sidewalk** (3-5m)
-  4. **Conveyor Sidewalk** (at max width) → **Tram-Loop** (6-8m)
-  5. **Road Lanes** (at max width) → **Tram-Loop** or **Conveyor Sidewalk** (if traffic very high)
+#### Server-Side (zones.go)
 
-**Upgrade Conditions**:
-- Traffic density exceeds current infrastructure capacity
-- Traffic sustained at high level for threshold period (e.g., 24-48 hours)
-- Upgrade replaces existing infrastructure (no duplication)
-- Smooth transition: Old infrastructure removed, new infrastructure added
+1. **Coordinate Wrapping Functions**:
+   - `wrapCoordinate(x)` - Wraps a single X coordinate to `[0, RingCircumference)`
+   - `wrapGeoJSONCoordinates(geom)` - Wraps all X coordinates in a GeoJSON geometry
 
-**Downgrade Conditions**:
-- Traffic decreases below threshold for current infrastructure type
-- Traffic sustained at low level for threshold period
-- Infrastructure narrows first, then downgrades if traffic continues low
-- Prevents infrastructure from being removed too quickly (hysteresis)
+2. **Query Wrapping**:
+   - Zone queries handle wrapped bounding boxes
+   - When query range crosses the wrap boundary, the query is expanded to cover both sides
 
-### Transportation Placement Rules
+#### Relationship to Chunk Wrapping
 
-- Transportation infrastructure follows NPC traffic paths
-- Respects zone boundaries (can cross but maintain zone identity)
-- Avoids player-placed structures
-- Connects to existing transportation network
-- **Dynamic Adaptation**: Infrastructure widens and upgrades based on traffic
-- Road lanes only generated at hub/regional stations
-- Prioritizes pedestrian connectivity
-- Compact design minimizes infrastructure footprint
-- Infrastructure adapts organically to traffic patterns
+- Zone wrapping uses the same logic as chunk wrapping
+- Both use unwrapped camera position for consistency
+- Ensures zones and chunks appear/disappear together at boundaries
+- Prevents synchronization issues between zones and chunks
 
-### Manual Infrastructure Placement
+## Transportation System
 
-**Decision**: Players with special roles can manually place transportation infrastructure.
-
-**Role System**:
-- **Infrastructure Manager Role**: Special role (lighter than admin, but with infrastructure permissions)
-- Allows manual placement of transportation infrastructure
-- Can override automatic generation
-- Can create custom routes and connections
-- Useful for planning and optimization
-
-**Manual Placement Rules**:
-- Must still use valid infrastructure types
-- Must respect zone boundaries and system zones
-- Can create routes not generated automatically
-- Can modify existing infrastructure
-- Changes affect NPC pathfinding and traffic patterns
-
-## Zone-to-Zone Connectivity
-
-### Connectivity Analysis
-
-The system analyzes how zones connect:
-
-1. **Direct Connections**
-   - Zones share a boundary
-   - Transportation infrastructure connects zones directly
-
-2. **Indirect Connections**
-   - Zones connected via intermediate zones
-   - Path through transportation network
-
-3. **Maglev Connections**
-   - Zones near elevator stations
-   - Can use maglev for long-distance travel
-
-### NPC Pathfinding
-
-NPCs use zone connectivity and transportation network for pathfinding:
-
-1. **Zone-Level Pathfinding**
-   - Find path through zone network
-   - Use A* or similar algorithm
-   - Consider zone types (residential → commercial → work)
-   - Prioritize walking paths
-
-2. **Transportation-Level Pathfinding**
-   - Find path along transportation network
-   - Consider transportation types and speeds:
-     - Foot traffic (default, slowest)
-     - Bike/skate lanes (medium speed)
-     - Conveyor sidewalks (faster, short distance)
-     - Tram-loops (faster, medium distance)
-     - Road lanes (only at hubs, variable speed)
-     - Maglev (fastest, long distance)
-   - Avoid congestion
-   - Prefer public transit over personal vehicles
-
-3. **Hybrid Pathfinding**
-   - Combine zone and transportation pathfinding
-   - Use maglev for long distances
-   - Optimize for time/distance
-   - Consider transportation availability (tram schedules, etc.)
-   - Default to walking when no infrastructure available
-
-## Zone Area Calculation
-
-### Area Calculation Implementation
-
-Zone areas are calculated using PostGIS `ST_Area()` function, which returns the area in square meters. The area is automatically computed and included in all zone responses.
-
-**Area Calculation Details:**
-- **PostGIS Function**: `ST_Area()` calculates the area of polygon geometries
-- **Unit**: Square meters (m²)
-- **Normalization**: Zones that wrap around the X axis (crossing from near X=0 to near X=264,000,000) are normalized before area calculation to prevent incorrect area measurements
-
-### Wrap-Around Area Fix
-
-**Problem**: When a zone wraps around the X axis (e.g., a circle drawn at world origin with coordinates spanning from near 0 to near 264,000,000), PostGIS calculates the area as if the polygon spans the entire ring width, resulting in billions of m² instead of the correct area.
-
-**Solution**: A PostGIS function `normalize_zone_geometry_for_area()` was created to normalize coordinates before area calculation:
-- Detects when coordinates span more than half the ring circumference (132,000,000m)
-- Shifts coordinates that are > half_ring by subtracting the ring circumference (264,000,000m)
-- Makes coordinates contiguous so PostGIS calculates area correctly
-- Applied automatically to all zone area calculations
-
-**Example**: A 30m diameter circle at world origin:
-- **Before fix**: Area calculated as billions of m² (incorrect)
-- **After fix**: Area calculated as ~707 m² (π × 15², correct)
-
-**Implementation**: Migration `000015_normalize_zone_geometry_for_area` creates the normalization function, and all zone queries (`CreateZone`, `GetZoneByID`, `UpdateZone`, `ListZonesByArea`, `ListZonesByOwner`) use `ST_Area(normalize_zone_geometry_for_area(geometry))` instead of `ST_Area(geometry)`.
-
-## Zone Properties and Effects
-
-### Zone Properties
-
-Each zone has properties that affect gameplay:
-
-- **Density**: Low, Medium, High (affects building density)
-- **Height Limit**: Maximum building height
-- **Building Style**: Modern, Classic, Futuristic, etc.
-- **NPC Population**: Target population for the zone
-- **Resource Production**: What resources the zone produces
-- **Resource Consumption**: What resources the zone consumes
-
-### Zone Effects
-
-Zones affect various game systems:
-
-1. **Procedural Generation**
-   - Buildings generated match zone type and density
-   - Building styles match zone properties
-   - NPCs spawned based on zone type
-
-2. **NPC Behavior**
-   - NPCs choose homes in residential zones
-   - NPCs choose work in commercial/industrial zones
-   - NPCs visit commercial zones for shopping
-   - NPCs visit park zones for recreation
-
-3. **Racing** (Illegal Street Racing)
-   - Zones affect route generation through existing infrastructure
-   - Dense zones create challenging, technical race routes
-   - Open zones allow high-speed sections
-   - Transportation infrastructure type determines racing characteristics
-
-## Zone Overlap and Conflicts
-
-### Zone Overlap Policy
-
-**Decision**: Zones are allowed to overlap with other player zones. Conflicts are resolved automatically based on zone ownership and type.
-
-**Player Zone Priority**: When a player creates a zone, it always claims the space the player selected, even if that area is already claimed by other zones. The newly created zone takes precedence in the overlap area, effectively "claiming" that space from existing zones. This ensures that player intent is respected - if a player draws a zone in a specific location, that zone will control that area regardless of existing overlaps.
-
-**Note**: The conflict resolution system prioritizes player intent and ownership. System zones and other players' zones are protected from claims, ensuring fair gameplay and preventing unauthorized zone modifications.
-
-### Conflict Resolution (Implemented)
-
-When a player creates a zone that overlaps with existing zones, the system handles conflicts as follows:
-
-1. **Same Type and Owner**: Zones of the same type and owner automatically merge into a single zone
-   - The oldest zone's ID is preserved
-   - All overlapping zones of matching type/owner are combined using PostGIS `ST_Union`
-   - Transitive overlaps are handled (if A overlaps B and B overlaps C, all merge together)
-
-2. **Different Type, Same Owner**: The newly created zone claims space from the player's own zones of different types
-   - The new zone's geometry is subtracted from overlapping zones using PostGIS `ST_Difference`
-   - Overlapping zones are reduced in area (or deleted if completely covered)
-   - If a zone is bisected, split zones are created for the disconnected pieces
-
-3. **Different Owner**: Player zones cannot claim space from other players' zones
-   - Other players' zones remain unchanged
-   - Both zones can coexist with overlapping areas
-
-4. **System Zones**: System zones are protected and cannot be claimed
-   - System zones (elevator stations, maglev, Atlas Pillars) remain unchanged
-   - Player zones can overlap system zones but do not claim space from them
-
-5. **Zones with No Owner**: Zones with NULL owner_id cannot be claimed from
-   - Unowned zones remain unchanged when overlapped by player zones
-
-**Implementation Details**:
-- Conflict detection occurs automatically on zone creation
-- All overlapping zones are identified using PostGIS spatial queries with proper coordinate normalization
-- Merge operations use `ST_Union` for same type/owner zones
-- Claim operations use `ST_Difference` for different type/owner zones (same owner only)
-- System zones and other players' zones are protected from claims
-- Wrap-around coordinates are handled correctly using normalization functions
-
-### Overlap Benefits
-
-- Allows creative zone combinations
-- Players can experiment with overlapping zones
-- Creates interesting gameplay dynamics
-- Simulates real-world property disputes
-
-## Floor Spanning Zones
-
-**Decision**: Floor-spanning zones are a special case, handled building-by-building.
-
-**Implementation**:
-- Not a general zone feature
-- Specific buildings can be designated as floor-spanning
-- Each floor-spanning building is handled as a special case
-- Zones on different floors can reference the same building
-- Building-specific rules determine how floors interact
-
-**Examples**:
-- A skyscraper spanning multiple station levels
-- A building with ground floor commercial and upper floors residential
-- Each case handled individually based on building design
-
-## Zone Modifications
-
-### Editing Zones
-
-Players can modify their zones:
-
-1. **Resize**: Adjust polygon vertices
-2. **Change Type**: Convert zone to different type
-3. **Change Density**: Adjust density level
-4. **Change Properties**: Modify custom properties
-5. **Delete**: Remove zone via zone editor panel (structures may be affected)
-   - Delete button available in zone list
-   - Confirmation dialog prevents accidental deletion
-   - Zone removed from scene and game state immediately
-
-### Zone Merging
-
-**Automatic Merging** (Implemented):
-
-When a player creates or updates a zone that overlaps with existing zones of the same type, floor, and owner, the zones are automatically merged:
-
-1. **Overlap Detection**: System detects overlapping zones with matching properties
-2. **Union Operation**: PostGIS `ST_Union` merges all overlapping zones into one
-3. **ID Preservation**: The oldest zone's ID is kept, others are deleted
-4. **Property Handling**: Oldest zone's name and properties are preserved
-
-**Wrap-Around Handling**:
-
-Zones crossing the X-axis boundary (e.g., rectangles from X=15 to X=263,999,970) require special handling:
-
-- **Problem**: Wrapped zones span almost the entire ring coordinate space
-- **Solution**: Per-coordinate normalization using `ST_DumpPoints` + `ST_MakePolygon`
-  - Detects wrapping when `span > 132,000 km (half ring)`
-  - Shifts individual coordinates where `X > 132,000,000` by `-264,000,000`
-  - Rebuilds polygon with contiguous coordinates
-  - Performs union in normalized space
-  - Wraps result back to `[0, 264,000,000)` range
-
-This ensures wrapped zones merge correctly with overlapping zones, producing proper union shapes.
-
-See `WRAP_POINT_FIX_SUMMARY.md` for technical implementation details.
-
-### Zone Splitting
-
-- Players can split zones into multiple zones
-- Polygon division operation
-- Properties distributed or copied
-
-### Dezone (Zone Subtraction)
-
-**Dezone Tool** (Implemented):
-
-The dezone tool allows players to subtract areas from existing zones, effectively "cutting out" portions of zones:
-
-1. **Dezone Creation**: When a player creates a zone with `zone_type: "dezone"`, it triggers a subtraction operation rather than creating a new zone
-2. **Overlap Detection**: The system finds all zones on the same floor that overlap with the dezone geometry
-3. **Ownership Check**: Only zones owned by the user creating the dezone can be modified
-4. **Subtraction Operation**: PostGIS `ST_Difference` subtracts the dezone geometry from each overlapping zone
-5. **Result Handling**:
-   - **Partial Overlap**: Zone is updated with the remaining geometry (after subtraction)
-   - **Complete Removal**: If the dezone completely covers a zone, the zone is deleted
-   - **Zone Bisection**: If subtraction splits a zone into multiple disconnected pieces, the original zone is updated with the largest piece, and additional zones are created for the remaining pieces
-
-**Wrap-Around Handling**:
-
-Dezone operations handle wrapped coordinates (zones crossing the X-axis boundary) using the same normalization approach as zone merging:
-- Both the target zone and dezone geometry are normalized using `normalize_for_intersection`
-- Geometries are aligned to a common coordinate space
-- Subtraction is performed in aligned space
-- Result is shifted back and wrapped to `[0, 264,000,000)` range
-
-**API Behavior**:
-
-- `POST /api/zones` with `zone_type: "dezone"` returns `{"updated_zones": [...], "count": N}` instead of a single zone
-- The response contains all zones that were modified by the dezone operation
-- If no zones overlap the dezone, an empty array is returned
-
-## Zone-Chunk Binding
-
-### Overview
-
-Default zones (specifically restricted zones) are now bound to chunks rather than being independent entities. This ensures zones appear and disappear with their associated chunks, providing better performance and consistency with the chunk-based procedural generation system.
-
-### Default Zone Generation
-
-- **Per-Chunk Generation**: Each chunk receives one default restricted zone during procedural generation
-- **Zone Dimensions**: 
-  - Length: Full chunk length (1000 meters)
-  - Width: 20 meters (Y: -10 to +10, centered on ring)
-- **Generation Process**: Zones are generated by the procedural service (`server/internal/procedural/generation.py`) alongside chunk geometry
-- **Zone Format**: Zones are generated as GeoJSON Features with geometry and metadata
-
-### Zone Storage and Persistence
-
-- **Database Storage**: Zones are stored in the `zones` table with standard zone fields
-- **Chunk Linking**: Zones are linked to chunks via the `chunk_data.zone_ids` array column
-- **Metadata**: Default zones include metadata:
-  - `metadata.default_zone = 'true'` - Indicates this is a system-generated default zone
-  - `metadata.chunk_index` - The chunk index this zone belongs to
-- **Zone Reuse**: When chunks are regenerated, the system checks for existing zones with matching `floor`, `zone_type`, `is_system_zone`, `chunk_index`, and `default_zone` flags. If found, the existing zone ID is reused rather than creating duplicates.
-- **Persistence**: Zones persist across server restarts because they are stored in the database and linked to chunks
-
-### Zone Lifecycle
-
-1. **Generation**: Zones are generated procedurally when chunks are created
-2. **Storage**: Zones are stored in the database and linked to chunks via `chunk_data.zone_ids`
-3. **Streaming**: Zones are embedded in chunk data when chunks are streamed to clients
-4. **Extraction**: Client extracts zones from chunk data and passes them to the zone manager
-5. **Rendering**: Zones are rendered when their associated chunks are visible
-6. **Cleanup**: Zones are removed from the scene when their associated chunks are unloaded
-
-### Coordinate Wrapping
-
-- **Unwrapped Camera Position**: Zone rendering uses the same unwrapped camera position logic as chunks
-- **Implementation**: Zones use raw Three.js camera position converted to EarthRing coordinates, preserving negative X values
-- **Boundary Handling**: Zones wrap correctly at ring boundaries (west/east wrap points) using `normalizeRelativeToCamera()` function
-- **Consistency**: Zone wrapping matches chunk wrapping behavior, ensuring zones and chunks appear/disappear together at boundaries
-
-### Benefits
-
-- **Performance**: Zones only exist when their chunks are loaded, reducing memory usage
-- **Consistency**: Zones always appear with their chunks, preventing synchronization issues
-- **Persistence**: Zones survive server restarts because they're stored in the database
-- **Granularity**: Per-chunk zones provide better control than full-ring zones
-
-## Special Zone Rules
-
-### Elevator Station Zones
-
-- Fixed geometry matching station design
-- Some areas may be buildable (TBD)
-- Roads must connect to station
-- Maglev access points
-
-### Restricted Zones
-
-- **Distribution**: One default restricted zone per chunk (see Zone-Chunk Binding section)
-- **Purpose**: Prevent or limit procedural generation in specific areas
-- **Dimensions**: 1000m length (full chunk) × 20m width (centered on ring)
-- **Lifecycle**: Bound to chunks - appear/disappear with chunks
-- **Persistence**: Stored in database and linked to chunks via `chunk_data.zone_ids`
-- **Note**: Previously implemented as full-ring maglev zones, now replaced with per-chunk zones
-
-### Atlas Pillar Zones
-
-- Fixed geometry (TBD)
-- Structural requirements
-- May have buildable areas
-- Roads must respect pillar structure
-
-## Client-Side Implementation
-
-### Zone Rendering Architecture
-
-**Current Implementation** (see `docs/06-client-architecture.md` for full details):
-
-- **World-Anchored Meshes**: Zones are rendered as separate Three.js meshes positioned at their actual world coordinates, not relative to the camera. This ensures zones stay fixed to their locations on the ring.
-
-- **Ring Wrapping**: Zones wrap around the 264,000 km ring circumference using the same logic as chunks. The `wrapZoneX()` function calculates the shortest path around the ring, ensuring zones always render at the copy closest to the camera.
-
-- **Coordinate Conversion**: Zone coordinates (EarthRing X/Y/Z) are converted to Three.js coordinates:
-  - EarthRing X (ring position) → Three.js X (right)
-  - EarthRing Y (width) → Three.js Z (forward)  
-  - EarthRing Z (floor) → Three.js Y (up) via `floor * DEFAULT_FLOOR_HEIGHT`
-
-- **Shape Geometry Creation**: Zones use `THREE.ShapeGeometry` created from `THREE.Shape` objects:
-  - Shape is created in the XY plane using `worldPos.x` (EarthRing X) and negated `worldPos.z` (EarthRing Y) as coordinates
-  - Shape is then rotated -90° around X-axis to lie flat on the ring floor
-  - **Y Coordinate Handling**: The shape's Y coordinate (`worldPos.z`) is always negated before creating the fill shape. This ensures correct face orientation after rotation, preventing zones from appearing mirrored on the opposite side of the Y-axis. The outline (stroke) uses `worldPos.z` directly without negation, as it renders correctly regardless of Y sign.
-
-- **Active Floor System**: Zones are fetched and rendered only for the **active floor** (player-selected floor from `gameStateManager.getActiveFloor()`), not camera elevation. This allows the camera to zoom out for a wider view while keeping zone actions on the selected floor. When the active floor changes, all zones from the old floor are removed and zones for the new floor are automatically loaded.
-
-- **Fetching Strategy**: Zones are fetched via `GET /api/zones/area` with a bounding box around the camera (default: 5000m ring, 3000m width). The floor parameter is set to the active floor, not camera elevation. Fetching is throttled to once per 4 seconds to prevent excessive API calls.
-  - **Zone Merging**: When zones are fetched, they are merged with existing zones rather than replacing them. This preserves manually added zones (e.g., newly created zones) that may be outside the current fetch bounds due to coordinate wrapping near X=0. Only zones that are far from the camera (more than 2x the fetch range) are removed.
-  - **Floor Filtering**: Only zones matching the active floor are rendered. Zones from other floors are automatically removed when the active floor changes.
-  - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization to ensure zones near X=0 remain visible even when the camera is at a different position.
-
-- **Visibility System**: Three-level visibility control:
-  - **Active Floor filtering**: Only zones matching the active floor are rendered (highest priority)
-  - Global visibility: All zones on/off (for the active floor only)
-  - Per-type visibility: Individual zone types can be shown/hidden independently (for the active floor only)
-  - Zones toolbar provides UI controls for floor selection and visibility levels
-
-- **Grid Overlay Separation**: Grid is rendered separately using circular `THREE.LineSegments` geometry with shader-driven fade and LOD. The overlay renders a bold world Y=0 axis plus thicker 20m multiples, while zones stay separate so they remain fully visible while the grid thins/fades based on camera distance.
-
-#### Full-Ring Zones & Current Limitations
-
-- **Full-ring caching**: Zones whose span exceeds half the circumference (e.g., the default maglev `restricted` stripe) are cached once and simply re-positioned as the camera wraps. This prevents the previous remove/re-add flicker loop.
-- **Authentication gating**: `ZoneManager` no longer attempts API calls while the user is logged out. World streaming begins only after login, avoiding the earlier unauthenticated fetch spam.
-- **Outstanding bug**: The five default maglev zones (floors -2 through +2) are recreated on every reset but still fail to render after a cold start. The geometry exists in the database and the caching layer eliminates flicker once drawn, but the initial fetch pipeline is still skipping system full-ring zones. Keep this documented until the maglev stripe renders automatically.
-
-### Zone Type Support
-
-**Implemented Zone Types:**
-- `residential` - Green overlay
-- `commercial` - Blue overlay
-- `industrial` - Orange overlay
-- `mixed-use` / `mixed_use` - Yellow-orange gradient overlay
-- `park` - Light green overlay
-- `restricted` - Red overlay (prevents procedural spawning)
-
-**Adding New Zone Types:**
-1. Add color/style to `ZONE_STYLES` in `zone-manager.js`
-2. Add to `zoneTypeVisibility` Map in constructor
-3. Add to zones toolbar `zoneTypes` array
-4. Update server-side validation if needed
-
-### Troubleshooting Client-Side Issues
-
-**Zones Not Appearing:**
-- Check authentication: User must be logged in
-- Check fetch throttling: Wait 4 seconds between manual fetches
-- Check visibility: Both global and per-type visibility must be enabled
-- Check console: Use `zoneManager.logZoneState()` for debug info
-- Verify zone data: Check `gameStateManager.getAllZones()` for cached zones
-
-**Zones Moving with Camera:**
-- Indicates ring wrapping logic failure
-- Verify camera position retrieval: `cameraController.getEarthRingPosition()`
-- Check that zone coordinates are in EarthRing space before wrapping
-
-**Performance Issues:**
-- Current implementation handles ~100 zones efficiently
-- Each zone creates 2-3 meshes (fill + outline per polygon)
-- Reduce fetch range or increase throttle if needed
-- Monitor mesh count: `zoneManager.zoneMeshes.size`
-
-## Performance Considerations
-
-### Zone Queries
-
-- Spatial indexing (GIST) for fast point-in-polygon queries
-- Cache zone lookups for frequently accessed positions
-- Batch zone queries when possible
-- Client-side fetch throttling (4 second minimum between requests)
-
-### Client-Side Rendering
-
-- Zone meshes use `depthWrite: false` and `depthTest: false` to prevent z-fighting
-- Render order: Zones (`renderOrder = 5`) above grid (`renderOrder = 1`)
-- Mesh cleanup: Zones are properly disposed when removed
-- Performance target: ~100 zones rendered simultaneously without frame drops
-
-### Transportation Generation
-
-- Incremental transportation generation (don't regenerate entire network)
-- Cache transportation network data
-- Update transportation infrastructure in background process
-- Limit generation frequency
-- Prioritize pedestrian infrastructure over vehicle infrastructure
-
-### Zone Validation
-
-- Validate polygons on creation/modification
-- Check for overlaps and conflicts
-- Optimize validation algorithms
-- Server-side validation ensures GeoJSON validity before storage
-
-## Open Questions
-
-1. What is the maximum number of vertices per zone polygon? (Needs performance testing with different clients - web, light local, Unreal)
-2. ~~What are the exact traffic thresholds for generating each transportation type?~~ **RESOLVED** - See `13-transportation-generation.md` for detailed threshold values and implementation specifications
-3. How should we handle zone boundaries at chunk boundaries? (Zones can span chunks - implementation details TBD)
-
-## Future Considerations
-
-- Zone templates for quick creation
-- Zone sharing between players
-- Zone marketplace (buy/sell zones)
-- Dynamic zone effects based on player actions
-- Zone statistics and analytics
-- Zone-based events and challenges
-
+[Rest of the document continues...]

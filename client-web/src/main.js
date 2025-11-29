@@ -10,6 +10,7 @@ import { showPlayerPanel } from './ui/player-ui.js';
 import { showChunkPanel } from './ui/chunk-ui.js';
 import { showAdminModal } from './ui/admin-modal.js';
 import { initializeZonesTab } from './ui/zone-ui.js';
+import { initializeStructuresTab } from './ui/structure-ui.js';
 import { createBottomToolbar } from './ui/bottom-toolbar.js';
 import * as THREE from 'three';
 import { SceneManager } from './rendering/scene-manager.js';
@@ -18,6 +19,7 @@ import { GameStateManager } from './state/game-state.js';
 import { ChunkManager } from './chunks/chunk-manager.js';
 import { ZoneManager } from './zones/zone-manager.js';
 import { ZoneEditor } from './zones/zone-editor.js';
+import { StructureManager } from './structures/structure-manager.js';
 import { GridOverlay } from './rendering/grid-overlay.js';
 import { DebugInfoPanel } from './ui/debug-info.js';
 import { Minimap } from './ui/minimap.js';
@@ -47,8 +49,15 @@ const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneMan
 // Expose zone manager globally for debugging/access
 window.zoneManager = zoneManager;
 
-// Initialize chunk manager (pass camera controller for position wrapping and zone manager for zone tracking)
+// Initialize structure manager
+const structureManager = new StructureManager(gameStateManager, cameraController, sceneManager);
+// Expose structure manager globally for debugging/access
+window.structureManager = structureManager;
+
+// Initialize chunk manager (pass camera controller for position wrapping and zone/structure managers for tracking)
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController, zoneManager);
+// Wire structure manager into chunk manager for streamed structures and cleanup
+chunkManager.structureManager = structureManager;
 const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateManager, {
   radius: 250, // 250m radius circular grid
   majorSpacing: 5,
@@ -88,6 +97,7 @@ window.earthring = {
   debugInfoPanel: debugPanel,
   zoneManager,
   zoneEditor,
+  structureManager,
   gridOverlay,
   debugPanel,
   wsClient,
@@ -243,7 +253,7 @@ sceneManager.onRender((deltaTime) => {
 
   // Initialize bottom toolbar
   createBottomToolbar();
-
+  
   // Initialize console (hidden by default)
   createConsole();
 
@@ -266,6 +276,8 @@ if (isAuthenticated()) {
   
   // Initialize zones tab in toolbar
   initializeZonesTab();
+  // Initialize structures tab in toolbar
+  initializeStructuresTab();
 } else {
   showAuthUI();
   console.log('Showing authentication UI');
@@ -279,6 +291,8 @@ if (isAuthenticated()) {
   
   // Initialize zones tab in toolbar
   initializeZonesTab();
+  // Initialize structures tab in toolbar
+  initializeStructuresTab();
   
   // Connect WebSocket if already authenticated
   wsClient.connect().then(() => {

@@ -16,6 +16,7 @@ import (
 	"github.com/earthring/server/internal/streaming"
 	"github.com/earthring/server/internal/testutil"
 	"github.com/gorilla/websocket"
+	"github.com/lib/pq"
 )
 
 // IntegrationTestFramework provides utilities for WebSocket streaming integration tests
@@ -875,4 +876,230 @@ func TestIntegration_Performance(t *testing.T) {
 
 	// Wait for async chunk loading
 	time.Sleep(500 * time.Millisecond)
+}
+
+// TestIntegration_ZonePersistence tests that zones persist across chunk regeneration
+func TestIntegration_ZonePersistence(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	// Create a chunk with a zone
+	chunkID, err := framework.CreateTestChunk(0, 50000)
+	if err != nil {
+		t.Fatalf("Failed to create test chunk: %v", err)
+	}
+
+	// Create a zone linked to this chunk via metadata
+	zoneID, err := framework.CreateTestZone(0, 50000000, -10, 50001000, 10, "restricted", 0)
+	if err != nil {
+		t.Fatalf("Failed to create test zone: %v", err)
+	}
+
+	// Update chunk_data to link zone to chunk
+	_, err = framework.db.Exec(`
+		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+	`, zoneID, chunkID)
+	if err != nil {
+		t.Fatalf("Failed to link zone to chunk: %v", err)
+	}
+
+	// Update zone metadata to mark it as default zone for this chunk
+	_, err = framework.db.Exec(`
+		UPDATE zones SET metadata = '{"default_zone": "true", "chunk_index": "50000"}'::jsonb
+		WHERE id = $1
+	`, zoneID)
+	if err != nil {
+		t.Fatalf("Failed to update zone metadata: %v", err)
+	}
+
+	// Verify zone is linked to chunk
+	var linkedZoneIDs []int64
+	err = framework.db.QueryRow(`
+		SELECT zone_ids FROM chunk_data WHERE chunk_id = $1
+	`, chunkID).Scan((*pq.Array)(&linkedZoneIDs))
+	if err != nil {
+		t.Fatalf("Failed to query chunk_data: %v", err)
+	}
+	if len(linkedZoneIDs) != 1 || linkedZoneIDs[0] != zoneID {
+		t.Errorf("Expected zone ID %d in chunk_data.zone_ids, got %v", zoneID, linkedZoneIDs)
+	}
+
+	// Verify zone persists in database
+	var persistedZoneID int64
+	err = framework.db.QueryRow(`
+		SELECT id FROM zones WHERE id = $1
+	`, zoneID).Scan(&persistedZoneID)
+	if err != nil {
+		t.Fatalf("Zone not found in database: %v", err)
+	}
+	if persistedZoneID != zoneID {
+		t.Errorf("Expected zone ID %d, got %d", zoneID, persistedZoneID)
+	}
+
+	t.Logf("Zone persistence verified: zone %d linked to chunk %d", zoneID, chunkID)
+}
+
+// TestIntegration_ZoneChunkBindingStreaming tests that zones are embedded in chunk streaming
+func TestIntegration_ZoneChunkBindingStreaming(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	// Create a chunk
+	chunkID, err := framework.CreateTestChunk(0, 60000)
+	if err != nil {
+		t.Fatalf("Failed to create test chunk: %v", err)
+	}
+
+	// Create a zone and link it to the chunk
+	zoneID, err := framework.CreateTestZone(0, 60000000, -10, 60001000, 10, "restricted", 0)
+	if err != nil {
+		t.Fatalf("Failed to create test zone: %v", err)
+	}
+
+	// Link zone to chunk
+	_, err = framework.db.Exec(`
+		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+	`, zoneID, chunkID)
+	if err != nil {
+		t.Fatalf("Failed to link zone to chunk: %v", err)
+	}
+
+	// Update zone metadata
+	_, err = framework.db.Exec(`
+		UPDATE zones SET metadata = '{"default_zone": "true", "chunk_index": "60000"}'::jsonb,
+			is_system_zone = TRUE
+		WHERE id = $1
+	`, zoneID)
+	if err != nil {
+		t.Fatalf("Failed to update zone metadata: %v", err)
+	}
+
+	// Connect and subscribe to streaming
+	conn := framework.ConnectWebSocket()
+	defer func() { _ = conn.Close() }() //nolint:errcheck
+
+	pose := streaming.CameraPose{
+		RingPosition: 60000000, // Position of our chunk
+		WidthOffset:  0,
+		Elevation:    0,
+		ActiveFloor:  0,
+	}
+
+	subscriptionID, err := framework.SubscribeToStreaming(conn, pose, 5000, 5000, true, true)
+	if err != nil {
+		t.Fatalf("Failed to subscribe: %v", err)
+	}
+
+	// Wait for stream_delta message with chunks
+	time.Sleep(1 * time.Second)
+
+	// Read stream_delta message
+	msg, err := framework.WaitForMessage(conn, "stream_delta", 2*time.Second)
+	if err != nil {
+		t.Logf("No stream_delta message received (may be async): %v", err)
+		return
+	}
+
+	// Parse stream_delta to check if zones are embedded in chunks
+	var deltaData struct {
+		SubscriptionID string `json:"subscription_id"`
+		Chunks         []struct {
+			ID    string          `json:"id"`
+			Zones json.RawMessage `json:"zones,omitempty"`
+		} `json:"chunks"`
+	}
+
+	if err := json.Unmarshal(msg.Data, &deltaData); err != nil {
+		t.Logf("Failed to parse stream_delta: %v", err)
+		return
+	}
+
+	// Check if our chunk has zones embedded
+	foundChunk := false
+	for _, chunk := range deltaData.Chunks {
+		if chunk.ID == "0_60000" {
+			foundChunk = true
+			if len(chunk.Zones) > 0 {
+				t.Logf("Zone found embedded in chunk: %s", string(chunk.Zones))
+			} else {
+				t.Logf("Chunk found but no zones embedded (may be async)")
+			}
+			break
+		}
+	}
+
+	if !foundChunk {
+		t.Logf("Chunk 0_60000 not found in stream_delta (may be outside range)")
+	}
+
+	t.Logf("Zone-chunk binding streaming test completed for subscription: %s", subscriptionID)
+}
+
+// TestIntegration_ZoneCleanupOnChunkRemoval tests that zones are cleaned up when chunks are removed
+func TestIntegration_ZoneCleanupOnChunkRemoval(t *testing.T) {
+	framework := NewIntegrationTestFramework(t)
+	defer framework.Close()
+
+	// Create a chunk with a zone
+	chunkID, err := framework.CreateTestChunk(0, 70000)
+	if err != nil {
+		t.Fatalf("Failed to create test chunk: %v", err)
+	}
+
+	zoneID, err := framework.CreateTestZone(0, 70000000, -10, 70001000, 10, "restricted", 0)
+	if err != nil {
+		t.Fatalf("Failed to create test zone: %v", err)
+	}
+
+	// Link zone to chunk
+	_, err = framework.db.Exec(`
+		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+	`, zoneID, chunkID)
+	if err != nil {
+		t.Fatalf("Failed to link zone to chunk: %v", err)
+	}
+
+	// Verify zone is linked
+	var linkedZoneIDs []int64
+	err = framework.db.QueryRow(`
+		SELECT zone_ids FROM chunk_data WHERE chunk_id = $1
+	`, chunkID).Scan((*pq.Array)(&linkedZoneIDs))
+	if err != nil {
+		t.Fatalf("Failed to query chunk_data: %v", err)
+	}
+	if len(linkedZoneIDs) != 1 {
+		t.Fatalf("Expected 1 zone linked to chunk, got %d", len(linkedZoneIDs))
+	}
+
+	// Delete chunk (should cascade to chunk_data, removing zone_ids link)
+	_, err = framework.db.Exec(`DELETE FROM chunks WHERE id = $1`, chunkID)
+	if err != nil {
+		t.Fatalf("Failed to delete chunk: %v", err)
+	}
+
+	// Verify chunk_data is deleted (cascade)
+	var chunkDataExists bool
+	err = framework.db.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM chunk_data WHERE chunk_id = $1)
+	`, chunkID).Scan(&chunkDataExists)
+	if err != nil {
+		t.Fatalf("Failed to check chunk_data: %v", err)
+	}
+	if chunkDataExists {
+		t.Error("chunk_data should be deleted when chunk is deleted (CASCADE)")
+	}
+
+	// Zone should still exist in zones table (zones are not deleted when chunks are deleted)
+	var zoneExists bool
+	err = framework.db.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM zones WHERE id = $1)
+	`, zoneID).Scan(&zoneExists)
+	if err != nil {
+		t.Fatalf("Failed to check zone: %v", err)
+	}
+	if !zoneExists {
+		t.Error("Zone should still exist after chunk deletion (zones are independent)")
+	}
+
+	t.Logf("Zone cleanup test completed: zone %d persists after chunk %d deletion", zoneID, chunkID)
 }

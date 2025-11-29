@@ -88,6 +88,13 @@ Migrations are numbered sequentially and follow the pattern:
     - **Idempotent**: Deletes existing default maglev zones before creating new ones
     - **Requires**: Migration 000003 (zones table)
 
+18. `000023_convert_structures_position_to_geometry` - Convert structures.position to PostGIS geometry
+    - Converts: `position POINT` → `position GEOMETRY(POINT, 0)`
+    - **Purpose**: Enables use of PostGIS functions (ST_X, ST_Y, ST_MakePoint) for coordinate operations
+    - **Data migration**: Converts existing POINT data to GEOMETRY format
+    - **Index**: Recreates GIST index on the new geometry column
+    - **Requires**: Migration 000004 (structures table), Migration 000001 (PostGIS extension)
+
 ## Database Objects Created
 
 ### Extensions

@@ -25,11 +25,12 @@ import * as THREE from 'three';
  * Manages chunk requests, caching, and rendering
  */
 export class ChunkManager {
-  constructor(sceneManager, gameStateManager, cameraController = null, zoneManager = null) {
+  constructor(sceneManager, gameStateManager, cameraController = null, zoneManager = null, structureManager = null) {
     this.sceneManager = sceneManager;
     this.gameStateManager = gameStateManager;
     this.cameraController = cameraController; // Store reference for position wrapping
     this.zoneManager = zoneManager; // Store reference to zone manager for zone cleanup
+    this.structureManager = structureManager; // Store reference to structure manager for structure cleanup
     this.scene = sceneManager.getScene();
     
     // Map of chunk IDs to Three.js meshes
@@ -167,6 +168,9 @@ export class ChunkManager {
     this.gameStateManager.on('chunkAdded', ({ chunkID, chunkData }) => {
       // Extract and handle zones from chunk before rendering
       this.extractZonesFromChunk(chunkID, chunkData);
+      
+      // Extract and handle structures from chunk before rendering
+      this.extractStructuresFromChunk(chunkID, chunkData);
       this.renderChunk(chunkID, chunkData);
     });
     
@@ -176,6 +180,11 @@ export class ChunkManager {
       // Clean up zones for this chunk
       if (this.zoneManager) {
         this.zoneManager.cleanupZonesForChunk(chunkID);
+      }
+      
+      // Clean up structures for this chunk
+      if (this.structureManager) {
+        this.structureManager.cleanupStructuresForChunk(chunkID);
       }
     });
     
@@ -626,6 +635,113 @@ export class ChunkManager {
       window.zoneManager.handleStreamedZones(zones, chunkID);
     } else {
       console.error(`[Chunks] No zone manager available to handle zones from chunk ${chunkID}`);
+    }
+  }
+
+  /**
+   * Extract structures from chunk data and pass to structure manager
+   * @param {string} chunkID - Chunk ID
+   * @param {Object} chunkData - Chunk data containing structures array
+   */
+  extractStructuresFromChunk(chunkID, chunkData) {
+    if (!chunkData || !chunkData.structures || !Array.isArray(chunkData.structures) || chunkData.structures.length === 0) {
+      return;
+    }
+
+    const structures = chunkData.structures.map((structureFeature, idx) => {
+      // Structure feature format: { type: "Feature", properties: {...}, geometry: {...} }
+      // or direct structure object: { id, structure_type, position, ... }
+      
+      let structure;
+      if (structureFeature.type === 'Feature') {
+        // GeoJSON Feature format
+        const properties = structureFeature.properties || {};
+        const geometry = structureFeature.geometry;
+        
+        // Parse geometry if it's a string
+        let parsedGeometry = geometry;
+        if (typeof geometry === 'string') {
+          try {
+            parsedGeometry = JSON.parse(geometry);
+          } catch (e) {
+            console.warn(`[Chunks] Failed to parse structure geometry from chunk ${chunkID}:`, e);
+            return null;
+          }
+        }
+        
+        // Extract position from Point geometry
+        if (parsedGeometry.type === 'Point' && Array.isArray(parsedGeometry.coordinates)) {
+          // Validate required properties before creating structure
+          if (!properties.structure_type) {
+            console.warn(`[Chunks] Structure from chunk ${chunkID} missing structure_type in properties:`, properties);
+            return null;
+          }
+          
+          structure = {
+            id: properties.id || `chunk_${chunkID}_structure_${idx}`,
+            structure_type: properties.structure_type,
+            floor: properties.floor ?? 0,
+            position: {
+              x: parsedGeometry.coordinates[0],
+              y: parsedGeometry.coordinates[1],
+            },
+            rotation: properties.rotation ?? 0,
+            scale: properties.scale ?? 1.0,
+            owner_id: properties.owner_id,
+            zone_id: properties.zone_id,
+            is_procedural: properties.is_procedural ?? false,
+            procedural_seed: properties.procedural_seed,
+            properties: properties.properties,
+            model_data: properties.model_data,
+          };
+        } else {
+          console.warn(`[Chunks] Structure from chunk ${chunkID} has invalid geometry type:`, parsedGeometry.type);
+          return null;
+        }
+      } else {
+        // Direct structure object format
+        structure = structureFeature;
+        
+        // Ensure position is an object with x, y
+        if (structure.position && typeof structure.position === 'string') {
+          try {
+            const parsed = JSON.parse(structure.position);
+            structure.position = parsed;
+          } catch (e) {
+            console.warn(`[Chunks] Failed to parse structure position from chunk ${chunkID}:`, e);
+            return null;
+          }
+        }
+      }
+      
+      // Validate required fields
+      if (!structure.id) {
+        console.warn(`[Chunks] Structure from chunk ${chunkID} missing id:`, structure);
+        return null;
+      }
+      if (!structure.structure_type) {
+        console.warn(`[Chunks] Structure from chunk ${chunkID} missing structure_type:`, structure);
+        return null;
+      }
+      if (!structure.position || typeof structure.position !== 'object' || structure.position.x === undefined || structure.position.y === undefined) {
+        console.warn(`[Chunks] Structure from chunk ${chunkID} missing or invalid position:`, structure);
+        return null;
+      }
+      
+      return structure;
+    }).filter(structure => structure !== null);
+
+    if (structures.length === 0) {
+      return;
+    }
+
+    // Pass structures to structure manager with chunkID for tracking
+    if (this.structureManager) {
+      this.structureManager.handleStreamedStructures(structures, chunkID);
+    } else if (window.structureManager) {
+      window.structureManager.handleStreamedStructures(structures, chunkID);
+    } else {
+      console.error(`[Chunks] No structure manager available to handle structures from chunk ${chunkID}`);
     }
   }
 

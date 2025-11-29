@@ -16,6 +16,9 @@ export class GameStateManager {
     // Zone cache: Map<zoneID, zoneData>
     this.zones = new Map();
     
+    // Structure cache: Map<structureID, structureData>
+    this.structures = new Map();
+    
     // Player state
     this.playerState = {
       id: null,
@@ -51,6 +54,10 @@ export class GameStateManager {
       zoneUpdated: [],
       zoneRemoved: [],
       zonesCleared: [],
+      structureAdded: [],
+      structureUpdated: [],
+      structureRemoved: [],
+      structuresCleared: [],
       activeFloorChanged: [],
     };
   }
@@ -203,6 +210,61 @@ export class GameStateManager {
    */
   getAllZones() {
     return Array.from(this.zones.values());
+  }
+
+  /**
+   * Add or update a single structure in the cache.
+   * @param {Object} structure
+   */
+  upsertStructure(structure) {
+    if (!structure || typeof structure.id === 'undefined') {
+      return;
+    }
+    const exists = this.structures.has(structure.id);
+    this.structures.set(structure.id, structure);
+    this.emit(exists ? 'structureUpdated' : 'structureAdded', { structure });
+  }
+
+  /**
+   * Remove a structure by ID.
+   * @param {number|string} structureID
+   */
+  removeStructure(structureID) {
+    if (!this.structures.has(structureID)) {
+      return false;
+    }
+    const removedStructure = this.structures.get(structureID);
+    this.structures.delete(structureID);
+    this.emit('structureRemoved', { structureID, structure: removedStructure });
+    return true;
+  }
+
+  /**
+   * Clear all structures from cache.
+   */
+  clearStructures() {
+    if (this.structures.size === 0) {
+      return;
+    }
+    this.structures.clear();
+    this.emit('structuresCleared');
+  }
+
+  /**
+   * Get a structure by ID.
+   * @param {number|string} structureID
+   * @returns {Object|null}
+   */
+  getStructure(structureID) {
+    return this.structures.get(structureID) || null;
+  }
+
+  /**
+   * Get all structures as an array.
+   * @returns {Array<Object>}
+   */
+  getAllStructures() {
+    return Array.from(this.structures.values());
   }
   
   /**

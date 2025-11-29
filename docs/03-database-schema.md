@@ -243,6 +243,40 @@ CREATE INDEX idx_zones_owner ON zones(owner_id);
 CREATE INDEX idx_zones_floor ON zones(floor);
 ```
 
+**Zone Metadata Structure:**
+
+The `metadata` JSONB field stores zone-specific metadata:
+
+- **Default Zones** (system-generated per-chunk restricted zones):
+  ```json
+  {
+    "default_zone": "true",
+    "chunk_index": "50000",
+    "maglev_zone": "true"
+  }
+  ```
+  - `default_zone`: Indicates this is a system-generated default zone
+  - `chunk_index`: The chunk index this zone belongs to (as string)
+  - `maglev_zone`: Indicates this zone is for maglev transit (legacy, may be present)
+
+- **Player-Defined Zones**:
+  ```json
+  {
+    "created_by": "player",
+    "custom_property": "value"
+  }
+  ```
+  - Player zones may have custom metadata or be empty
+
+**Zone-Chunk Binding:**
+
+Zones are linked to chunks via the `chunk_data.zone_ids` array:
+- Default restricted zones (one per chunk) are stored in the `zones` table
+- Zone IDs are stored in `chunk_data.zone_ids` array
+- When chunks are loaded, zones are retrieved by ID and embedded in chunk data
+- Zones appear/disappear with their associated chunks
+- See [Zone System](09-zone-system.md) for full details on zone-chunk binding
+
 **Zone Area Calculation:**
 - Zone areas are calculated using PostGIS `ST_Area()` function
 - **Function**: `normalize_zone_geometry_for_area(geometry)` - Normalizes coordinates for zones that wrap around the X axis before area calculation
@@ -320,7 +354,7 @@ CREATE TABLE chunk_data (
     geometry GEOMETRY(POLYGON, 0) NOT NULL, -- PostGIS polygon geometry for chunk boundary
     geometry_detail GEOMETRY(MULTIPOLYGON, 0), -- Detailed geometry for complex chunks (optional)
     structure_ids INTEGER[], -- Array of structure IDs in this chunk
-    zone_ids INTEGER[], -- Array of zone IDs overlapping this chunk
+    zone_ids INTEGER[], -- Array of zone IDs linked to this chunk (default restricted zones and player zones)
     npc_data JSONB, -- NPC population and traffic data
     terrain_data JSONB, -- Terrain heightmap, materials, etc.
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -503,6 +537,57 @@ AND s.zone_id IN (
     AND geometry && ST_MakeEnvelope(? * 1000, -2500, (? + 1) * 1000, 2500, 0)
 );
 ```
+
+### Structure System
+
+The `structures` table stores both player-placed and procedural structures (buildings, decorations, etc.) using PostGIS geometry for precise spatial queries.
+
+**Table**: `structures`
+
+```sql
+CREATE TABLE structures (
+    id SERIAL PRIMARY KEY,
+    structure_type VARCHAR(50) NOT NULL,
+    position GEOMETRY(POINT, 0) NOT NULL, -- EarthRing (x, y) in meters
+    floor INTEGER DEFAULT 0 NOT NULL,     -- Floor/level (-2..15)
+    rotation REAL DEFAULT 0,              -- Degrees
+    scale REAL DEFAULT 1.0,
+    owner_id INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    zone_id INTEGER REFERENCES zones(id) ON DELETE SET NULL,
+    is_procedural BOOLEAN DEFAULT FALSE,
+    procedural_seed INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    properties JSONB,
+    model_data JSONB
+);
+
+CREATE INDEX idx_structures_position ON structures USING GIST(position);
+CREATE INDEX idx_structures_owner ON structures(owner_id);
+CREATE INDEX idx_structures_zone ON structures(zone_id);
+CREATE INDEX idx_structures_floor ON structures(floor);
+CREATE INDEX idx_structures_type ON structures(structure_type);
+```
+
+**Position & Bounds**:
+- `position`: `GEOMETRY(POINT, 0)` storing EarthRing coordinates
+  - `x`: ring position in meters, range `[0, 264,000,000)`
+  - `y`: width offset in meters, typical range `[-2,500, +2,500]`
+- `floor`: integer floor/level, range `[-2..15]`
+
+**Validation Rules** (enforced in application layer):
+- `structure_type` is required, max length 50
+- `scale > 0`
+- `rotation ∈ [-360, 360]` degrees
+- `position.x ∈ [0, RingCircumference)`
+- `position.y ∈ [-MaxWidthOffset, MaxWidthOffset]` (±2.5km)
+- `floor ∈ [MinFloor, MaxFloor]` (currently [-2..15])
+
+**Zone Relationship Validation**:
+- If `zone_id` is set, the server validates:
+  - Zone exists and `zones.floor = structures.floor`
+  - `ST_Contains(zones.geometry, structures.position)` is true
+- This ensures structures are actually inside the zones they reference.
 
 #### Find Nearby Roads
 
