@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -16,14 +17,14 @@ type Structure struct {
 	OwnerID        *int64          `json:"owner_id,omitempty"`
 	ZoneID         *int64          `json:"zone_id,omitempty"`
 	IsProcedural   bool            `json:"is_procedural"`
-	ProceduralSeed *int64           `json:"procedural_seed,omitempty"`
-	Position       Position         `json:"position"` // (ring_position, width_position)
-	Rotation       float64          `json:"rotation"` // Rotation in degrees
-	Scale          float64          `json:"scale"`
+	ProceduralSeed *int64          `json:"procedural_seed,omitempty"`
+	Position       Position        `json:"position"` // (ring_position, width_position)
+	Rotation       float64         `json:"rotation"` // Rotation in degrees
+	Scale          float64         `json:"scale"`
 	Properties     json.RawMessage `json:"properties,omitempty"`
 	ModelData      json.RawMessage `json:"model_data,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // Position represents a 2D point (ring_position, width_position).
@@ -50,20 +51,20 @@ type StructureCreateInput struct {
 // StructureUpdateInput describes the fields that can be updated on a structure.
 // A nil field means "leave unchanged".
 type StructureUpdateInput struct {
-	StructureType  *string
-	Floor          *int
-	OwnerID        *int64
-	OwnerIDSet     bool
-	ZoneID         *int64
-	ZoneIDSet      bool
-	IsProcedural   *bool
-	ProceduralSeed *int64
+	StructureType     *string
+	Floor             *int
+	OwnerID           *int64
+	OwnerIDSet        bool
+	ZoneID            *int64
+	ZoneIDSet         bool
+	IsProcedural      *bool
+	ProceduralSeed    *int64
 	ProceduralSeedSet bool
-	Position       *Position
-	Rotation       *float64
-	Scale          *float64
-	Properties     *json.RawMessage
-	ModelData      *json.RawMessage
+	Position          *Position
+	Rotation          *float64
+	Scale             *float64
+	Properties        *json.RawMessage
+	ModelData         *json.RawMessage
 }
 
 // StructureStorage provides structure persistence helpers.
@@ -186,22 +187,6 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 	}
 	if modelDataOut.Valid {
 		structure.ModelData = json.RawMessage(modelDataOut.String)
-	}
-
-	return &structure, nil
-	if err != nil {
-		return nil, fmt.Errorf("failed to create structure: %w", err)
-	}
-
-	structure.Position = Position{X: posX, Y: posY}
-	if ownerIDOut.Valid {
-		structure.OwnerID = &ownerIDOut.Int64
-	}
-	if zoneIDOut.Valid {
-		structure.ZoneID = &zoneIDOut.Int64
-	}
-	if proceduralSeedOut.Valid {
-		structure.ProceduralSeed = &proceduralSeedOut.Int64
 	}
 
 	return &structure, nil
@@ -374,7 +359,7 @@ func (s *StructureStorage) UpdateStructure(id int64, input *StructureUpdateInput
 		if err != nil {
 			return nil, fmt.Errorf("failed to get current structure: %w", err)
 		}
-		
+
 		pos := current.Position
 		floor := current.Floor
 		if input.Position != nil {
@@ -383,7 +368,7 @@ func (s *StructureStorage) UpdateStructure(id int64, input *StructureUpdateInput
 		if input.Floor != nil {
 			floor = *input.Floor
 		}
-		
+
 		if err := s.validateZoneRelationship(*input.ZoneID, pos, floor); err != nil {
 			return nil, err
 		}
@@ -494,7 +479,11 @@ func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query structures: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	var structures []*Structure
 	for rows.Next() {
@@ -569,7 +558,11 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to query structures: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	var structures []*Structure
 	for rows.Next() {
@@ -651,17 +644,17 @@ func validateStructureInput(input StructureCreateInput) error {
 	if input.Rotation < -360 || input.Rotation > 360 {
 		return fmt.Errorf("rotation must be between -360 and 360 degrees")
 	}
-	
+
 	// Validate position bounds
 	if err := validatePosition(input.Position); err != nil {
 		return err
 	}
-	
+
 	// Validate floor range
 	if input.Floor < MinFloor || input.Floor > MaxFloor {
 		return fmt.Errorf("floor must be between %d and %d", MinFloor, MaxFloor)
 	}
-	
+
 	return nil
 }
 
@@ -722,7 +715,7 @@ func (s *StructureStorage) validateZoneRelationship(zoneID int64, position Posit
 			  )
 		)
 	`
-	
+
 	var exists bool
 	err := s.db.QueryRow(query, zoneID, floor, position.X, position.Y).Scan(&exists)
 	if err != nil {
@@ -731,11 +724,10 @@ func (s *StructureStorage) validateZoneRelationship(zoneID int64, position Posit
 		}
 		return fmt.Errorf("failed to validate zone relationship: %w", err)
 	}
-	
+
 	if !exists {
 		return fmt.Errorf("structure position (%.2f, %.2f) is not within zone %d on floor %d", position.X, position.Y, zoneID, floor)
 	}
-	
+
 	return nil
 }
-

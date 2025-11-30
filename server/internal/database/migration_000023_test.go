@@ -21,7 +21,7 @@ func TestMigration000023_ConvertStructuresPositionToGeometry(t *testing.T) {
 	}
 
 	// Drop table if it exists to ensure clean state
-	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`)
+	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`) //nolint:errcheck // Test setup - table may not exist
 
 	// Create structures table with POINT type (as it exists before migration)
 	_, err = db.Exec(`
@@ -165,7 +165,11 @@ func TestMigration000023_ConvertStructuresPositionToGeometry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query structures: %v", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Logf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	structureCount := 0
 	for rows.Next() {
@@ -246,7 +250,7 @@ func TestMigration000023_Rollback(t *testing.T) {
 	}
 
 	// Drop table if it exists to ensure clean state
-	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`)
+	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`) //nolint:errcheck // Test setup - table may not exist
 
 	// Create structures table with GEOMETRY type (as it exists after migration 000023)
 	_, err = db.Exec(`
@@ -360,7 +364,11 @@ func TestMigration000023_Rollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query structures: %v", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Logf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	structureCount := 0
 	for rows.Next() {
@@ -403,4 +411,3 @@ func TestMigration000023_Rollback(t *testing.T) {
 		t.Logf("✓ GIST index exists after rollback")
 	}
 }
-

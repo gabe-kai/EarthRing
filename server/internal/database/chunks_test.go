@@ -980,8 +980,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zoneFeature := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone (Floor 0, Chunk 50000)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone (Floor 0, Chunk 50000)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",
@@ -1067,8 +1067,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zoneFeature := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone (Floor 0, Chunk 60000)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone (Floor 0, Chunk 60000)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",
@@ -1187,8 +1187,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zoneFeature := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone (Floor 0, Chunk 70000)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone (Floor 0, Chunk 70000)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",
@@ -1259,8 +1259,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zone1 := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone 1 (Floor 0, Chunk 80000)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone 1 (Floor 0, Chunk 80000)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",
@@ -1277,8 +1277,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zone2 := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "residential",
-				"name":          "Player Zone (Floor 0, Chunk 80000)",
+				"zone_type":      "residential",
+				"name":           "Player Zone (Floor 0, Chunk 80000)",
 				"is_system_zone": false,
 				"metadata": map[string]interface{}{
 					"chunk_index": "80000",
@@ -1353,8 +1353,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zone0 := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone (Floor 0, Chunk 0)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone (Floor 0, Chunk 0)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",
@@ -1399,8 +1399,8 @@ func TestChunkStorage_ZoneChunkBinding(t *testing.T) {
 		zone263999 := map[string]interface{}{
 			"type": "Feature",
 			"properties": map[string]interface{}{
-				"zone_type":     "restricted",
-				"name":          "Chunk Zone (Floor 0, Chunk 263999)",
+				"zone_type":      "restricted",
+				"name":           "Chunk Zone (Floor 0, Chunk 263999)",
 				"is_system_zone": true,
 				"metadata": map[string]interface{}{
 					"default_zone": "true",

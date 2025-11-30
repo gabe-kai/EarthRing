@@ -190,24 +190,44 @@ func TestStructureStorage_ZoneRelationship(t *testing.T) {
 		t.Errorf("Expected zone_id to be nil for structure outside zone, got %v", structure2.ZoneID)
 	}
 
-	// Test structure with zone_id but different floor (should still work, just not in that zone's floor)
+	// Test structure with zone_id on a different floor - create a zone on floor 1
+	var zoneID2 int64
+	err = db.QueryRow(`
+		INSERT INTO zones (name, zone_type, geometry, floor, is_system_zone)
+		VALUES ($1, $2, ST_SetSRID(ST_GeomFromText('POLYGON((1000 -100, 2000 -100, 2000 100, 1000 100, 1000 -100))'), 0), $3, FALSE)
+		RETURNING id
+	`, "Test Zone Floor 1", "residential", 1).Scan(&zoneID2)
+	if err != nil {
+		t.Fatalf("Failed to create test zone on floor 1: %v", err)
+	}
+
 	structure3, err := storage.CreateStructure(&StructureCreateInput{
 		StructureType: "building",
 		Floor:         1, // Different floor
 		Position:      Position{X: 1500.0, Y: 0.0},
 		Rotation:      0.0,
 		Scale:         1.0,
-		ZoneID:        &zoneID,
+		ZoneID:        &zoneID2, // Use zone on floor 1
 	})
 	if err != nil {
 		t.Fatalf("Failed to create structure with zone_id on different floor: %v", err)
 	}
-	if structure3.ZoneID == nil || *structure3.ZoneID != zoneID {
-		t.Fatalf("Expected zone_id %d, got %v", zoneID, structure3.ZoneID)
+	if structure3.ZoneID == nil || *structure3.ZoneID != zoneID2 {
+		t.Fatalf("Expected zone_id %d, got %v", zoneID2, structure3.ZoneID)
 	}
 
 	// Test updating structure to add zone_id
+	// First, move structure2 inside the zone, then add zone_id
 	updateInput := &StructureUpdateInput{
+		Position: &Position{X: 1500.0, Y: 0.0}, // Move inside zone
+	}
+	_, err = storage.UpdateStructure(structure2.ID, updateInput)
+	if err != nil {
+		t.Fatalf("Failed to move structure inside zone: %v", err)
+	}
+
+	// Now add zone_id
+	updateInput = &StructureUpdateInput{
 		ZoneIDSet: true,
 		ZoneID:    &zoneID,
 	}
@@ -313,4 +333,3 @@ func TestStructureStorage_BoundaryConditions(t *testing.T) {
 		t.Error("Failed to find structures on floor 0")
 	}
 }
-

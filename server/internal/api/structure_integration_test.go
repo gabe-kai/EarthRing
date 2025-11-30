@@ -2,13 +2,13 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
@@ -57,8 +57,10 @@ func NewStructureIntegrationTestFramework(t *testing.T) *StructureIntegrationTes
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:     "test-secret-key-for-testing-only",
-			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTSecret:         "test-secret-key-for-testing-only",
+			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
+			JWTExpiration:     15 * time.Minute,
+			RefreshExpiration: 7 * 24 * time.Hour,
 		},
 	}
 
@@ -129,14 +131,11 @@ func (f *StructureIntegrationTestFramework) MakeRequest(method, path string, bod
 		}
 	}
 
-	req := httptest.NewRequest(method, f.server.URL+path, bytes.NewReader(bodyBytes))
+	// Use just the path, not the full URL, when calling mux.ServeHTTP directly
+	// httptest.NewRequest requires a valid URL, so use a placeholder host
+	req := httptest.NewRequest(method, "http://example.com"+path, bytes.NewReader(bodyBytes))
 	req.Header.Set("Authorization", "Bearer "+f.testToken)
 	req.Header.Set("Content-Type", "application/json")
-
-	// Add auth context
-	ctx := context.WithValue(req.Context(), auth.UserIDKey, f.testUserID)
-	ctx = context.WithValue(ctx, auth.RoleKey, "player")
-	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
 	f.mux.ServeHTTP(rr, req)
@@ -252,15 +251,16 @@ func TestIntegration_StructureCoordinateWrapping(t *testing.T) {
 	}
 
 	// Query structures by area near start
-	rr = framework.MakeRequest("GET", "/api/structures/area?min_x=0&max_x=1000&min_y=-200&max_y=200&floor=0", nil)
+	rr = framework.MakeRequest("GET", "/api/structures/area?x_min=0&x_max=1000&y_min=-200&y_max=200&floor=0", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var listResponse []structureResponse
-	if err := json.NewDecoder(rr.Body).Decode(&listResponse); err != nil {
+	var listResponseWrapper map[string][]structureResponse
+	if err := json.NewDecoder(rr.Body).Decode(&listResponseWrapper); err != nil {
 		t.Fatalf("Failed to decode list response: %v", err)
 	}
+	listResponse := listResponseWrapper["structures"]
 
 	foundNear0 := false
 	for _, s := range listResponse {
@@ -365,4 +365,3 @@ func TestIntegration_UnauthorizedAccess(t *testing.T) {
 		t.Fatalf("Expected status 401, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
-

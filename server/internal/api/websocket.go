@@ -656,12 +656,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					if err != nil {
 						log.Printf("Error loading geometry for chunk %s: %v", chunkID, err)
 					}
-					
+
 					// Load zones that overlap with this chunk
 					// This includes zones from chunk_data.zone_ids AND player-placed zones that overlap
 					var zones []interface{}
 					zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
-					
+
 					// First, load zones from chunk_data.zone_ids (system zones)
 					chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
 					if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
@@ -672,25 +672,25 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								zoneFeature := map[string]interface{}{
 									"type": "Feature",
 									"properties": map[string]interface{}{
-										"id":            zone.ID,
-										"name":          zone.Name,
-										"zone_type":     zone.ZoneType,
-										"floor":         zone.Floor,
+										"id":             zone.ID,
+										"name":           zone.Name,
+										"zone_type":      zone.ZoneType,
+										"floor":          zone.Floor,
 										"is_system_zone": zone.IsSystemZone,
 									},
 									"geometry": json.RawMessage(zone.Geometry),
 								}
 								if len(zone.Properties) > 0 {
-									zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+									zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 								}
 								if len(zone.Metadata) > 0 {
-									zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+									zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck // Type assertion is safe - we control the map structure
 								}
 								zones = append(zones, zoneFeature)
 							}
 						}
 					}
-					
+
 					// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
 					overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(storedMetadata.ID, storedMetadata.Floor)
 					if err == nil {
@@ -703,24 +703,24 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							zoneFeature := map[string]interface{}{
 								"type": "Feature",
 								"properties": map[string]interface{}{
-									"id":            zone.ID,
-									"name":          zone.Name,
-									"zone_type":     zone.ZoneType,
-									"floor":         zone.Floor,
+									"id":             zone.ID,
+									"name":           zone.Name,
+									"zone_type":      zone.ZoneType,
+									"floor":          zone.Floor,
 									"is_system_zone": zone.IsSystemZone,
 								},
 								"geometry": json.RawMessage(zone.Geometry),
 							}
 							if len(zone.Properties) > 0 {
-								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 							}
 							if len(zone.Metadata) > 0 {
-								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck // Type assertion is safe - we control the map structure
 							}
 							zones = append(zones, zoneFeature)
 						}
 					}
-					
+
 					metadata := ChunkMetadata{
 						ID:           chunkID,
 						Floor:        storedMetadata.Floor,
@@ -768,7 +768,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 				// This includes zones from chunk_data.zone_ids AND player-placed zones that overlap
 				var zones []interface{}
 				zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
-				
+
 				// First, load zones from chunk_data.zone_ids (system zones)
 				chunkData, err := h.chunkStorage.GetChunkData(storedMetadata.ID)
 				if err == nil && chunkData != nil && len(chunkData.ZoneIDs) > 0 {
@@ -781,20 +781,20 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							zoneFeature := map[string]interface{}{
 								"type": "Feature",
 								"properties": map[string]interface{}{
-									"id":            zone.ID,
-									"name":          zone.Name,
-									"zone_type":     zone.ZoneType,
-									"floor":         zone.Floor,
+									"id":             zone.ID,
+									"name":           zone.Name,
+									"zone_type":      zone.ZoneType,
+									"floor":          zone.Floor,
 									"is_system_zone": zone.IsSystemZone,
 								},
 								"geometry": json.RawMessage(zone.Geometry),
 							}
 							// Add properties and metadata if present
 							if len(zone.Properties) > 0 {
-								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 							}
 							if len(zone.Metadata) > 0 {
-								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+								zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck // Type assertion is safe - we control the map structure
 							}
 							zones = append(zones, zoneFeature)
 						}
@@ -802,7 +802,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 						log.Printf("[Chunks] Warning: Failed to load zones by IDs for chunk %s: %v", chunkID, err)
 					}
 				}
-				
+
 				// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
 				overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(storedMetadata.ID, storedMetadata.Floor)
 				if err == nil {
@@ -815,24 +815,24 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 						zoneFeature := map[string]interface{}{
 							"type": "Feature",
 							"properties": map[string]interface{}{
-								"id":            zone.ID,
-								"name":          zone.Name,
-								"zone_type":     zone.ZoneType,
-								"floor":         zone.Floor,
+								"id":             zone.ID,
+								"name":           zone.Name,
+								"zone_type":      zone.ZoneType,
+								"floor":          zone.Floor,
 								"is_system_zone": zone.IsSystemZone,
 							},
 							"geometry": json.RawMessage(zone.Geometry),
 						}
 						// Add properties and metadata if present
 						if len(zone.Properties) > 0 {
-							zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties)
+							zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 						}
 						if len(zone.Metadata) > 0 {
-							zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata)
+							zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck // Type assertion is safe - we control the map structure
 						}
 						zones = append(zones, zoneFeature)
 					}
-					log.Printf("[Chunks] Loaded %d zones for chunk %s from database (%d from zone_ids, %d overlapping)", 
+					log.Printf("[Chunks] Loaded %d zones for chunk %s from database (%d from zone_ids, %d overlapping)",
 						len(zones), chunkID, len(chunkData.ZoneIDs), len(overlappingZones))
 				} else {
 					log.Printf("[Chunks] Warning: Failed to load overlapping zones for chunk %s: %v", chunkID, err)
@@ -1154,6 +1154,8 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 // This is the server-side zone processing pipeline that handles database lookup,
 // active-floor filtering, and full-ring/system-zone retention.
 // Supports both legacy and new coordinate systems.
+//
+//nolint:unused // Reserved for future use or refactoring
 func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pose streaming.CameraPose) []database.Zone {
 	if h.zoneStorage == nil {
 		log.Printf("Zone storage unavailable")
@@ -1216,7 +1218,7 @@ type ZoneDataResponse struct {
 }
 
 // sendZoneData sends zone data to a WebSocket connection.
-func (h *WebSocketHandlers) sendZoneData(conn *WebSocketConnection, zones []database.Zone, messageType string, messageID string) {
+func (h *WebSocketHandlers) sendZoneData(conn *WebSocketConnection, zones []database.Zone, messageType string, messageID string) { //nolint:unused // Reserved for future use or refactoring
 	// Use recover to handle panics from closed channels (e.g., during test cleanup)
 	defer func() {
 		if r := recover(); r != nil {

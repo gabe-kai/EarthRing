@@ -165,7 +165,7 @@ export class ZoneManager {
           }
         }
         
-        if (metadata && metadata.chunk_index === chunkIndex && metadata.default_zone === true) {
+        if (metadata && metadata.chunk_index === chunkIndex && (metadata.default_zone === true || metadata.default_zone === 'true')) {
           // This is a chunk-based zone, remove it
           this.removeZone(zone.id);
           this.gameState.removeZone(zone.id);
@@ -474,6 +474,8 @@ export class ZoneManager {
       // Zone is for a different floor - remove it if it exists
       this.removeZone(zone.id);
       this.fullRingZoneCache.delete(zone.id);
+      // Also remove from game state
+      this.gameState.removeZone(zone.id);
       return;
     }
 

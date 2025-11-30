@@ -344,42 +344,42 @@ EarthRing/
 ├── MANUAL_TESTING_GUIDE.md            # Manual testing procedures and guidelines
 ├── .gitignore                         # Git ignore patterns
 ├── docs/                              # Design documentation
-│   ├── 01-architecture-overview.md
-│   ├── 02-map-system.md
-│   ├── 03-database-schema.md
-│   ├── 04-api-design.md
-│   ├── 05-authentication-security.md
-│   ├── 06-client-architecture.md
-│   ├── 07-streaming-system.md
-│   ├── 08-procedural-generation.md
-│   ├── 09-zone-system.md
-│   ├── 10-game-mechanics.md
-│   ├── 11-microgravity-physics.md
-│   ├── 12-npc-ai-pathfinding.md
-│   ├── 13-transportation-generation.md
+│   ├── 01-architecture-overview.md    # System architecture and technology stack
+│   ├── 02-map-system.md               # Ring geometry, coordinate system, chunk specifications
+│   ├── 03-database-schema.md          # Database schema and spatial data design
+│   ├── 04-api-design.md               # REST and WebSocket API specifications
+│   ├── 05-authentication-security.md  # Authentication and security implementation
+│   ├── 06-client-architecture.md      # Web client architecture (Three.js)
+│   ├── 07-streaming-system.md         # Chunk loading, streaming, compression
+│   ├── 08-procedural-generation.md    # Procedural generation algorithms
+│   ├── 09-zone-system.md              # Player-defined zones and road generation
+│   ├── 10-game-mechanics.md           # City builder, Sims, and racing mechanics
+│   ├── 11-microgravity-physics.md     # Microgravity physics implementation specification
+│   ├── 12-npc-ai-pathfinding.md       # NPC AI and pathfinding algorithms specification
+│   ├── 13-transportation-generation.md # Transportation generation algorithm specification
 │   ├── DEPLOYMENT_CHECKLIST.md        # Deployment procedures
 │   ├── DEVELOPER_WORKFLOW.md          # Developer workflow guidelines
 │   ├── PERFORMANCE_PROFILING.md       # Performance profiling documentation
 │   ├── minimap-system.md              # Minimap system design
 │   ├── README.md                      # Documentation index
 │   ├── bug_fixes/                     # Bug fix documentation
-│   │   ├── WRAP_POINT_FIX_SUMMARY.md
-│   │   └── ZONE_TOOLS_WRAP_ANALYSIS.md
+│   │   ├── WRAP_POINT_FIX_SUMMARY.md  # Summary of wrap point coordinate fixes
+│   │   └── ZONE_TOOLS_WRAP_ANALYSIS.md # Analysis of zone tool wrapping issues
 │   ├── performance/                   # Performance analysis
-│   │   └── grid-overlay-performance-analysis.md
+│   │   └── grid-overlay-performance-analysis.md # Grid overlay performance profiling
 │   ├── refactor/                      # Refactoring documentation
-│   │   ├── CLIENT_REFACTOR_STATUS.md
-│   │   ├── client-server-responsibility.md
-│   │   ├── coordinate-system-migration.md
-│   │   ├── coordinate-system-status.md
-│   │   └── database-coordinate-migration.md
+│   │   ├── CLIENT_REFACTOR_STATUS.md  # Client refactoring status and progress
+│   │   ├── client-server-responsibility.md # Client-server responsibility boundaries
+│   │   ├── coordinate-system-migration.md # Coordinate system migration guide
+│   │   ├── coordinate-system-status.md # Current coordinate system status
+│   │   └── database-coordinate-migration.md # Database coordinate migration details
 │   └── tests/                         # Testing documentation
-│       ├── README.md
-│       ├── integration-testing.md
-│       ├── minimap-test-coverage.md
-│       ├── testing-gap-analysis.md
-│       ├── ui-test-coverage.md
-│       └── zone-system-test-coverage.md
+│       ├── README.md                  # Testing documentation index
+│       ├── integration-testing.md     # Integration testing guidelines
+│       ├── minimap-test-coverage.md   # Minimap test coverage analysis
+│       ├── testing-gap-analysis.md    # Testing gap analysis
+│       ├── ui-test-coverage.md        # UI test coverage analysis
+│       └── zone-system-test-coverage.md # Zone system test coverage analysis
 ├── server/                            # Go main server + Python procedural service
 │   ├── cmd/earthring-server/         # Server entry point
 │   │   ├── main.go
@@ -390,62 +390,62 @@ EarthRing/
 │   │   │   ├── admin_routes.go        # Admin routes
 │   │   │   ├── auth_routes.go         # Authentication routes
 │   │   │   ├── chunk_handlers.go      # Chunk CRUD handlers
-│   │   │   ├── chunk_handlers_test.go
+│   │   │   ├── chunk_handlers_test.go # Chunk handler tests
 │   │   │   ├── chunk_models.go        # Chunk data models
 │   │   │   ├── chunk_routes.go        # Chunk routes
 │   │   │   ├── cors.go                # CORS middleware
 │   │   │   ├── player_handlers.go     # Player management handlers
-│   │   │   ├── player_handlers_test.go
+│   │   │   ├── player_handlers_test.go # Player handler tests
 │   │   │   ├── player_models.go       # Player data models
 │   │   │   ├── player_routes.go       # Player routes
 │   │   │   ├── ratelimit.go           # Rate limiting middleware
-│   │   │   ├── ratelimit_test.go
+│   │   │   ├── ratelimit_test.go      # Rate limiting tests
 │   │   │   ├── structure_handlers.go  # Structure CRUD handlers
-│   │   │   ├── structure_handlers_test.go
-│   │   │   ├── structure_integration_test.go
+│   │   │   ├── structure_handlers_test.go # Structure handler tests
+│   │   │   ├── structure_integration_test.go # Structure integration tests
 │   │   │   ├── structure_routes.go    # Structure routes
 │   │   │   ├── websocket.go           # WebSocket server implementation
-│   │   │   ├── websocket_test.go
-│   │   │   ├── websocket_integration_test.go
+│   │   │   ├── websocket_test.go      # WebSocket unit tests
+│   │   │   ├── websocket_integration_test.go # WebSocket integration tests
 │   │   │   ├── zone_handlers.go       # Zone CRUD handlers
 │   │   │   ├── zone_routes.go         # Zone routes
 │   │   │   └── README.md               # API package documentation
 │   │   ├── auth/                      # Authentication system
 │   │   │   ├── handlers.go            # Auth handlers (register, login, refresh, logout)
 │   │   │   ├── jwt.go                 # JWT token management
-│   │   │   ├── jwt_test.go
+│   │   │   ├── jwt_test.go            # JWT token tests
 │   │   │   ├── middleware.go          # Auth middleware
 │   │   │   ├── models.go               # Auth data models
 │   │   │   ├── password.go             # Password hashing (bcrypt)
-│   │   │   ├── password_test.go
+│   │   │   ├── password_test.go       # Password hashing tests
 │   │   │   ├── security_headers.go    # Security headers middleware
 │   │   │   └── README.md               # Auth package documentation
 │   │   ├── compression/               # Chunk compression format
 │   │   │   ├── format.go              # Binary compression format
-│   │   │   ├── format_test.go
+│   │   │   ├── format_test.go         # Compression format tests
 │   │   │   ├── geometry.go            # Geometry compression
-│   │   │   ├── geometry_test.go
+│   │   │   ├── geometry_test.go       # Geometry compression tests
 │   │   │   └── README.md               # Compression documentation
 │   │   ├── config/                     # Configuration management
 │   │   │   ├── config.go              # Configuration loading and validation
-│   │   │   ├── config_test.go
+│   │   │   ├── config_test.go         # Configuration tests
 │   │   │   └── README.md               # Configuration documentation
 │   │   ├── database/                  # Database access layer
 │   │   │   ├── chunks.go              # Chunk storage and retrieval (PostGIS)
-│   │   │   ├── chunks_test.go
+│   │   │   ├── chunks_test.go         # Chunk storage tests
 │   │   │   ├── structures.go          # Structure storage and retrieval
-│   │   │   ├── structures_test.go
-│   │   │   ├── structures_integration_test.go
-│   │   │   ├── structures_validation_test.go
+│   │   │   ├── structures_test.go     # Structure storage tests
+│   │   │   ├── structures_integration_test.go # Structure integration tests
+│   │   │   ├── structures_validation_test.go # Structure validation tests
 │   │   │   ├── zones.go               # Zone storage and retrieval (PostGIS)
-│   │   │   ├── zones_test.go
-│   │   │   ├── migration_000022_test.go
-│   │   │   ├── migration_000023_test.go
-│   │   │   ├── schema_verification_test.go
+│   │   │   ├── zones_test.go          # Zone storage tests
+│   │   │   ├── migration_000022_test.go # Migration 22 tests
+│   │   │   ├── migration_000023_test.go # Migration 23 tests
+│   │   │   ├── schema_verification_test.go # Schema verification tests
 │   │   │   └── README.md               # Database package documentation
 │   │   ├── performance/               # Performance profiling
-│   │   │   ├── profiler.go            # Performance profiler
-│   │   │   └── profiler_test.go
+│   │   │   ├── profiler.go           # Performance profiler
+│   │   │   └── profiler_test.go       # Performance profiler tests
 │   │   ├── procedural/                # Procedural generation service
 │   │   │   ├── main.py                # FastAPI application and endpoints
 │   │   │   ├── config.py              # Configuration management
@@ -453,29 +453,29 @@ EarthRing/
 │   │   │   ├── stations.py            # Station locations and flare calculations
 │   │   │   ├── generation.py          # Chunk generation functions
 │   │   │   ├── client.go              # Go client for calling Python service
-│   │   │   ├── client_test.go
+│   │   │   ├── client_test.go         # Go client tests
 │   │   │   ├── tests/                 # Python service tests
-│   │   │   │   ├── test_api.py
-│   │   │   │   ├── test_generation.py
-│   │   │   │   ├── test_seeds.py
-│   │   │   │   └── test_stations.py
+│   │   │   │   ├── test_api.py        # API endpoint tests
+│   │   │   │   ├── test_generation.py # Chunk generation tests
+│   │   │   │   ├── test_seeds.py      # Seed generation tests
+│   │   │   │   └── test_stations.py   # Station calculation tests
 │   │   │   └── README.md              # Procedural service documentation
 │   │   ├── ringmap/                   # Map wrapping and spatial query utilities
 │   │   │   ├── coordinates.go         # Coordinate conversion utilities
-│   │   │   ├── coordinates_test.go
+│   │   │   ├── coordinates_test.go    # Coordinate conversion tests
 │   │   │   ├── spatial.go             # Spatial query utilities
-│   │   │   ├── spatial_test.go
+│   │   │   ├── spatial_test.go        # Spatial query tests
 │   │   │   ├── stations.go            # Station location utilities
 │   │   │   ├── wrapping.go            # Position and chunk index wrapping logic
-│   │   │   └── wrapping_test.go
+│   │   │   └── wrapping_test.go       # Wrapping logic tests
 │   │   ├── streaming/                 # Streaming system
 │   │   │   ├── manager.go             # Stream subscription manager
-│   │   │   └── manager_test.go
+│   │   │   └── manager_test.go        # Stream manager tests
 │   │   └── testutil/                  # Test utilities and helpers
 │   │       ├── database.go            # Database test utilities
 │   │       ├── fixtures.go            # Test fixtures
 │   │       ├── http.go                # HTTP test utilities
-│   │       ├── testutil_test.go
+│   │       ├── testutil_test.go       # Test utility tests
 │   │       └── README.md               # Test utilities documentation
 │   ├── scripts/                       # Utility scripts
 │   │   ├── run-procedural-service.sh  # Run Python service (Linux/Mac)
@@ -500,7 +500,7 @@ EarthRing/
 │   │   │   └── auth-ui.js             # Authentication UI components
 │   │   ├── chunks/                    # Chunk management
 │   │   │   ├── chunk-manager.js       # Chunk manager (loading, caching, rendering)
-│   │   │   └── chunk-manager.test.js
+│   │   │   └── chunk-manager.test.js  # Chunk manager tests
 │   │   ├── input/                     # Input handling
 │   │   │   └── camera-controller.js   # Camera controller (OrbitControls integration)
 │   │   ├── network/                   # WebSocket client and network utilities
@@ -508,12 +508,12 @@ EarthRing/
 │   │   ├── rendering/                 # Rendering engine
 │   │   │   ├── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
 │   │   │   ├── grid-overlay.js         # Grid overlay (LineSegments grid w/ shader fade, centerline, LOD)
-│   │   │   └── grid-overlay.test.js
+│   │   │   └── grid-overlay.test.js   # Grid overlay tests
 │   │   ├── state/                     # Game state management
 │   │   │   └── game-state.js          # Game state manager (chunks, player, connection, zones)
 │   │   ├── structures/                # Structure management
 │   │   │   ├── structure-manager.js    # Structure manager (loading, rendering)
-│   │   │   └── structure-manager.test.js
+│   │   │   └── structure-manager.test.js # Structure manager tests
 │   │   ├── ui/                        # UI components
 │   │   │   ├── admin-modal.js         # Admin panel modal
 │   │   │   ├── bottom-toolbar.js      # Bottom toolbar with tabs
@@ -523,30 +523,30 @@ EarthRing/
 │   │   │   ├── game-modal.js          # In-game modal system (confirmations, conflict resolution)
 │   │   │   ├── info-box.js            # Info box for selected objects
 │   │   │   ├── minimap.js             # Minimap component
-│   │   │   ├── minimap.test.js
+│   │   │   ├── minimap.test.js        # Minimap tests
 │   │   │   ├── player-ui.js            # Player management panel
-│   │   │   ├── player-ui.test.js
+│   │   │   ├── player-ui.test.js      # Player UI tests
 │   │   │   ├── structure-ui.js         # Structure management panel
 │   │   │   ├── zone-info-window.js    # Zone info window (selected zone details)
 │   │   │   ├── zone-ui.js             # Zone management panel
 │   │   │   ├── zones-toolbar.js       # Zones toolbar (grid and zone visibility controls)
-│   │   │   └── zones-toolbar.test.js
+│   │   │   └── zones-toolbar.test.js  # Zones toolbar tests
 │   │   ├── utils/                     # Utility modules
 │   │   │   ├── coordinates-new.js      # Coordinate conversion utilities (EarthRing ↔ Three.js ↔ Unreal)
-│   │   │   ├── coordinates-new.test.js
+│   │   │   ├── coordinates-new.test.js # Coordinate conversion tests
 │   │   │   ├── decompression.js        # Chunk decompression utilities
-│   │   │   ├── decompression.test.js
+│   │   │   ├── decompression.test.js   # Decompression tests
 │   │   │   ├── rendering.js            # Rendering utilities with coordinate conversion integration
 │   │   │   └── stations.js              # Station location utilities
 │   │   ├── zones/                     # Zone management
 │   │   │   ├── zone-editor.js         # Zone editor (drawing tools, preview, conflict resolution)
 │   │   │   ├── zone-manager.js        # Zone manager (fetching, rendering, visibility)
-│   │   │   └── zone-manager.test.js
+│   │   │   └── zone-manager.test.js   # Zone manager tests
 │   │   ├── main.js                    # Application entry point
-│   │   ├── main.test.js
+│   │   ├── main.test.js               # Main entry point tests
 │   │   ├── config.js                  # Client configuration
 │   │   ├── test-utils.js              # Test utilities and mocks
-│   │   └── test-utils.test.js
+│   │   └── test-utils.test.js         # Test utility tests
 │   ├── assets/                        # Game assets (models, textures, shaders)
 │   ├── public/                        # Static files
 │   │   └── favicon.svg
@@ -556,14 +556,14 @@ EarthRing/
 │   └── vitest.setup.js                # Vitest setup file
 ├── database/                          # Database files
 │   ├── schema/                        # SQL schema files (reference only)
-│   │   └── init.sql
+│   │   └── init.sql                   # Initial database schema
 │   ├── seeds/                         # Seed data
 │   ├── migrations/                    # Migration scripts (23 migrations)
 │   │   └── README.md                   # Migration documentation
 │   ├── scripts/                       # Database utility scripts
-│   │   ├── fix_torus_overlap_detection.sql
-│   │   ├── verify_and_fix_normalize_for_intersection.sql
-│   │   └── README.md
+│   │   ├── fix_torus_overlap_detection.sql # Fix for torus overlap detection issues
+│   │   ├── verify_and_fix_normalize_for_intersection.sql # Verify and fix normalize_for_intersection function
+│   │   └── README.md                   # Database scripts documentation
 │   ├── migrate.ps1                   # PowerShell migration runner (alternative)
 │   ├── migrate.sh                     # Shell migration runner (alternative)
 │   └── run_migrations.ps1            # PowerShell migration runner

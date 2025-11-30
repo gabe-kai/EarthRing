@@ -202,11 +202,18 @@ The zone editor provides multiple tools for creating zones:
      - Debug logging can be enabled with `window.DEBUG_ZONE_PREVIEW = true` in the browser console for troubleshooting
 
 2. **Paintbrush Tool Details**
+   - **Status**: ⚠️ **DISABLED** - The paintbrush tool is currently disabled in the UI. See TODO section below for known issues.
    - **Closed Loop Detection**: Paths that form closed loops (where first and last points are within 3x brush radius) are automatically detected
    - **Smooth Connection**: For closed loops, the first and last points use the same perpendicular direction and identical positions to ensure seamless connection
    - **Stroke Generation**: The brush expands the path by the brush radius on both sides, creating a thick stroke polygon
    - **Single Clicks**: Create circular zones with the brush radius
    - **Dragging**: Creates continuous strokes with smooth curves at corners (perpendicular vectors are averaged at path points)
+   
+   **TODO - Paintbrush Tool Issues (when re-enabling)**:
+   - Make brush strokes round instead of square (currently creates square/rectangular strokes)
+   - Fix polygon vertex order (vertices may be in incorrect order causing rendering issues)
+   - Fix merge code to properly handle intersecting strokes (brush strokes should merge when they intersect)
+   - Fix preview rendering (preview does not show while using the paintbrush tool)
 
 2. **Validation Rules**
    - Minimum 3 vertices (triangle) for polygon tool

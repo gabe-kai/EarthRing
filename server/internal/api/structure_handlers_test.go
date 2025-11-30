@@ -19,11 +19,11 @@ import (
 func createStructuresTableForTest(t *testing.T, db *sql.DB) {
 	t.Helper()
 	// Create PostGIS extension if needed
-	_, _ = db.Exec(`CREATE EXTENSION IF NOT EXISTS postgis;`)
-	
+	_, _ = db.Exec(`CREATE EXTENSION IF NOT EXISTS postgis;`) //nolint:errcheck // Test setup - extension may already exist
+
 	// Drop table if exists to ensure clean state
-	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`)
-	
+	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`) //nolint:errcheck // Test setup - table may not exist
+
 	_, err := db.Exec(`
 		CREATE TABLE structures (
 			id SERIAL PRIMARY KEY,
@@ -112,7 +112,7 @@ func TestStructureHandlers_CreateStructure(t *testing.T) {
 		"rotation": 45.0,
 		"scale":    1.0,
 	}
-	body, _ := json.Marshal(reqBody)
+	body, _ := json.Marshal(reqBody) //nolint:errcheck // Test setup - will fail later if marshal fails
 
 	req := httptest.NewRequest("POST", "/api/structures", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -289,9 +289,9 @@ func TestStructureHandlers_UpdateStructure(t *testing.T) {
 	newRotation := 90.0
 	reqBody := map[string]interface{}{
 		"structure_type": newType,
-		"rotation":        newRotation,
+		"rotation":       newRotation,
 	}
-	body, _ := json.Marshal(reqBody)
+	body, _ := json.Marshal(reqBody) //nolint:errcheck // Test setup - will fail later if marshal fails
 
 	req := httptest.NewRequest("PUT", "/api/structures/"+strconv.FormatInt(structure.ID, 10), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -575,4 +575,3 @@ func TestStructureHandlers_ListStructuresByOwner(t *testing.T) {
 		t.Fatalf("expected 2 structures for owner, got %d", len(structures))
 	}
 }
-

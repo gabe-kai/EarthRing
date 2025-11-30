@@ -13,7 +13,7 @@ import (
 func createStructuresTable(t *testing.T, db *sql.DB) {
 	t.Helper()
 	// Drop table if it exists to ensure we use the correct type
-	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`)
+	_, _ = db.Exec(`DROP TABLE IF EXISTS structures CASCADE`) //nolint:errcheck // Test setup - table may not exist
 	// Use PostGIS geometry instead of PostgreSQL POINT for compatibility with PostGIS functions
 	_, err := db.Exec(`
 		CREATE TABLE structures (
@@ -148,7 +148,7 @@ func TestStructureStorage_CreateStructureWithProceduralFields(t *testing.T) {
 func TestStructureStorage_CreateStructureWithZoneID(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-	
+
 	// Create zones table and insert a test zone
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS zones (
@@ -162,7 +162,7 @@ func TestStructureStorage_CreateStructureWithZoneID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create zones table: %v", err)
 	}
-	
+
 	// Insert a test zone
 	var zoneID int64
 	err = db.QueryRow(`
@@ -173,7 +173,7 @@ func TestStructureStorage_CreateStructureWithZoneID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test zone: %v", err)
 	}
-	
+
 	createStructuresTable(t, db)
 	truncateStructuresTable(t, db)
 
@@ -181,11 +181,11 @@ func TestStructureStorage_CreateStructureWithZoneID(t *testing.T) {
 
 	structure, err := storage.CreateStructure(&StructureCreateInput{
 		StructureType: "building",
-		Floor:        0,
-		ZoneID:       &zoneID,
-		Position:     Position{X: 2000.0, Y: 0.0},
-		Rotation:     0.0,
-		Scale:        1.0,
+		Floor:         0,
+		ZoneID:        &zoneID,
+		Position:      Position{X: 50.0, Y: 50.0}, // Inside zone (0-100, 0-100)
+		Rotation:      0.0,
+		Scale:         1.0,
 	})
 	if err != nil {
 		t.Fatalf("CreateStructure failed: %v", err)
@@ -255,7 +255,7 @@ func TestStructureStorage_UpdateStructure(t *testing.T) {
 func TestStructureStorage_UpdateStructureWithNullFields(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)
-	
+
 	// Create zones table and insert a test zone
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS zones (
@@ -269,7 +269,7 @@ func TestStructureStorage_UpdateStructureWithNullFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create zones table: %v", err)
 	}
-	
+
 	// Insert a test zone
 	var zoneID int64
 	err = db.QueryRow(`
@@ -280,7 +280,7 @@ func TestStructureStorage_UpdateStructureWithNullFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test zone: %v", err)
 	}
-	
+
 	createStructuresTable(t, db)
 	truncateStructuresTable(t, db)
 
@@ -294,7 +294,7 @@ func TestStructureStorage_UpdateStructureWithNullFields(t *testing.T) {
 		OwnerID:        &ownerID,
 		ZoneID:         &zoneID,
 		ProceduralSeed: &proceduralSeed,
-		Position:       Position{X: 1000.0, Y: 50.0},
+		Position:       Position{X: 50.0, Y: 50.0}, // Inside zone (0-100, 0-100)
 		Rotation:       0.0,
 		Scale:          1.0,
 	})
@@ -615,4 +615,3 @@ func normalizeJSONForStructures(raw json.RawMessage) string {
 	}
 	return string(normalized)
 }
-

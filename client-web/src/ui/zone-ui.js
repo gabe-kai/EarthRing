@@ -96,14 +96,27 @@ function createZonesToolbarContent() {
     { id: TOOLS.RECTANGLE, icon: '▭', label: 'Rectangle' },
     { id: TOOLS.CIRCLE, icon: '○', label: 'Circle' },
     { id: TOOLS.POLYGON, icon: '⬟', label: 'Polygon' },
-    { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush' },
+    { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush', disabled: true },
   ];
   
-  tools.forEach(({ id, icon, label }) => {
+  tools.forEach(({ id, icon, label, disabled }) => {
     const button = createToolbarButton(icon, label, `tool-${id}`);
-    button.addEventListener('click', () => {
-      selectTool(id);
-    });
+    
+    if (disabled) {
+      button.classList.add('disabled');
+      button.title = 'Paintbrush tool is disabled until later';
+      // Prevent clicks but allow hover for tooltip
+      button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+    } else {
+      button.addEventListener('click', () => {
+        selectTool(id);
+      });
+    }
+    
     toolSection.appendChild(button);
   });
   

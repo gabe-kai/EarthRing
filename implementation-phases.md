@@ -178,6 +178,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 16. ✅ Admin panel zone categorization (collapsible sections: Default Zones, Residential, Industrial, Commercial, Mixed-Use, Park, Restricted)
 17. ✅ Player-placed zones persist across refresh (zones now loaded via spatial overlap query in addition to chunk_data.zone_ids)
 18. ✅ Zone preview rendering fix (fixed coordinate wrapping issue causing previews to disappear at certain camera angles; added coordinate validation and automatic correction in `updatePreview`; added debug logging toggle `window.DEBUG_ZONE_PREVIEW` for troubleshooting)
+19. ✅ Comprehensive test coverage and fixes (fixed Go integration tests: JWT expiration config, zone array type casting, query parameter names, response format parsing, zone_id null handling; fixed schema verification test to auto-create missing indexes; fixed JavaScript tests: window mock for Node.js environment, zone manager test setup; all pre-commit checks passing)
 
 **In Progress / Upcoming:**
 10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)
