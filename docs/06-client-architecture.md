@@ -679,6 +679,17 @@ gridOverlay.setVisible(false); // Hide grid
    - **Floor change handling**: When active floor changes, all zones from the old floor are removed and zones for the new floor are loaded
    - **Coordinate Normalization**: Zones use unwrapped camera position for coordinate normalization. The `normalizeRelativeToCamera` function handles wrapping internally and expects the actual camera position (which may be negative or outside [0, RING_CIRCUMFERENCE)) rather than a pre-wrapped position.
 
+5. **Zone Rendering and Cleanup (Double-Rendering Prevention):**
+   - **Single Rendering Path**: Zones are rendered only once via event listeners (`zoneAdded`/`zoneUpdated` events from `gameState.upsertZone()`)
+   - **No Direct Rendering**: `handleStreamedZones()` does NOT call `renderZone()` directly to prevent double-rendering
+   - **Mesh Cleanup Before Upsert**: When zones are re-added (e.g., after leaving and returning to an area), existing meshes are detected and properly cleaned up before upserting to game state
+   - **Proper Re-placement**: 
+     - When chunks are removed, `cleanupZonesForChunk()` removes zones from both scene and game state
+     - When chunks are re-added, `handleStreamedZones()` checks for orphaned meshes, cleans them up, then upserts zones to game state
+     - Event listeners trigger `renderZone()` which creates new meshes
+   - **Orphaned Mesh Detection**: `renderZone()` detects meshes that exist in `zoneMeshes` but not in the scene, and properly disposes of them before creating new meshes
+   - **Resource Management**: All geometry and materials are properly disposed when meshes are removed to prevent memory leaks
+
 5. **Visibility System:**
    - Two-level visibility control:
      - Global: `zonesVisible` (all zones on/off)

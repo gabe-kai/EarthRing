@@ -105,17 +105,40 @@ export class ZoneManager {
           this.chunkZones.get(chunkID).add(zone.id);
         }
         
+        // Check if zone already exists in game state to determine if this is an update or new zone
+        const existingZone = this.gameState.getZone(zone.id);
+        const isUpdate = existingZone !== undefined;
+        
+        // Check if zone mesh already exists - if it does, we need to force re-render
+        // This handles the case where zones were cleaned up but the mesh wasn't properly removed
+        const existingMesh = this.zoneMeshes.get(zone.id);
+        if (existingMesh) {
+          // Mesh exists but might not be in scene - ensure it's removed first
+          // Only remove from scene/meshes, not from game state (we're about to upsert)
+          this.scene.remove(existingMesh);
+          this.zoneMeshes.delete(zone.id);
+          this.fullRingZoneCache.delete(zone.id);
+          // Dispose of geometry and materials
+          existingMesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => mat.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          });
+        }
+        
         // Upsert to game state - this ensures zones persist even if REST API is called later
-        this.gameState.upsertZone(zone);
-        // Also ensure zone is rendered immediately
         // The gameState.upsertZone will trigger zoneAdded/zoneUpdated events,
-        // which will call renderZone via the listener, but we can also call it directly
-        // to ensure immediate rendering
+        // which will call renderZone via the listener - don't call it directly to avoid double rendering
         const activeFloor = this.gameState.getActiveFloor();
         const zoneFloor = zone.floor ?? 0;
+        this.gameState.upsertZone(zone);
+        // Count zones that match the active floor (rendering happens via event listener)
         if (zoneFloor === activeFloor) {
-          // Only render if zone matches active floor
-          this.renderZone(zone);
           renderedCount.count++;
         } else {
           skippedCount.count++;
@@ -574,7 +597,43 @@ export class ZoneManager {
     }
 
     // Normal path: remove existing mesh and rebuild
-    this.removeZone(zone.id);
+    // Check if mesh exists and is in scene - if not, ensure it's properly cleaned up
+    const existingMesh = this.zoneMeshes.get(zone.id);
+    if (existingMesh) {
+      // Mesh exists - check if it's actually in the scene
+      if (existingMesh.parent === null || !this.scene.children.includes(existingMesh)) {
+        // Mesh is orphaned - clean it up properly
+        this.zoneMeshes.delete(zone.id);
+        this.fullRingZoneCache.delete(zone.id);
+        // Dispose of geometry and materials
+        existingMesh.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+      } else {
+        // Mesh is in scene - remove it for re-rendering (but keep in game state)
+        this.scene.remove(existingMesh);
+        this.zoneMeshes.delete(zone.id);
+        this.fullRingZoneCache.delete(zone.id);
+        // Dispose of geometry and materials
+        existingMesh.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+      }
+    }
 
     const polygons = parseGeometry(zone.geometry);
     if (polygons.length === 0) {
