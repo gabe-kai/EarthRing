@@ -195,6 +195,11 @@ The zone editor provides multiple tools for creating zones:
      - Shape Y coordinates are always negated for fill shapes to ensure correct face orientation after rotation
      - Preview mesh position is set to `(0, floorHeight + 0.001, 0)` since geometry coordinates are already in world space
      - This ensures 100% match between preview and final rendered zone, with perfect cursor alignment
+   - **Coordinate Validation**: The preview system includes automatic coordinate validation and correction:
+     - Detects when coordinates are incorrectly wrapped (more than half the ring circumference from the camera)
+     - Automatically corrects wrapped coordinates before creating preview geometry
+     - Ensures previews appear consistently at all camera angles, including when pointing straight down
+     - Debug logging can be enabled with `window.DEBUG_ZONE_PREVIEW = true` in the browser console for troubleshooting
 
 2. **Paintbrush Tool Details**
    - **Closed Loop Detection**: Paths that form closed loops (where first and last points are within 3x brush radius) are automatically detected
@@ -279,6 +284,15 @@ During rendering, zone coordinates are wrapped relative to the camera position:
 - Camera can be at negative positions (west of origin) when moving west
 - Zones are wrapped relative to the unwrapped camera position
 - This ensures zones render correctly even when camera is at negative positions
+
+#### Preview Coordinate Validation
+
+- **Issue**: At certain camera angles (especially when pointing straight down), coordinate normalization can sometimes wrap coordinates to the far side of the ring (e.g., `x: 264000023` instead of near the camera)
+- **Solution**: The preview system (`updatePreview` in `zone-editor.js`) validates coordinates before creating preview geometry:
+  - Calculates distance from camera for both start and end points
+  - If distance exceeds half the ring circumference (132,000,000m), coordinates are automatically wrapped back to the correct side
+  - This ensures previews always appear near the camera, regardless of camera angle
+- **Debug Toggle**: Enable detailed logging with `window.DEBUG_ZONE_PREVIEW = true` in the browser console to troubleshoot coordinate wrapping issues
 
 #### Zones Spanning Wrap Boundary
 

@@ -177,6 +177,7 @@ This document outlines the implementation plan for EarthRing, tracking progress,
 15. ✅ System zones made non-editable (delete button hidden for system zones in info window and zone UI)
 16. ✅ Admin panel zone categorization (collapsible sections: Default Zones, Residential, Industrial, Commercial, Mixed-Use, Park, Restricted)
 17. ✅ Player-placed zones persist across refresh (zones now loaded via spatial overlap query in addition to chunk_data.zone_ids)
+18. ✅ Zone preview rendering fix (fixed coordinate wrapping issue causing previews to disappear at certain camera angles; added coordinate validation and automatic correction in `updatePreview`; added debug logging toggle `window.DEBUG_ZONE_PREVIEW` for troubleshooting)
 
 **In Progress / Upcoming:**
 10. Zone editor UI enhancements (freeform drawing, vertex manipulation, conflict indicators)

@@ -4,6 +4,11 @@
  * Supports: rectangle, circle, dezone, polygon, and paintbrush tools
  */
 
+// Debug toggle for preview logging (set window.DEBUG_ZONE_PREVIEW = true to enable)
+if (typeof window !== 'undefined' && window.DEBUG_ZONE_PREVIEW) {
+  console.log('=== ZONE-EDITOR.JS FILE LOADED ===');
+}
+
 import * as THREE from 'three';
 import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, denormalizeFromCamera } from '../utils/coordinates-new.js';
 import { createZone, deleteZone } from '../api/zone-service.js';
@@ -20,6 +25,16 @@ const TOOLS = {
 
 export class ZoneEditor {
   constructor(sceneManager, cameraController, zoneManager, gameStateManager) {
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== ZoneEditor CONSTRUCTOR CALLED ===');
+      console.error('ZoneEditor instance created', {
+        hasSceneManager: !!sceneManager,
+        hasCameraController: !!cameraController,
+        hasZoneManager: !!zoneManager,
+        hasGameStateManager: !!gameStateManager
+      });
+    }
+    
     this.scene = sceneManager.getScene();
     this.camera = sceneManager.getCamera();
     this.renderer = sceneManager.getRenderer();
@@ -79,9 +94,10 @@ export class ZoneEditor {
    * Create an invisible plane at the floor level for raycasting
    */
   createRaycastPlane() {
-    // Create a large plane at floor 0 for raycasting
+    // Create a very large plane at floor 0 for raycasting
+    // Make it extremely large to ensure it's always hit regardless of camera angle/distance
     // Zones are rendered at floor * DEFAULT_FLOOR_HEIGHT, so floor 0 is at Y=0
-    const planeGeometry = new THREE.PlaneGeometry(1000000, 1000000);
+    const planeGeometry = new THREE.PlaneGeometry(10000000, 10000000); // Increased from 1M to 10M
     const planeMaterial = new THREE.MeshBasicMaterial({ 
       visible: false,
       side: THREE.DoubleSide 
@@ -89,6 +105,7 @@ export class ZoneEditor {
     this.raycastPlane = new THREE.Mesh(planeGeometry, planeMaterial);
     this.raycastPlane.rotation.x = -Math.PI / 2; // Horizontal plane
     this.raycastPlane.position.y = this.currentFloor * DEFAULT_FLOOR_HEIGHT; // Match zone rendering position
+    // Ensure the plane is always in the scene and properly positioned
     this.scene.add(this.raycastPlane);
   }
   
@@ -96,10 +113,21 @@ export class ZoneEditor {
    * Set up mouse event listeners
    */
   setupMouseListeners() {
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] setupMouseListeners CALLED ===', {
+        rendererElement: this.renderer.domElement,
+        hasRenderer: !!this.renderer
+      });
+    }
+    
     this.renderer.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
     this.renderer.domElement.addEventListener('mousemove', this.onMouseMove.bind(this));
     this.renderer.domElement.addEventListener('mouseup', this.onMouseUp.bind(this));
     this.renderer.domElement.addEventListener('click', this.onClick.bind(this));
+    
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] Event listeners ATTACHED ===');
+    }
     this.renderer.domElement.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       // Right-click to dismiss tool and return to select mode
@@ -140,11 +168,40 @@ export class ZoneEditor {
    * This prevents mirroring and ensures preview matches final geometry
    */
   getEarthRingPositionFromMouse(event) {
+    if (window.DEBUG_ZONE_COORDS && this.isDrawing) {
+      console.log('[ZoneEditor] getEarthRingPositionFromMouse called', {
+        mouse: { x: this.mouse.x, y: this.mouse.y },
+        cameraPosition: this.camera.position,
+        cameraRotation: this.camera.rotation
+      });
+    }
     this.updateMousePosition(event);
     this.raycaster.setFromCamera(this.mouse, this.camera);
     
+    // Ensure raycast plane is at the correct floor position and in the scene
+    if (this.raycastPlane) {
+      const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+      this.raycastPlane.position.y = floorHeight;
+      // Ensure plane is in scene (might have been removed)
+      if (!this.raycastPlane.parent) {
+        this.scene.add(this.raycastPlane);
+      }
+    } else {
+      // Plane doesn't exist - recreate it
+      this.createRaycastPlane();
+    }
+    
     // Intersect with the floor plane
-    const intersects = this.raycaster.intersectObject(this.raycastPlane);
+    // Use intersectObjects with an array to ensure proper intersection
+    const intersects = this.raycaster.intersectObject(this.raycastPlane, false);
+    if (window.DEBUG_ZONE_COORDS && this.isDrawing) {
+      console.log('[ZoneEditor] getEarthRingPositionFromMouse: Mesh intersection result', {
+        intersectsCount: intersects.length,
+        raycastPlaneExists: !!this.raycastPlane,
+        raycastPlaneInScene: !!this.raycastPlane?.parent,
+        raycastPlanePosition: this.raycastPlane?.position
+      });
+    }
     if (intersects.length > 0) {
       const worldPos = intersects[0].point;
       // Convert Three.js coordinates to EarthRing coordinates
@@ -172,6 +229,104 @@ export class ZoneEditor {
       };
     }
     
+    // If raycast failed, try alternative method: intersect with a mathematical plane
+    // This helps when looking straight down where the mesh intersection might fail
+    const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+    const planeNormal = new THREE.Vector3(0, 1, 0); // Up vector (Y axis)
+    const planeConstant = -floorHeight; // Distance from origin
+    const plane = new THREE.Plane(planeNormal, planeConstant);
+    
+    const intersectionPoint = new THREE.Vector3();
+    const didIntersect = this.raycaster.ray.intersectPlane(plane, intersectionPoint);
+    
+    if (window.DEBUG_ZONE_COORDS && this.isDrawing) {
+      console.log('[ZoneEditor] getEarthRingPositionFromMouse: Fallback plane intersection', {
+        didIntersect: didIntersect,
+        intersectionPoint: intersectionPoint,
+        floorHeight: floorHeight,
+        rayDirection: this.raycaster.ray.direction
+      });
+    }
+    
+    // Check if intersection is valid (not at infinity and not null)
+    if (didIntersect !== null && 
+        intersectionPoint.x !== Infinity && 
+        intersectionPoint.y !== Infinity && 
+        intersectionPoint.z !== Infinity &&
+        !isNaN(intersectionPoint.x) &&
+        !isNaN(intersectionPoint.y) &&
+        !isNaN(intersectionPoint.z)) {
+      try {
+        const earthRingPos = fromThreeJS(intersectionPoint, DEFAULT_FLOOR_HEIGHT);
+        earthRingPos.z = this.currentFloor;
+        
+        const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+        const cameraX = cameraPos.x;
+        const x = normalizeRelativeToCamera(earthRingPos.x, cameraX);
+        
+        return {
+          x,
+          y: earthRingPos.y,
+          z: earthRingPos.z,
+        };
+      } catch (error) {
+        if (window.DEBUG_ZONE_COORDS) {
+          console.warn('[ZoneEditor] Fallback intersection succeeded but coordinate conversion failed:', error);
+        }
+      }
+    }
+    
+    // Third fallback: Use camera position and ray direction to intersect floor plane
+    // This is a last resort when both intersection methods fail
+    try {
+      const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+      const cameraWorldPos = this.camera.position.clone();
+      
+      // Get the ray direction from the raycaster (already set from camera)
+      const rayDirection = this.raycaster.ray.direction.clone();
+      
+      // Calculate intersection with floor plane using ray equation: point = origin + t * direction
+      // Floor plane: y = floorHeight, so we solve: cameraWorldPos.y + t * rayDirection.y = floorHeight
+      const t = (floorHeight - cameraWorldPos.y) / rayDirection.y;
+      
+      // Check if intersection is valid (ray is not parallel to floor and t is reasonable)
+      if (Math.abs(rayDirection.y) > 0.001 && !isNaN(t) && isFinite(t) && t > 0 && t < 100000) {
+        const fallbackPoint = cameraWorldPos.clone();
+        fallbackPoint.addScaledVector(rayDirection, t);
+        
+        // Validate the point is reasonable
+        if (Math.abs(fallbackPoint.y - floorHeight) < 1000 && // Close to floor
+            Math.abs(fallbackPoint.x) < 100000000 && // Reasonable X range
+            Math.abs(fallbackPoint.z) < 100000000) { // Reasonable Z range
+          const earthRingPos = fromThreeJS(fallbackPoint, DEFAULT_FLOOR_HEIGHT);
+          earthRingPos.z = this.currentFloor;
+          const cameraX = cameraPos.x;
+          const x = normalizeRelativeToCamera(earthRingPos.x, cameraX);
+          
+          return {
+            x,
+            y: earthRingPos.y,
+            z: earthRingPos.z,
+          };
+        }
+      }
+    } catch (error) {
+      if (window.DEBUG_ZONE_COORDS) {
+        console.warn('[ZoneEditor] Third fallback method failed:', error);
+      }
+    }
+    
+    // If both methods failed, log for debugging (only in debug mode to avoid spam)
+    if (window.DEBUG_ZONE_COORDS) {
+      console.warn('[ZoneEditor] getEarthRingPositionFromMouse: No intersection with raycast plane', {
+        mouse: { x: this.mouse.x, y: this.mouse.y },
+        cameraPosition: this.camera.position,
+        cameraRotation: this.camera.rotation,
+        raycastPlanePosition: this.raycastPlane?.position,
+        raycastPlaneRotation: this.raycastPlane?.rotation,
+      });
+    }
+    
     return null;
   }
   
@@ -179,8 +334,21 @@ export class ZoneEditor {
    * Handle mouse down event
    */
   onMouseDown(event) {
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] onMouseDown CALLED ===', {
+        button: event.button,
+        currentTool: this.currentTool,
+        isDrawing: this.isDrawing,
+        target: event.target,
+        rendererElement: this.renderer.domElement
+      });
+    }
+    
     // Don't interfere if clicking on UI elements
-    if (event.target !== this.renderer.domElement) return;
+    if (event.target !== this.renderer.domElement) {
+      console.log('[ZoneEditor] onMouseDown: Ignoring click on UI element');
+      return;
+    }
     
     // Right mouse button (2): Dismiss tool and return to select mode
     if (event.button === 2) {
@@ -255,14 +423,74 @@ export class ZoneEditor {
    * Handle mouse move event
    */
   onMouseMove(event) {
-    if (this.currentTool === TOOLS.NONE) return;
+    if (this.currentTool === TOOLS.NONE) {
+      // Don't log every mouse move when no tool is active (too noisy)
+      return;
+    }
+    
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] onMouseMove CALLED ===', {
+        currentTool: this.currentTool,
+        isDrawing: this.isDrawing,
+        hasStartPoint: !!this.startPoint
+      });
+    }
+    
+    if (window.DEBUG_ZONE_COORDS && this.isDrawing) {
+      console.log('[ZoneEditor] onMouseMove: tool active, isDrawing=true', {
+        tool: this.currentTool,
+        hasStartPoint: !!this.startPoint
+      });
+    }
     
     const earthRingPos = this.getEarthRingPositionFromMouse(event);
-    if (!earthRingPos) return;
+    if (!earthRingPos) {
+      if (window.DEBUG_ZONE_PREVIEW) {
+        console.error('=== [ZoneEditor] onMouseMove: getEarthRingPositionFromMouse returned NULL ===', {
+          isDrawing: this.isDrawing,
+          hasCurrentPoint: !!this.currentPoint,
+          hasStartPoint: !!this.startPoint,
+          currentPoint: this.currentPoint,
+          startPoint: this.startPoint
+        });
+      }
+      // If raycast failed, try to use the last known position if we're drawing
+      // This helps maintain preview when raycasting is unreliable at certain angles
+      if (this.isDrawing && this.currentPoint) {
+        if (window.DEBUG_ZONE_PREVIEW) {
+          console.error('=== [ZoneEditor] onMouseMove: Using fallback currentPoint ===', this.currentPoint);
+        }
+        // Use last known position to keep preview updating
+        // This prevents preview from disappearing when raycast temporarily fails
+        this.updatePreview(this.currentPoint);
+      } else if (this.isDrawing && this.startPoint) {
+        if (window.DEBUG_ZONE_PREVIEW) {
+          console.error('=== [ZoneEditor] onMouseMove: Using fallback startPoint ===', this.startPoint);
+        }
+        // If we have a start point but no current position, use start point
+        // This ensures preview appears even if first raycast fails
+        this.updatePreview(this.startPoint);
+      } else {
+        if (window.DEBUG_ZONE_PREVIEW) {
+          console.error('=== [ZoneEditor] onMouseMove: No fallback available, returning ===');
+        }
+      }
+      return;
+    }
+    
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] onMouseMove: getEarthRingPositionFromMouse SUCCEEDED ===', {
+        earthRingPos: earthRingPos,
+        isDrawing: this.isDrawing
+      });
+    }
     
     this.currentPoint = earthRingPos;
     
     if (this.isDrawing) {
+      if (window.DEBUG_ZONE_PREVIEW) {
+        console.error('=== [ZoneEditor] onMouseMove: Calling updatePreview ===', earthRingPos);
+      }
       // For paintbrush, add points to the path while dragging
       if (this.currentTool === TOOLS.PAINTBRUSH) {
         // Add point to path if it's far enough from the last point (prevent too many points)
@@ -307,10 +535,18 @@ export class ZoneEditor {
     // Get the actual mouse release position from the event
     // This ensures the final zone goes exactly where the cursor is when released
     const endPos = this.getEarthRingPositionFromMouse(event);
-    if (!endPos) return;
+    if (!endPos) {
+      // If we can't get position, still stop drawing
+      this.isDrawing = false;
+      return;
+    }
     
     // Update currentPoint to match
     this.currentPoint = endPos;
+    
+    // Stop drawing immediately to prevent preview from continuing to update
+    // This ensures the preview stays at the release position
+    this.isDrawing = false;
     
     // Update preview one final time with the actual release position
     // This ensures the preview shows exactly what will be created
@@ -330,6 +566,7 @@ export class ZoneEditor {
     }
     
     // Finish drawing for drag-based tools
+    // Note: isDrawing is already false, so preview won't update during async operations
     if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
       this.finishDrawing(endPos);
     }
@@ -347,6 +584,14 @@ export class ZoneEditor {
    * Start drawing
    */
   startDrawing(startPos, _event) {
+    if (window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] startDrawing CALLED ===', {
+        tool: this.currentTool,
+        startPos: startPos,
+        isDrawing: this.isDrawing
+      });
+    }
+    
     this.isDrawing = true;
     this.startPoint = startPos;
     this.currentPoint = startPos;
@@ -354,20 +599,115 @@ export class ZoneEditor {
     if (this.currentTool === TOOLS.PAINTBRUSH) {
       this.paintbrushPath = [startPos];
     }
+    
+    // Create initial preview immediately when starting to draw
+    // This ensures preview appears even if mouse doesn't move
+    if (this.currentTool !== TOOLS.POLYGON && this.currentTool !== TOOLS.SELECT) {
+      // Use a small offset to ensure preview geometry is valid
+      const offsetPos = {
+        x: startPos.x + 0.1,
+        y: startPos.y + 0.1,
+        z: startPos.z
+      };
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] startDrawing: Calling updatePreview with offset', offsetPos);
+      }
+      this.updatePreview(offsetPos);
+    }
   }
   
   /**
    * Update preview geometry while drawing
    */
   updatePreview(currentPos) {
-    if (!this.startPoint || !currentPos) return;
+    if (window.DEBUG_ZONE_COORDS) {
+      console.log('[ZoneEditor] updatePreview called', {
+        hasStartPoint: !!this.startPoint,
+        hasCurrentPos: !!currentPos,
+        tool: this.currentTool,
+        isDrawing: this.isDrawing,
+        startPoint: this.startPoint,
+        currentPos: currentPos
+      });
+    }
+    
+    if (!this.startPoint || !currentPos) {
+      // If we don't have required data, remove preview if it exists
+      if (window.DEBUG_ZONE_COORDS) {
+        console.warn('[ZoneEditor] updatePreview: Missing required data', {
+          hasStartPoint: !!this.startPoint,
+          hasCurrentPos: !!currentPos
+        });
+      }
+      if (this.previewMesh) {
+        this.scene.remove(this.previewMesh);
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        this.previewMesh = null;
+      }
+      return;
+    }
+    
+    // Validate coordinates are reasonable (not wrapped to far side of ring)
+    // If coordinates are way out of bounds, they're likely wrapped incorrectly
+    const RING_CIRCUMFERENCE = 264000000;
+    const MAX_REASONABLE_DISTANCE = RING_CIRCUMFERENCE / 2; // Half the ring
+    
+    const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+    const cameraX = cameraPos.x;
+    
+    // Check if coordinates are too far from camera (likely wrapped incorrectly)
+    const startDist = Math.abs(this.startPoint.x - cameraX);
+    const currentDist = Math.abs(currentPos.x - cameraX);
+    
+    // If distance is more than half the ring, wrap it back
+    const wrapCoordinate = (x) => {
+      let dist = x - cameraX;
+      if (dist > MAX_REASONABLE_DISTANCE) {
+        return x - RING_CIRCUMFERENCE;
+      } else if (dist < -MAX_REASONABLE_DISTANCE) {
+        return x + RING_CIRCUMFERENCE;
+      }
+      return x;
+    };
+    
+    // Fix wrapped coordinates
+    const fixedStartPoint = {
+      ...this.startPoint,
+      x: wrapCoordinate(this.startPoint.x)
+    };
+    const fixedCurrentPos = {
+      ...currentPos,
+      x: wrapCoordinate(currentPos.x)
+    };
+    
+    if ((startDist > MAX_REASONABLE_DISTANCE || currentDist > MAX_REASONABLE_DISTANCE) && window.DEBUG_ZONE_PREVIEW) {
+      console.error('=== [ZoneEditor] updatePreview: Coordinates wrapped incorrectly, fixing ===', {
+        originalStart: this.startPoint,
+        originalCurrent: currentPos,
+        fixedStart: fixedStartPoint,
+        fixedCurrent: fixedCurrentPos,
+        cameraX: cameraX,
+        startDist: startDist,
+        currentDist: currentDist
+      });
+    }
     
     let geometry;
     
     try {
       switch (this.currentTool) {
         case TOOLS.RECTANGLE:
-          geometry = this.createRectanglePreview(this.startPoint, currentPos);
+          geometry = this.createRectanglePreview(fixedStartPoint, fixedCurrentPos);
+          if (window.DEBUG_ZONE_COORDS) {
+            console.log('[ZoneEditor] createRectanglePreview returned', {
+              geometry: geometry,
+              hasGeometry: !!geometry,
+              hasAttributes: geometry?.attributes,
+              hasPosition: geometry?.attributes?.position
+            });
+          }
           break;
         case TOOLS.CIRCLE:
           geometry = this.createCirclePreview(this.startPoint, currentPos);
@@ -379,74 +719,190 @@ export class ZoneEditor {
           }
           break;
         default:
+          // Remove preview for unsupported tools
+          if (this.previewMesh) {
+            this.scene.remove(this.previewMesh);
+            if (this.previewMesh.geometry) {
+              this.previewMesh.geometry.dispose();
+            }
+            this.previewMesh = null;
+          }
           return;
       }
       
-      if (geometry) {
-        // Reuse existing mesh and material if possible for better performance
+      if (!geometry) {
+        // Geometry creation failed - remove preview if it exists
+        console.warn('[ZoneEditor] updatePreview: Geometry creation returned null/undefined', {
+          tool: this.currentTool,
+          startPoint: this.startPoint,
+          currentPos: currentPos,
+          paintbrushPathLength: this.paintbrushPath?.length || 0
+        });
         if (this.previewMesh) {
-          // Dispose old geometry
+          this.scene.remove(this.previewMesh);
           if (this.previewMesh.geometry) {
             this.previewMesh.geometry.dispose();
           }
-          // Update geometry only (keeps material and mesh)
-          this.previewMesh.geometry = geometry;
-        } else {
-          // Create new mesh on first preview
-          // Use brighter colors and higher opacity for better visibility
-          const previewColor = this.getToolColor();
-          const material = new THREE.MeshBasicMaterial({
-            color: previewColor,
-            transparent: true,
-            opacity: 0.7, // Increased from 0.5 for better visibility
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            depthTest: false,
-          });
-          this.previewMesh = new THREE.Mesh(geometry, material);
-          this.previewMesh.rotation.x = -Math.PI / 2;
-          // Use the same floor height calculation as zone rendering
-          // Position at origin - geometry coordinates are already in world space
-          const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
-          this.previewMesh.position.set(0, floorHeight + 0.001, 0);
-          this.previewMesh.renderOrder = 10; // Render above zones
+          this.previewMesh = null;
+        }
+        return;
+      }
+      
+      // Validate geometry before using it
+      if (!geometry.attributes || !geometry.attributes.position) {
+        console.warn('[ZoneEditor] updatePreview: Invalid geometry structure', {
+          tool: this.currentTool,
+          geometry: geometry,
+          hasAttributes: !!geometry.attributes,
+          hasPosition: !!geometry?.attributes?.position
+        });
+        return;
+      }
+      
+      // Reuse existing mesh and material if possible for better performance
+      if (this.previewMesh) {
+        // Ensure mesh is in scene (might have been removed elsewhere)
+        if (!this.previewMesh.parent) {
+          if (window.DEBUG_ZONE_COORDS) {
+            console.log('[ZoneEditor] Re-adding preview mesh to scene');
+          }
           this.scene.add(this.previewMesh);
         }
-        
-        // Always reset position to origin - geometry coordinates are already in world space
-        // This ensures preview aligns with cursor (geometry is calculated from cursor position)
+        // Dispose old geometry
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        // Update geometry only (keeps material and mesh)
+        this.previewMesh.geometry = geometry;
+        if (window.DEBUG_ZONE_COORDS) {
+          console.log('[ZoneEditor] Updated existing preview mesh geometry');
+        }
+      } else {
+        // Create new mesh on first preview
+        // Use brighter colors and higher opacity for better visibility
+        const previewColor = this.getToolColor();
+        const material = new THREE.MeshBasicMaterial({
+          color: previewColor,
+          transparent: true,
+          opacity: 0.7, // Increased from 0.5 for better visibility
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: false,
+        });
+        this.previewMesh = new THREE.Mesh(geometry, material);
+        this.previewMesh.rotation.x = -Math.PI / 2;
+        // Use the same floor height calculation as zone rendering
+        // Position at origin - geometry coordinates are already in world space
         const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
         this.previewMesh.position.set(0, floorHeight + 0.001, 0);
+        this.previewMesh.renderOrder = 10; // Render above zones
+        this.previewMesh.visible = true; // Ensure it's visible
+        this.scene.add(this.previewMesh);
+        if (window.DEBUG_ZONE_COORDS) {
+          console.log('[ZoneEditor] Created new preview mesh', {
+            position: this.previewMesh.position,
+            visible: this.previewMesh.visible,
+            inScene: !!this.previewMesh.parent,
+            geometryVertices: geometry.attributes.position?.count || 0
+          });
+        }
+      }
+      
+      // Always reset position to origin - geometry coordinates are already in world space
+      // This ensures preview aligns with cursor (geometry is calculated from cursor position)
+      const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+      this.previewMesh.position.set(0, floorHeight + 0.001, 0);
+      this.previewMesh.visible = true; // Ensure it stays visible
+      
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] Preview mesh state', {
+          exists: !!this.previewMesh,
+          visible: this.previewMesh?.visible,
+          inScene: !!this.previewMesh?.parent,
+          position: this.previewMesh?.position,
+          geometryVertices: this.previewMesh?.geometry?.attributes?.position?.count || 0
+        });
       }
     } catch (error) {
       console.error('Error creating preview geometry:', error);
+      // On error, remove preview to avoid showing stale/invalid geometry
+      if (this.previewMesh) {
+        this.scene.remove(this.previewMesh);
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        this.previewMesh = null;
+      }
     }
   }
   
   /**
    * Update paintbrush preview (shown even when not dragging)
+   * Only shows when NOT actively drawing (isDrawing === false)
    */
   updatePaintbrushPreview(pos) {
-    if (this.previewMesh) {
-      this.scene.remove(this.previewMesh);
+    // Don't show paintbrush preview if we're actively drawing - let updatePreview handle it
+    if (this.isDrawing) {
+      return;
     }
     
-    const geometry = new THREE.CircleGeometry(this.paintbrushRadius, 32);
-    const material = new THREE.MeshBasicMaterial({
-      color: this.getToolColor(),
-      transparent: true,
-      opacity: 0.7, // Increased from 0.3 for better visibility
-      side: THREE.DoubleSide,
-    });
-    this.previewMesh = new THREE.Mesh(geometry, material);
-    this.previewMesh.rotation.x = -Math.PI / 2;
+    if (!pos) {
+      // Remove preview if no position
+      if (this.previewMesh) {
+        this.scene.remove(this.previewMesh);
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        this.previewMesh = null;
+      }
+      return;
+    }
     
-    // Convert EarthRing position to Three.js coordinates
-    // CircleGeometry creates a circle centered at origin, so we position the mesh at the cursor position
-    const threeJSPos = toThreeJS(pos, this.currentFloor);
-    const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
-    this.previewMesh.position.set(threeJSPos.x, floorHeight + 0.001, threeJSPos.z);
-    this.scene.add(this.previewMesh);
+    try {
+      const geometry = new THREE.CircleGeometry(this.paintbrushRadius, 32);
+      const material = new THREE.MeshBasicMaterial({
+        color: this.getToolColor(),
+        transparent: true,
+        opacity: 0.7, // Increased from 0.3 for better visibility
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: false,
+      });
+      
+      if (this.previewMesh) {
+        // Reuse existing mesh
+        if (!this.previewMesh.parent) {
+          this.scene.add(this.previewMesh);
+        }
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        this.previewMesh.geometry = geometry;
+        this.previewMesh.material = material;
+      } else {
+        // Create new mesh
+        this.previewMesh = new THREE.Mesh(geometry, material);
+        this.previewMesh.rotation.x = -Math.PI / 2;
+        this.previewMesh.renderOrder = 10; // Render above zones
+        this.scene.add(this.previewMesh);
+      }
+      
+      // Convert EarthRing position to Three.js coordinates
+      // CircleGeometry creates a circle centered at origin, so we position the mesh at the cursor position
+      const threeJSPos = toThreeJS(pos, this.currentFloor);
+      const floorHeight = this.currentFloor * DEFAULT_FLOOR_HEIGHT;
+      this.previewMesh.position.set(threeJSPos.x, floorHeight + 0.001, threeJSPos.z);
+    } catch (error) {
+      console.error('Error creating paintbrush preview:', error);
+      // On error, remove preview
+      if (this.previewMesh) {
+        this.scene.remove(this.previewMesh);
+        if (this.previewMesh.geometry) {
+          this.previewMesh.geometry.dispose();
+        }
+        this.previewMesh = null;
+      }
+    }
   }
   
   /**
@@ -479,11 +935,27 @@ export class ZoneEditor {
       paintbrushPathLength: this.paintbrushPath?.length,
     });
     
-    // Remove preview
+    // Remove preview immediately when starting to finish drawing
+    // This prevents the preview from continuing to follow the mouse
     if (this.previewMesh) {
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] finishDrawing: Removing preview mesh', {
+          inScene: !!this.previewMesh.parent,
+          visible: this.previewMesh.visible
+        });
+      }
       this.scene.remove(this.previewMesh);
+      if (this.previewMesh.geometry) {
+        this.previewMesh.geometry.dispose();
+      }
+      if (this.previewMesh.material) {
+        this.previewMesh.material.dispose();
+      }
       this.previewMesh = null;
     }
+    
+    // Ensure isDrawing is false (should already be set in onMouseUp, but double-check)
+    this.isDrawing = false;
     
     let geometry;
     
@@ -578,8 +1050,8 @@ export class ZoneEditor {
       // Check if response indicates a conflict (HTTP 409)
       if (response && response.error === 'zone_conflict') {
         // Show prompt asking which zone should win
-        const conflictResolution = await this.promptConflictResolution(response.conflicts, response.new_zone_type);
-        if (!conflictResolution) {
+        const conflictResult = await this.promptConflictResolution(response.conflicts, response.new_zone_type);
+        if (!conflictResult) {
           // User cancelled
           this.isDrawing = false;
           this.paintbrushPath = [];
@@ -587,19 +1059,33 @@ export class ZoneEditor {
           return;
         }
         
-        // Retry zone creation with conflict resolution
-        response = await createZone({
+        // Build request with per-zone resolutions if provided, otherwise use bulk resolution
+        const createRequest = {
           name: `${this.currentZoneType} Zone`,
           zone_type: this.currentZoneType,
           floor: this.currentFloor,
           geometry,
-          conflict_resolution: conflictResolution,
           properties: {
             created_by: 'zone-editor',
             tool: this.currentTool,
             owner_id: currentUser?.id,
           },
-        });
+        };
+        
+        // If per-zone resolutions are provided, convert Map to object
+        if (conflictResult.perZone && conflictResult.perZone.size > 0) {
+          const conflictResolutions = {};
+          conflictResult.perZone.forEach((resolution, zoneId) => {
+            conflictResolutions[zoneId] = resolution;
+          });
+          createRequest.conflict_resolutions = conflictResolutions;
+        } else if (conflictResult.resolution) {
+          // Use bulk resolution if no per-zone resolutions
+          createRequest.conflict_resolution = conflictResult.resolution;
+        }
+        
+        // Retry zone creation with conflict resolution
+        response = await createZone(createRequest);
       }
       
       // Handle response: can be single zone or multiple zones (when bisected)
@@ -697,33 +1183,25 @@ export class ZoneEditor {
    * Prompt user to resolve zone conflicts
    * @param {Array} conflicts - Array of conflicting zones
    * @param {string} newZoneType - Type of the new zone being created
-   * @returns {Promise<string|null>} "new_wins" or "existing_wins", or null if cancelled
+   * @returns {Promise<Object|null>} {resolution: string, perZone: Map} or null if cancelled
    */
   async promptConflictResolution(conflicts, newZoneType) {
-    return new Promise((resolve) => {
-      // Format zone type names for display
-      const formatZoneType = (type) => {
-        return type.split('-').map(word => 
-          word.charAt(0).toUpperCase() + word.slice(1)
-        ).join(' ');
-      };
-      
-      const existingZoneTypes = [...new Set(conflicts.map(c => c.zone_type))];
-      const existingZoneTypeStr = existingZoneTypes.length === 1 
-        ? formatZoneType(existingZoneTypes[0])
-        : existingZoneTypes.map(t => formatZoneType(t)).join(', ');
-      const newZoneTypeStr = formatZoneType(newZoneType);
-      
-      const message = `Zone conflict detected!\n\n` +
-        `Your new ${newZoneTypeStr} zone overlaps with existing ${existingZoneTypeStr} zone(s).\n\n` +
-        `Which zone should keep the overlapping area?`;
-      
-      const choice = confirm(`${message}\n\n` +
-        `Click OK to keep the NEW ${newZoneTypeStr} zone (existing zones will lose the overlapping area).\n` +
-        `Click Cancel to keep the EXISTING ${existingZoneTypeStr} zone(s) (new zone will lose the overlapping area).`);
-      
-      resolve(choice ? 'new_wins' : 'existing_wins');
+    const { showConflictResolutionModal } = await import('../ui/game-modal.js');
+    const result = await showConflictResolutionModal({
+      newZoneType,
+      conflicts: conflicts.map(c => ({
+        id: c.id,
+        name: c.name,
+        zone_type: c.zone_type,
+        zoneType: c.zone_type // Support both formats
+      }))
     });
+    
+    if (!result) {
+      return null; // Cancelled
+    }
+    
+    return result; // Return the full result object with resolution and/or perZone
   }
   
   /**
@@ -887,7 +1365,17 @@ export class ZoneEditor {
   async deleteSelectedZone() {
     if (!this.selectedZone) return;
     
-    if (!confirm(`Delete zone "${this.selectedZone.name || this.selectedZone.id}"?`)) {
+    const { showConfirmationModal } = await import('../ui/game-modal.js');
+    const confirmed = await showConfirmationModal({
+      title: 'Delete Zone',
+      message: `Are you sure you want to delete zone "${this.selectedZone.name || this.selectedZone.id}"?`,
+      checkboxLabel: 'I understand this zone will be permanently deleted',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      confirmColor: '#ff4444'
+    });
+    
+    if (!confirmed) {
       return;
     }
     
@@ -906,6 +1394,12 @@ export class ZoneEditor {
    * Set current tool
    */
   setTool(tool) {
+    console.log('[ZoneEditor] setTool called', {
+      oldTool: this.currentTool,
+      newTool: tool,
+      isDrawing: this.isDrawing
+    });
+    
     // Cancel current drawing if switching tools
     if (this.isDrawing) {
       this.cancelDrawing();
@@ -920,6 +1414,18 @@ export class ZoneEditor {
     
     this.currentTool = tool;
     this.polygonVertices = [];
+    
+    // Clean up preview when switching tools (unless switching to paintbrush which has its own preview)
+    if (tool !== TOOLS.PAINTBRUSH && this.previewMesh) {
+      this.scene.remove(this.previewMesh);
+      if (this.previewMesh.geometry) {
+        this.previewMesh.geometry.dispose();
+      }
+      if (this.previewMesh.material) {
+        this.previewMesh.material.dispose();
+      }
+      this.previewMesh = null;
+    }
     
     // Disable OrbitControls when a drawing tool is active
     if (this.cameraController && this.cameraController.controls) {
@@ -939,7 +1445,19 @@ export class ZoneEditor {
    */
   cancelDrawing() {
     if (this.previewMesh) {
+      if (window.DEBUG_ZONE_COORDS) {
+        console.log('[ZoneEditor] cancelDrawing: Removing preview mesh', {
+          inScene: !!this.previewMesh.parent,
+          visible: this.previewMesh.visible
+        });
+      }
       this.scene.remove(this.previewMesh);
+      if (this.previewMesh.geometry) {
+        this.previewMesh.geometry.dispose();
+      }
+      if (this.previewMesh.material) {
+        this.previewMesh.material.dispose();
+      }
       this.previewMesh = null;
     }
     this.isDrawing = false;
@@ -1015,8 +1533,22 @@ export class ZoneEditor {
     // Step 1: Generate the exact stored geometry (same as createRectangleGeometry)
     let minX = Math.min(start.x, end.x);
     let maxX = Math.max(start.x, end.x);
-    const minY = Math.min(start.y, end.y);
-    const maxY = Math.max(start.y, end.y);
+    let minY = Math.min(start.y, end.y);
+    let maxY = Math.max(start.y, end.y);
+    
+    // Ensure we have a valid rectangle (minimum size)
+    // If start and end are the same or very close, create a small rectangle
+    const MIN_SIZE = 1; // 1 meter minimum
+    if (Math.abs(maxX - minX) < MIN_SIZE) {
+      const centerX = (minX + maxX) / 2;
+      minX = centerX - MIN_SIZE / 2;
+      maxX = centerX + MIN_SIZE / 2;
+    }
+    if (Math.abs(maxY - minY) < MIN_SIZE) {
+      const centerY = (minY + maxY) / 2;
+      minY = centerY - MIN_SIZE / 2;
+      maxY = centerY + MIN_SIZE / 2;
+    }
     
     // DEBUG: Log preview input coordinates
     if (window.DEBUG_ZONE_COORDS) {
