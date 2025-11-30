@@ -653,6 +653,11 @@ gridOverlay.setVisible(false); // Hide grid
      };
      ```
    - This ensures zones always render at the copy closest to the camera, preventing gaps at the 0/263999 seam
+   - **Coordinate Validation**: The preview system includes automatic validation to handle edge cases:
+     - Detects when coordinates are incorrectly wrapped (more than half the ring circumference from camera)
+     - Automatically corrects wrapped coordinates in `updatePreview()` before creating preview geometry
+     - Ensures previews appear consistently at all camera angles, including extreme angles like pointing straight down
+     - Debug logging available via `window.DEBUG_ZONE_PREVIEW = true` for troubleshooting coordinate wrapping issues
 
 3. **Coordinate Conversion:**
    - Zone coordinates (EarthRing X/Y/Z) are converted to Three.js coordinates using `toThreeJS()`:

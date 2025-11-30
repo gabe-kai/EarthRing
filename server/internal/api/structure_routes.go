@@ -49,4 +49,3 @@ func SetupStructureRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/api/structures/", rateLimited)
 	mux.Handle("/api/structures", rateLimited)
 }
-

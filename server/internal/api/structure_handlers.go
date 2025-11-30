@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,48 +32,48 @@ func NewStructureHandlers(db *sql.DB, cfg *config.Config) *StructureHandlers {
 }
 
 type createStructureRequest struct {
-	StructureType  string          `json:"structure_type"`
-	Floor          int             `json:"floor"`
-	OwnerID        *int64          `json:"owner_id,omitempty"`
-	ZoneID         *int64          `json:"zone_id,omitempty"`
-	IsProcedural   bool            `json:"is_procedural"`
-	ProceduralSeed *int64           `json:"procedural_seed,omitempty"`
+	StructureType  string            `json:"structure_type"`
+	Floor          int               `json:"floor"`
+	OwnerID        *int64            `json:"owner_id,omitempty"`
+	ZoneID         *int64            `json:"zone_id,omitempty"`
+	IsProcedural   bool              `json:"is_procedural"`
+	ProceduralSeed *int64            `json:"procedural_seed,omitempty"`
 	Position       database.Position `json:"position"`
-	Rotation       float64          `json:"rotation"`
-	Scale          float64          `json:"scale"`
-	Properties     json.RawMessage `json:"properties,omitempty"`
-	ModelData      json.RawMessage `json:"model_data,omitempty"`
+	Rotation       float64           `json:"rotation"`
+	Scale          float64           `json:"scale"`
+	Properties     json.RawMessage   `json:"properties,omitempty"`
+	ModelData      json.RawMessage   `json:"model_data,omitempty"`
 }
 
 type updateStructureRequest struct {
-	StructureType  *string          `json:"structure_type,omitempty"`
-	Floor          *int             `json:"floor,omitempty"`
-	OwnerID        *int64           `json:"owner_id,omitempty"`
-	ZoneID         *int64           `json:"zone_id,omitempty"`
-	IsProcedural   *bool            `json:"is_procedural,omitempty"`
-	ProceduralSeed *int64            `json:"procedural_seed,omitempty"`
+	StructureType  *string            `json:"structure_type,omitempty"`
+	Floor          *int               `json:"floor,omitempty"`
+	OwnerID        *int64             `json:"owner_id,omitempty"`
+	ZoneID         *int64             `json:"zone_id,omitempty"`
+	IsProcedural   *bool              `json:"is_procedural,omitempty"`
+	ProceduralSeed *int64             `json:"procedural_seed,omitempty"`
 	Position       *database.Position `json:"position,omitempty"`
-	Rotation       *float64          `json:"rotation,omitempty"`
-	Scale          *float64          `json:"scale,omitempty"`
-	Properties     *json.RawMessage `json:"properties,omitempty"`
-	ModelData      *json.RawMessage `json:"model_data,omitempty"`
+	Rotation       *float64           `json:"rotation,omitempty"`
+	Scale          *float64           `json:"scale,omitempty"`
+	Properties     *json.RawMessage   `json:"properties,omitempty"`
+	ModelData      *json.RawMessage   `json:"model_data,omitempty"`
 }
 
 type structureResponse struct {
-	ID             int64           `json:"id"`
-	StructureType  string          `json:"structure_type"`
-	Floor          int             `json:"floor"`
-	OwnerID        *int64          `json:"owner_id,omitempty"`
-	ZoneID         *int64          `json:"zone_id,omitempty"`
-	IsProcedural   bool            `json:"is_procedural"`
-	ProceduralSeed *int64           `json:"procedural_seed,omitempty"`
+	ID             int64             `json:"id"`
+	StructureType  string            `json:"structure_type"`
+	Floor          int               `json:"floor"`
+	OwnerID        *int64            `json:"owner_id,omitempty"`
+	ZoneID         *int64            `json:"zone_id,omitempty"`
+	IsProcedural   bool              `json:"is_procedural"`
+	ProceduralSeed *int64            `json:"procedural_seed,omitempty"`
 	Position       database.Position `json:"position"`
-	Rotation       float64          `json:"rotation"`
-	Scale          float64          `json:"scale"`
-	Properties     json.RawMessage `json:"properties,omitempty"`
-	ModelData      json.RawMessage `json:"model_data,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	Rotation       float64           `json:"rotation"`
+	Scale          float64           `json:"scale"`
+	Properties     json.RawMessage   `json:"properties,omitempty"`
+	ModelData      json.RawMessage   `json:"model_data,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 // CreateStructure handles POST /api/structures
@@ -95,7 +96,7 @@ func (h *StructureHandlers) CreateStructure(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate that owner_id matches authenticated user (unless admin)
-	authRole, _ := r.Context().Value(auth.RoleKey).(string)
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 	if req.OwnerID != nil && *req.OwnerID != authUserID && authRole != "admin" {
 		respondWithError(w, http.StatusForbidden, "Cannot create structures for other users")
 		return
@@ -173,14 +174,33 @@ func (h *StructureHandlers) UpdateStructure(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Check ownership (unless admin)
-	authRole, _ := r.Context().Value(auth.RoleKey).(string)
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 	if existing.OwnerID == nil || (*existing.OwnerID != authUserID && authRole != "admin") {
 		respondWithError(w, http.StatusForbidden, "Cannot update structures owned by other users")
 		return
 	}
 
+	// Read raw body to check for explicit null values
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	// Check if zone_id key exists in JSON (even if null)
+	var rawReq map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawReq); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	zoneIDKeyExists := false
+	if _, exists := rawReq["zone_id"]; exists {
+		zoneIDKeyExists = true
+	}
+
+	// Decode into struct
 	var req updateStructureRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
@@ -203,7 +223,8 @@ func (h *StructureHandlers) UpdateStructure(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	if req.ZoneID != nil {
+	// Set ZoneIDSet if zone_id key exists in JSON (even if null)
+	if zoneIDKeyExists {
 		input.ZoneID = req.ZoneID
 		input.ZoneIDSet = true
 	}
@@ -270,7 +291,7 @@ func (h *StructureHandlers) DeleteStructure(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Check ownership (unless admin)
-	authRole, _ := r.Context().Value(auth.RoleKey).(string)
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 	if existing.OwnerID == nil || (*existing.OwnerID != authUserID && authRole != "admin") {
 		respondWithError(w, http.StatusForbidden, "Cannot delete structures owned by other users")
 		return
@@ -363,7 +384,7 @@ func (h *StructureHandlers) ListStructuresByOwner(w http.ResponseWriter, r *http
 	}
 
 	// Users can only view their own structures (unless admin)
-	authRole, _ := r.Context().Value(auth.RoleKey).(string)
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 	if ownerID != authUserID && authRole != "admin" {
 		respondWithError(w, http.StatusForbidden, "Cannot view structures owned by other users")
 		return
@@ -404,4 +425,3 @@ func structureToResponse(s *database.Structure) structureResponse {
 		UpdatedAt:      s.UpdatedAt,
 	}
 }
-

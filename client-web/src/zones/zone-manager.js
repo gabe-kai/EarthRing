@@ -165,7 +165,7 @@ export class ZoneManager {
           }
         }
         
-        if (metadata && metadata.chunk_index === chunkIndex && metadata.default_zone === true) {
+        if (metadata && metadata.chunk_index === chunkIndex && (metadata.default_zone === true || metadata.default_zone === 'true')) {
           // This is a chunk-based zone, remove it
           this.removeZone(zone.id);
           this.gameState.removeZone(zone.id);
@@ -474,6 +474,8 @@ export class ZoneManager {
       // Zone is for a different floor - remove it if it exists
       this.removeZone(zone.id);
       this.fullRingZoneCache.delete(zone.id);
+      // Also remove from game state
+      this.gameState.removeZone(zone.id);
       return;
     }
 
@@ -482,15 +484,17 @@ export class ZoneManager {
     // This preserves negative X values and large positive values without wrapping
     const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
     let cameraX = 0;
+    let cameraPos = { x: 0, y: 0, z: 0 }; // Initialize for debug logging
     if (camera) {
       // Three.js X coordinate directly maps to arc length s in RingArc coordinates
       // Convert to EarthRing coordinates preserving raw position (including negatives)
       const cameraThreeJSPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
       const cameraEarthRingPos = fromThreeJS(cameraThreeJSPos);
       cameraX = cameraEarthRingPos.x || 0;
+      cameraPos = cameraEarthRingPos; // Set for debug logging
     } else {
       // Fallback: try camera controller but note it wraps the value
-      const cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
+      cameraPos = this.cameraController?.getEarthRingPosition() ?? { x: 0, y: 0, z: 0 };
       cameraX = cameraPos.x;
     }
 

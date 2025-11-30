@@ -160,6 +160,16 @@ export function createBottomToolbar() {
       background: rgba(76, 175, 80, 0.2);
       color: #4caf50;
     }
+    .toolbar-button.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      filter: grayscale(0.5);
+    }
+    .toolbar-button.disabled:hover {
+      border-color: #333;
+      background: rgba(0, 0, 0, 0.5);
+      color: #ccc;
+    }
     .toolbar-button-icon {
       font-size: 1.3rem;
       line-height: 1;

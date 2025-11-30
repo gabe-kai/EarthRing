@@ -261,4 +261,3 @@ func findMigrationFile(t *testing.T, filename string) string {
 	t.Fatalf("Could not find migration file: %s (tried paths: %v)", filename, possiblePaths)
 	return ""
 }
-

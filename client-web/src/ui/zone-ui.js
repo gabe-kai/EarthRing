@@ -96,14 +96,27 @@ function createZonesToolbarContent() {
     { id: TOOLS.RECTANGLE, icon: '▭', label: 'Rectangle' },
     { id: TOOLS.CIRCLE, icon: '○', label: 'Circle' },
     { id: TOOLS.POLYGON, icon: '⬟', label: 'Polygon' },
-    { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush' },
+    { id: TOOLS.PAINTBRUSH, icon: '🖌', label: 'Paintbrush', disabled: true },
   ];
   
-  tools.forEach(({ id, icon, label }) => {
+  tools.forEach(({ id, icon, label, disabled }) => {
     const button = createToolbarButton(icon, label, `tool-${id}`);
-    button.addEventListener('click', () => {
-      selectTool(id);
-    });
+    
+    if (disabled) {
+      button.classList.add('disabled');
+      button.title = 'Paintbrush tool is disabled until later';
+      // Prevent clicks but allow hover for tooltip
+      button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+    } else {
+      button.addEventListener('click', () => {
+        selectTool(id);
+      });
+    }
+    
     toolSection.appendChild(button);
   });
   
@@ -394,9 +407,19 @@ function setupZonesToolbarListeners() {
         }
       };
       
-      // Define delete action
+      // Define delete action (only for non-system zones)
       const deleteAction = async () => {
-        if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
+        const { showConfirmationModal } = await import('./game-modal.js');
+        const confirmed = await showConfirmationModal({
+          title: 'Delete Zone',
+          message: `Are you sure you want to delete zone "${zone.name || zone.id}"?`,
+          checkboxLabel: 'I understand this zone will be permanently deleted',
+          confirmText: 'Delete',
+          cancelText: 'Cancel',
+          confirmColor: '#ff4444'
+        });
+        
+        if (!confirmed) {
           return;
         }
         
@@ -420,13 +443,17 @@ function setupZonesToolbarListeners() {
         }
       };
       
+      // Build actions object - only include delete for non-system zones
+      const actions = {};
+      if (!(zone.is_system_zone === true)) {
+        actions['Delete Zone'] = deleteAction;
+      }
+      
       // Update info box with zone information
       updateInfoBox(zoneInfo, {
         title: `${zoneTypeDisplay} Zone Details`,
         tooltip: tooltip,
-        actions: {
-          'Delete Zone': deleteAction
-        },
+        actions: actions,
         editableFields: {
           'Name': { onSave: saveName }
         }

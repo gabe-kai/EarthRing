@@ -28,6 +28,13 @@ async function authorizedRequest(path, { method = 'GET', body } = {}) {
   });
 
   if (!response.ok) {
+    // Handle 409 Conflict - zone conflicts that need user resolution
+    if (response.status === 409) {
+      const errorData = await response.json().catch(() => ({}));
+      // Return the conflict data instead of throwing
+      return errorData;
+    }
+    
     // Handle 401 Unauthorized - token expired or invalid
     if (response.status === 401) {
       // Try to refresh token once

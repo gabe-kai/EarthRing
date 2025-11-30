@@ -43,9 +43,10 @@ func NewIntegrationTestFramework(t *testing.T) *IntegrationTestFramework {
 
 	cfg := &config.Config{
 		Auth: config.AuthConfig{
-			JWTSecret:     "test-secret-key-for-testing-only",
-			RefreshSecret: "test-refresh-secret-key-for-testing-only",
-			JWTExpiration: 15 * time.Minute,
+			JWTSecret:         "test-secret-key-for-testing-only",
+			RefreshSecret:     "test-refresh-secret-key-for-testing-only",
+			JWTExpiration:     15 * time.Minute,
+			RefreshExpiration: 7 * 24 * time.Hour,
 		},
 		Procedural: config.ProceduralConfig{
 			BaseURL:    "", // No procedural service for integration tests
@@ -897,7 +898,7 @@ func TestIntegration_ZonePersistence(t *testing.T) {
 
 	// Update chunk_data to link zone to chunk
 	_, err = framework.db.Exec(`
-		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+		UPDATE chunk_data SET zone_ids = ARRAY[$1::bigint] WHERE chunk_id = $2
 	`, zoneID, chunkID)
 	if err != nil {
 		t.Fatalf("Failed to link zone to chunk: %v", err)
@@ -916,7 +917,7 @@ func TestIntegration_ZonePersistence(t *testing.T) {
 	var linkedZoneIDs []int64
 	err = framework.db.QueryRow(`
 		SELECT zone_ids FROM chunk_data WHERE chunk_id = $1
-	`, chunkID).Scan((*pq.Array)(&linkedZoneIDs))
+	`, chunkID).Scan(pq.Array(&linkedZoneIDs))
 	if err != nil {
 		t.Fatalf("Failed to query chunk_data: %v", err)
 	}
@@ -958,7 +959,7 @@ func TestIntegration_ZoneChunkBindingStreaming(t *testing.T) {
 
 	// Link zone to chunk
 	_, err = framework.db.Exec(`
-		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+		UPDATE chunk_data SET zone_ids = ARRAY[$1::bigint] WHERE chunk_id = $2
 	`, zoneID, chunkID)
 	if err != nil {
 		t.Fatalf("Failed to link zone to chunk: %v", err)
@@ -1053,7 +1054,7 @@ func TestIntegration_ZoneCleanupOnChunkRemoval(t *testing.T) {
 
 	// Link zone to chunk
 	_, err = framework.db.Exec(`
-		UPDATE chunk_data SET zone_ids = ARRAY[$1] WHERE chunk_id = $2
+		UPDATE chunk_data SET zone_ids = ARRAY[$1::bigint] WHERE chunk_id = $2
 	`, zoneID, chunkID)
 	if err != nil {
 		t.Fatalf("Failed to link zone to chunk: %v", err)
@@ -1063,7 +1064,7 @@ func TestIntegration_ZoneCleanupOnChunkRemoval(t *testing.T) {
 	var linkedZoneIDs []int64
 	err = framework.db.QueryRow(`
 		SELECT zone_ids FROM chunk_data WHERE chunk_id = $1
-	`, chunkID).Scan((*pq.Array)(&linkedZoneIDs))
+	`, chunkID).Scan(pq.Array(&linkedZoneIDs))
 	if err != nil {
 		t.Fatalf("Failed to query chunk_data: %v", err)
 	}

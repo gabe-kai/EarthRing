@@ -65,6 +65,12 @@ const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateMan
   fadeStart: 0.7, // Start fading at 70% of radius
 });
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
+// Expose zone editor globally for debugging/access
+window.zoneEditor = zoneEditor;
+if (!window.earthring) {
+  window.earthring = {};
+}
+window.earthring.zoneEditor = zoneEditor;
 createZonesToolbar(zoneManager, gridOverlay, gameStateManager);
 
 // Initialize debug info panel

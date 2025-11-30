@@ -292,15 +292,15 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				}
 
 				// Extract zone properties
-				zoneType, _ := props["zone_type"].(string)
+				zoneType, _ := props["zone_type"].(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 				if zoneType == "" {
 					zoneType = "restricted" // Default to restricted
 				}
-				name, _ := props["name"].(string)
+				name, _ := props["name"].(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
 				if name == "" {
 					name = fmt.Sprintf("Chunk Zone (Floor %d, Chunk %d)", floor, chunkIndex)
 				}
-				isSystemZone, _ := props["is_system_zone"].(bool)
+				isSystemZone, _ := props["is_system_zone"].(bool) //nolint:errcheck // ok value ignored - defaults to false if not a bool
 
 				// Extract properties and metadata
 				var propertiesJSON json.RawMessage

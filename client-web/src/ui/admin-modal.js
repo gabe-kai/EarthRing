@@ -407,6 +407,64 @@ export function showAdminModal() {
     .admin-zone-action-btn:hover {
       background: rgba(0, 255, 0, 0.3);
     }
+
+    .admin-zone-category {
+      margin-top: 0.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid #333;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .admin-zone-category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      user-select: none;
+      background: rgba(0, 0, 0, 0.3);
+      border-bottom: 1px solid #333;
+      transition: background 0.2s;
+    }
+
+    .admin-zone-category-header:hover {
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .admin-zone-category-title {
+      color: #4caf50;
+      font-weight: 600;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .admin-zone-category-count {
+      color: #888;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
+    .admin-zone-category-toggle {
+      color: #888;
+      font-size: 1rem;
+      transition: transform 0.2s;
+    }
+
+    .admin-zone-category.expanded .admin-zone-category-toggle {
+      transform: rotate(90deg);
+    }
+
+    .admin-zone-category-list {
+      display: none;
+      padding: 0.25rem;
+    }
+
+    .admin-zone-category.expanded .admin-zone-category-list {
+      display: block;
+    }
   `;
   document.head.appendChild(style);
   
@@ -1193,9 +1251,16 @@ function createFloorSection(floor, zones, container) {
   if (zones.length === 0) {
     zoneList.innerHTML = '<p style="color: #888; padding: 0.5rem; margin: 0;">No zones on this floor</p>';
   } else {
-    zones.forEach(zone => {
-      const zoneItem = createZoneItem(zone, container);
-      zoneList.appendChild(zoneItem);
+    // Group zones by category
+    const categorizedZones = categorizeZones(zones);
+    
+    // Create category sections
+    Object.keys(categorizedZones).forEach(categoryName => {
+      const categoryZones = categorizedZones[categoryName];
+      if (categoryZones.length > 0) {
+        const categorySection = createZoneCategory(categoryName, categoryZones, container);
+        zoneList.appendChild(categorySection);
+      }
     });
   }
   
@@ -1203,6 +1268,135 @@ function createFloorSection(floor, zones, container) {
   section.appendChild(zoneList);
   
   return section;
+}
+
+/**
+ * Categorize zones by type
+ */
+function categorizeZones(zones) {
+  const categories = {
+    'Default Zones': [],
+    'Residential': [],
+    'Commercial': [],
+    'Industrial': [],
+    'Mixed-Use': [],
+    'Park': [],
+    'Restricted': [],
+    'Other': [],
+  };
+  
+  zones.forEach(zone => {
+    // System zones go into "Default Zones"
+    if (zone.is_system_zone === true) {
+      categories['Default Zones'].push(zone);
+      return;
+    }
+    
+    // Categorize by zone_type
+    const zoneType = zone.zone_type || 'unknown';
+    const categoryName = formatZoneTypeCategory(zoneType);
+    
+    if (categories[categoryName]) {
+      categories[categoryName].push(zone);
+    } else {
+      categories['Other'].push(zone);
+    }
+  });
+  
+  // Remove empty categories
+  Object.keys(categories).forEach(key => {
+    if (categories[key].length === 0) {
+      delete categories[key];
+    }
+  });
+  
+  return categories;
+}
+
+/**
+ * Format zone type to category name
+ */
+function formatZoneTypeCategory(zoneType) {
+  const typeMap = {
+    'residential': 'Residential',
+    'commercial': 'Commercial',
+    'industrial': 'Industrial',
+    'mixed-use': 'Mixed-Use',
+    'park': 'Park',
+    'restricted': 'Restricted',
+  };
+  
+  const normalized = zoneType.toLowerCase().replace(/_/g, '-');
+  return typeMap[normalized] || 'Other';
+}
+
+/**
+ * Create a collapsible zone category section
+ */
+function createZoneCategory(categoryName, zones, container) {
+  const category = document.createElement('div');
+  category.className = 'admin-zone-category';
+  category.dataset.category = categoryName;
+  
+  // Default to expanded for Default Zones, collapsed for others
+  if (categoryName === 'Default Zones') {
+    category.classList.add('expanded');
+  }
+  
+  const header = document.createElement('div');
+  header.className = 'admin-zone-category-header';
+  header.onclick = () => {
+    category.classList.toggle('expanded');
+  };
+  
+  const title = document.createElement('span');
+  title.className = 'admin-zone-category-title';
+  
+  // Add icon based on category
+  const icon = getCategoryIcon(categoryName);
+  title.innerHTML = `${icon} ${categoryName}`;
+  
+  const count = document.createElement('span');
+  count.className = 'admin-zone-category-count';
+  count.textContent = `(${zones.length})`;
+  
+  const toggle = document.createElement('span');
+  toggle.className = 'admin-zone-category-toggle';
+  toggle.textContent = '▶';
+  
+  header.appendChild(title);
+  header.appendChild(count);
+  header.appendChild(toggle);
+  
+  const categoryList = document.createElement('div');
+  categoryList.className = 'admin-zone-category-list';
+  
+  zones.forEach(zone => {
+    const zoneItem = createZoneItem(zone, container);
+    categoryList.appendChild(zoneItem);
+  });
+  
+  category.appendChild(header);
+  category.appendChild(categoryList);
+  
+  return category;
+}
+
+/**
+ * Get icon for category
+ */
+function getCategoryIcon(categoryName) {
+  const icons = {
+    'Default Zones': '⚙️',
+    'Residential': '🏠',
+    'Commercial': '🏪',
+    'Industrial': '🏭',
+    'Mixed-Use': '🏢',
+    'Park': '🌳',
+    'Restricted': '🚫',
+    'Other': '📦',
+  };
+  return icons[categoryName] || '📦';
 }
 
 /**
@@ -1309,21 +1503,29 @@ async function handleAdminResetAllZones(container, cascade = false) {
     ? 'This will delete ALL zones, reset sequence numbering, and cascade to related tables (structures, roads, npcs).'
     : 'This will delete ALL zones but preserve related records. Zone references in structures, roads, and npcs will be cleared.';
   
-  const confirmed = confirm(
-    `WARNING: ${mode}\n\n` +
-    `${description}\n\n` +
-    'This action cannot be undone. Are you absolutely sure?'
-  );
+  const { showConfirmationModal } = await import('./game-modal.js');
+  const confirmed = await showConfirmationModal({
+    title: `WARNING: ${mode}`,
+    message: `${description}\n\nThis action cannot be undone.`,
+    checkboxLabel: 'I understand this will permanently delete all zones',
+    confirmText: 'Delete All Zones',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
   
   if (!confirmed) {
     return;
   }
   
   // Double confirmation
-  const doubleConfirmed = confirm(
-    `Final confirmation: ${mode}?\n\n` +
-    'This will permanently remove all zone data from the database.'
-  );
+  const doubleConfirmed = await showConfirmationModal({
+    title: `Final Confirmation: ${mode}`,
+    message: 'This will permanently remove all zone data from the database.',
+    checkboxLabel: 'I confirm I want to delete all zones',
+    confirmText: 'Yes, Delete All',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
   
   if (!doubleConfirmed) {
     return;
@@ -1362,20 +1564,29 @@ async function handleAdminResetAllChunks(container) {
   const resultDisplay = container.querySelector('#admin-reset-chunks-result');
   const resetButton = container.querySelector('#admin-reset-all-chunks-btn');
   
-  const confirmed = confirm(
-    'WARNING: This will delete ALL chunks from the database!\n\n' +
-    'All chunks will be regenerated by the procedural service on next request. Are you sure?'
-  );
+  const { showConfirmationModal } = await import('./game-modal.js');
+  const confirmed = await showConfirmationModal({
+    title: 'WARNING: Delete All Chunks',
+    message: 'This will delete ALL chunks from the database!\n\nAll chunks will be regenerated by the procedural service on next request.',
+    checkboxLabel: 'I understand this will delete all chunk data',
+    confirmText: 'Delete All Chunks',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
   
   if (!confirmed) {
     return;
   }
   
   // Double confirmation
-  const doubleConfirmed = confirm(
-    'Final confirmation: Delete ALL chunks?\n\n' +
-    'This will remove all chunk data from the database. Chunks will be regenerated on next request.'
-  );
+  const doubleConfirmed = await showConfirmationModal({
+    title: 'Final Confirmation: Delete All Chunks',
+    message: 'This will remove all chunk data from the database. Chunks will be regenerated on next request.',
+    checkboxLabel: 'I confirm I want to delete all chunks',
+    confirmText: 'Yes, Delete All',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
   
   if (!doubleConfirmed) {
     return;
@@ -1440,7 +1651,16 @@ async function handleAdminChunkDelete(container) {
   const chunkIndex = container.querySelector('#admin-chunk-index').value;
   const chunkID = `${floor}_${chunkIndex}`;
   
-  const confirmed = confirm(`Are you sure you want to delete chunk ${chunkID}?\n\nThis will remove it from the database and force regeneration on next request.`);
+  const { showConfirmationModal } = await import('./game-modal.js');
+  const confirmed = await showConfirmationModal({
+    title: 'Delete Chunk',
+    message: `Are you sure you want to delete chunk ${chunkID}?\n\nThis will remove it from the database and force regeneration on next request.`,
+    checkboxLabel: 'I understand this chunk will be deleted',
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
+  
   if (!confirmed) {
     return;
   }

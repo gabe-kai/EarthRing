@@ -381,7 +381,16 @@ async function handleChunkDelete(container = null) {
   const chunkID = `${floor}_${chunkIndex}`;
   
   // Confirm deletion
-  const confirmed = confirm(`Are you sure you want to delete chunk ${chunkID}?\n\nThis will remove it from the database and force regeneration on next request.`);
+  const { showConfirmationModal } = await import('./game-modal.js');
+  const confirmed = await showConfirmationModal({
+    title: 'Delete Chunk',
+    message: `Are you sure you want to delete chunk ${chunkID}?\n\nThis will remove it from the database and force regeneration on next request.`,
+    checkboxLabel: 'I understand this chunk will be deleted',
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+    confirmColor: '#ff4444'
+  });
+  
   if (!confirmed) {
     return;
   }

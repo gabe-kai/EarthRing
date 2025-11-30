@@ -376,7 +376,7 @@ func TestStructureStorage_ValidationZoneRelationship(t *testing.T) {
 				ZoneID:        func() *int64 { id := int64(99999); return &id }(),
 			},
 			wantErr: true,
-			errMsg:  "zone 99999 not found",
+			errMsg:  "not within zone", // Error message changed - now checks position first
 		},
 	}
 
@@ -490,4 +490,3 @@ func TestStructureStorage_ValidationUpdate(t *testing.T) {
 		})
 	}
 }
-
