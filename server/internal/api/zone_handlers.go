@@ -39,7 +39,8 @@ type createZoneRequest struct {
 	Geometry          json.RawMessage `json:"geometry"`
 	Properties        json.RawMessage `json:"properties,omitempty"`
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
-	ConflictResolution *string        `json:"conflict_resolution,omitempty"` // "new_wins" or "existing_wins"
+	ConflictResolution *string        `json:"conflict_resolution,omitempty"` // "new_wins" or "existing_wins" (bulk resolution for all conflicts)
+	ConflictResolutions map[string]string `json:"conflict_resolutions,omitempty"` // Per-zone resolutions: zone_id (as string) -> "new_wins" or "existing_wins"
 }
 
 type updateZoneRequest struct {
@@ -114,6 +115,20 @@ func (h *ZoneHandlers) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert string keys to int64 keys for ConflictResolutions
+	var conflictResolutions map[int64]string
+	if req.ConflictResolutions != nil && len(req.ConflictResolutions) > 0 {
+		conflictResolutions = make(map[int64]string)
+		for zoneIDStr, resolution := range req.ConflictResolutions {
+			zoneID, err := strconv.ParseInt(zoneIDStr, 10, 64)
+			if err != nil {
+				log.Printf("Invalid zone ID in conflict_resolutions: %s", zoneIDStr)
+				continue
+			}
+			conflictResolutions[zoneID] = resolution
+		}
+	}
+
 	input := &database.ZoneCreateInput{
 		Name:              req.Name,
 		ZoneType:          req.ZoneType,
@@ -123,6 +138,7 @@ func (h *ZoneHandlers) CreateZone(w http.ResponseWriter, r *http.Request) {
 		Properties:        req.Properties,
 		Metadata:          req.Metadata,
 		ConflictResolution: req.ConflictResolution,
+		ConflictResolutions: conflictResolutions,
 	}
 
 	result, err := h.storage.CreateZoneWithComponents(input)

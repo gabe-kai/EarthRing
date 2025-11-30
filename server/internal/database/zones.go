@@ -178,7 +178,8 @@ type ZoneCreateInput struct {
 	Geometry          json.RawMessage
 	Properties        json.RawMessage
 	Metadata          json.RawMessage
-	ConflictResolution *string // "new_wins" or "existing_wins", nil means return conflict info
+	ConflictResolution *string // "new_wins" or "existing_wins", nil means return conflict info (bulk resolution)
+	ConflictResolutions map[int64]string // Per-zone resolutions: zone_id -> "new_wins" or "existing_wins"
 }
 
 // ZoneUpdateInput describes the fields that can be updated on a zone.
@@ -440,8 +441,29 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 		}
 	}
 
-	// If we have player-owned conflict zones and no resolution provided, return conflict info
-	if len(playerConflictZoneIDs) > 0 && (input.ConflictResolution == nil || (*input.ConflictResolution != "new_wins" && *input.ConflictResolution != "existing_wins")) {
+	// If we have player-owned conflict zones, check if resolutions are provided
+	// Check both bulk resolution and per-zone resolutions
+	hasBulkResolution := input.ConflictResolution != nil && (*input.ConflictResolution == "new_wins" || *input.ConflictResolution == "existing_wins")
+	hasPerZoneResolutions := input.ConflictResolutions != nil && len(input.ConflictResolutions) > 0
+	
+	// Check if all conflicts have per-zone resolutions
+	allConflictsResolved := false
+	if hasPerZoneResolutions {
+		allConflictsResolved = true
+		for _, conflictZoneID := range playerConflictZoneIDs {
+			if resolution, ok := input.ConflictResolutions[conflictZoneID]; !ok || (resolution != "new_wins" && resolution != "existing_wins") {
+				log.Printf("[ZoneConflict] Missing or invalid per-zone resolution for zone %d (has: %v, resolution: %s)", conflictZoneID, ok, resolution)
+				allConflictsResolved = false
+				break
+			}
+		}
+		if allConflictsResolved {
+			log.Printf("[ZoneConflict] All %d conflicts have valid per-zone resolutions", len(playerConflictZoneIDs))
+		}
+	}
+	
+	// If we have conflicts and no valid resolution (bulk or per-zone), return conflict info
+	if len(playerConflictZoneIDs) > 0 && !hasBulkResolution && !allConflictsResolved {
 		// Get conflict zone details for the response
 		conflictZones := make([]ConflictZoneInfo, 0, len(playerConflictZoneIDs))
 		for _, conflictZoneID := range playerConflictZoneIDs {
@@ -501,9 +523,23 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			}
 
 			// Same owner, different type - apply conflict resolution
+			// Check per-zone resolution first, then bulk resolution, then default
 			resolution := "new_wins" // Default: new zone wins
-			if input.ConflictResolution != nil {
+			if input.ConflictResolutions != nil {
+				if perZoneRes, ok := input.ConflictResolutions[conflictZoneID]; ok {
+					resolution = perZoneRes
+					log.Printf("[ZoneConflict] Using per-zone resolution for zone %d: %s", conflictZoneID, resolution)
+				} else if input.ConflictResolution != nil {
+					resolution = *input.ConflictResolution
+					log.Printf("[ZoneConflict] Using bulk resolution for zone %d: %s (no per-zone resolution found)", conflictZoneID, resolution)
+				} else {
+					log.Printf("[ZoneConflict] Using default resolution for zone %d: %s (no resolution provided)", conflictZoneID, resolution)
+				}
+			} else if input.ConflictResolution != nil {
 				resolution = *input.ConflictResolution
+				log.Printf("[ZoneConflict] Using bulk resolution for zone %d: %s", conflictZoneID, resolution)
+			} else {
+				log.Printf("[ZoneConflict] Using default resolution for zone %d: %s", conflictZoneID, resolution)
 			}
 
 			if resolution == "existing_wins" {
@@ -1894,17 +1930,12 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			FROM target_geom_dumped_raw
 			WHERE geom_type != 'ST_MultiPolygon'
 		),
+		-- Union all components of the target zone (if it's a MultiPolygon, we need to subtract from all of it)
 		target_geom AS (
-			-- Take the largest component if it's a MultiPolygon, otherwise use as-is
 			SELECT 
-				ST_MakeValid(geom) AS geom
-			FROM (
-				SELECT geom, ST_Area(geom) AS area
-				FROM target_geom_dumped
-				WHERE geom IS NOT NULL
-				ORDER BY ST_Area(geom) DESC
-				LIMIT 1
-			) AS largest
+				ST_MakeValid(ST_Union(geom)) AS geom
+			FROM target_geom_dumped
+			WHERE geom IS NOT NULL
 		),
 		dezone_geom AS (
 			SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($2), 0)) AS geom
@@ -2115,7 +2146,9 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			continue
 		}
 
-		newZoneInput := &ZoneCreateInput{
+		// Insert split component directly without going through merge logic
+		// This prevents the split component from being merged back with the original group
+		newZone, err := s.insertZoneDirect(&ZoneCreateInput{
 			Name:         fmt.Sprintf("%s (Split %d)", originalZone.Name, i),
 			ZoneType:     originalZone.ZoneType,
 			Floor:        originalZone.Floor,
@@ -2124,19 +2157,58 @@ func (s *ZoneStorage) subtractDezoneFromZone(targetZoneID int64, dezoneGeometry 
 			Geometry:     wrappedGeometry,
 			Properties:   originalZone.Properties,
 			Metadata:     originalZone.Metadata,
-		}
-
-		newZone, err := s.CreateZone(newZoneInput)
+		})
 		if err != nil {
 			log.Printf("[Dezone] WARNING: Failed to create new zone for split component %d: %v", i, err)
 			continue
 		}
 
-		log.Printf("[Dezone] Created new zone %d for split component %d", newZone.ID, i)
+		log.Printf("[Dezone] Created new zone %d for split component %d (inserted directly, bypassing merge)", newZone.ID, i)
 		resultZones = append(resultZones, newZone)
 	}
 
 	return resultZones, nil
+}
+
+// insertZoneDirect inserts a zone directly into the database without going through
+// merge logic or conflict resolution. Used for split components to prevent them
+// from being merged back with the original group.
+func (s *ZoneStorage) insertZoneDirect(input *ZoneCreateInput) (*Zone, error) {
+	if input == nil {
+		return nil, fmt.Errorf("input cannot be nil")
+	}
+	
+	owner := sql.NullInt64{Valid: false}
+	if input.OwnerID != nil {
+		owner = sql.NullInt64{Int64: *input.OwnerID, Valid: true}
+	}
+
+	query := `
+		INSERT INTO zones (name, zone_type, geometry, floor, owner_id, is_system_zone, properties, metadata)
+		VALUES ($1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 0), $4, $5, $6, $7, $8)
+		RETURNING id, name, zone_type, floor, owner_id, is_system_zone,
+		          properties, metadata, ST_AsGeoJSON(geometry), ST_Area(normalize_zone_geometry_for_area(geometry)),
+		          created_at, updated_at
+	`
+
+	row := s.db.QueryRow(
+		query,
+		input.Name,
+		input.ZoneType,
+		string(input.Geometry),
+		input.Floor,
+		owner,
+		input.IsSystemZone,
+		nullableJSONString(input.Properties),
+		nullableJSONString(input.Metadata),
+	)
+
+	zone, err := scanZone(row)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert zone directly: %w", err)
+	}
+
+	return zone, nil
 }
 
 // GetZoneByID retrieves a zone by its identifier.

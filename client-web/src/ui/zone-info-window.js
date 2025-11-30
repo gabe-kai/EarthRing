@@ -199,7 +199,17 @@ export function showZoneInfoWindow(zone, onDelete) {
     const dezoneButton = document.getElementById('zone-info-dezone');
     if (dezoneButton) {
       dezoneButton.addEventListener('click', async () => {
-        if (!confirm(`Are you sure you want to delete zone "${zone.name || zone.id}"?`)) {
+        const { showConfirmationModal } = await import('./game-modal.js');
+        const confirmed = await showConfirmationModal({
+          title: 'Delete Zone',
+          message: `Are you sure you want to delete zone "${zone.name || zone.id}"?`,
+          checkboxLabel: 'I understand this zone will be permanently deleted',
+          confirmText: 'Delete',
+          cancelText: 'Cancel',
+          confirmColor: '#ff4444'
+        });
+        
+        if (!confirmed) {
           return;
         }
         
