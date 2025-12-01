@@ -6,19 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 )
 
 // SetupZoneRoutes registers zone management routes.
 func SetupZoneRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	handlers := NewZoneHandlers(db, cfg)
-
-	jwtService := auth.NewJWTService(cfg)
-	passwordService := auth.NewPasswordService(cfg)
-	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-
-	authMiddleware := authHandlers.AuthMiddleware
+	authMiddleware := setupAuthMiddleware(db, cfg)
 	userRateLimit := UserRateLimitMiddleware(200, 1*time.Minute)
 
 	zoneHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

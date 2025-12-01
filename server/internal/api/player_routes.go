@@ -6,21 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 )
 
 // SetupPlayerRoutes registers player management routes.
 func SetupPlayerRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	handlers := NewPlayerHandlers(db, cfg)
-
-	// Create auth handlers for middleware
-	jwtService := auth.NewJWTService(cfg)
-	passwordService := auth.NewPasswordService(cfg)
-	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-
-	// Apply authentication middleware to all player routes
-	authMiddleware := authHandlers.AuthMiddleware
+	authMiddleware := setupAuthMiddleware(db, cfg)
 
 	// Apply per-user rate limiting (500 requests per minute per user)
 	userRateLimit := UserRateLimitMiddleware(500, 1*time.Minute)

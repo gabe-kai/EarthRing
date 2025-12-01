@@ -27,6 +27,15 @@ func SetupAuthRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/api/auth/logout", authRateLimit(http.HandlerFunc(authHandlers.Logout)))
 }
 
+// setupAuthMiddleware creates JWT service, password service, auth handlers, and returns the auth middleware.
+// This helper function eliminates code duplication across route setup functions.
+func setupAuthMiddleware(db *sql.DB, cfg *config.Config) func(http.Handler) http.Handler {
+	jwtService := auth.NewJWTService(cfg)
+	passwordService := auth.NewPasswordService(cfg)
+	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
+	return authHandlers.AuthMiddleware
+}
+
 // SecurityHeadersMiddleware wraps auth.SecurityHeadersMiddleware for use in main
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return auth.SecurityHeadersMiddleware(next)

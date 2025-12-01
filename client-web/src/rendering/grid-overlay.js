@@ -6,7 +6,6 @@ const DEFAULTS = {
   majorSpacing: 5,
   minorSpacing: 1,
   fadeStart: 0.8,
-  elevation: 0.002,
   // LOD settings: hide minor lines when zoomed out
   minorLineMaxHeight: 300, // Hide minor lines when camera > 300m above grid
   // Performance settings: reduce update frequency
@@ -479,12 +478,12 @@ export class GridOverlay {
     let verticalIndexOffset = 0;
     const verticalRemainder = MOD(worldX, spacing);
 
-      for (let k = -steps; k <= steps; k++) {
+    for (let k = -steps; k <= steps; k++) {
       const localX = k * spacing - verticalRemainder;
       // Skip if this is a major line
       if (Math.abs(MOD(localX, this.settings.majorSpacing)) < 0.01) {
-          continue;
-        }
+        continue;
+      }
       
       if (localX < -radius - spacing || localX > radius + spacing) {
         continue;
@@ -545,13 +544,12 @@ export class GridOverlay {
     const vertices = [];
     const distances = [];
     const indices = [];
-    const indexOffset = 0;
 
     pushThickLineVertices(
       vertices,
       distances,
       indices,
-      indexOffset,
+      0, // indexOffset
       'horizontal',
       -xExtent,
       xExtent,
@@ -574,45 +572,6 @@ export class GridOverlay {
     );
   }
 
-  updateCenterLine(radius) {
-    this.axisLinesGroup.traverse((child) => {
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-    });
-    this.axisLinesGroup.clear();
-
-    const vertices = [];
-    const distances = [];
-    const indices = [];
-    const indexOffset = 0;
-    
-    pushThickLineVertices(
-      vertices,
-      distances,
-      indices,
-      indexOffset,
-      'horizontal',
-      -radius,
-      radius,
-      0,
-      0,
-      THICKNESS_STYLES.axis
-    );
-
-    if (!vertices.length) {
-      return;
-    }
-
-    this.updateOrCreateGeometry(
-      'axis',
-      vertices,
-      distances,
-      indices,
-      this.axisLinesGroup,
-      this.axisMaterial
-    );
-  }
 
   updateFade() {
     // Update shader uniforms for fade effect (only if values changed)
@@ -637,12 +596,6 @@ export class GridOverlay {
     }
   }
 
-  clearLines() {
-    // Remove children from groups but keep geometries and line segments for reuse
-    // Only dispose if we're shutting down (handled in dispose())
-    // Note: We don't actually clear here since we're reusing line segments
-    // The updateOrCreateGeometry function will handle adding/updating
-  }
   
   /**
    * Update or create a geometry with new vertex data
@@ -739,7 +692,6 @@ export class GridOverlay {
     this.reusableGeometries = {};
     
     // Clear groups (geometries already disposed above)
-    this.clearLines();
     
     // Dispose materials
     this.majorHorizontalMaterial.dispose();

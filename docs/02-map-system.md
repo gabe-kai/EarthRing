@@ -115,13 +115,13 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 - **+Y axis**: 90°E on the equator
 - **+Z axis**: North Pole
 - **Usage**: All absolute positions in 3D space, physics, rendering, inter-ring distances
-- **Kongo Hub Position**: ER0 = (KongoHubRadius, 0, 0) where KongoHubRadius = 6,878,137 m
+- **Pillar of Kongo Position** (Hub 0): ER0 = (KongoHubRadius, 0, 0) where KongoHubRadius = 6,878,137 m
 
 **2. EarthRing Coordinate Frame**
 
 **RingPolar (theta, r, z):**
 - **theta**: angle around ring in radians
-  - theta = 0 at Kongo Hub
+  - theta = 0° at Pillar of Kongo (Hub 0)
   - increases eastward
   - wraps at ±π (International Date Line, opposite Kongo)
 - **r**: radial offset from ring's centerline in meters
@@ -133,7 +133,7 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 
 **RingArc (s, r, z):**
 - **s**: arc length along ring in meters
-  - s = 0 at Kongo Hub
+  - s = 0 at Pillar of Kongo (Hub 0)
   - s = theta * R_ring
   - wraps at ring circumference (264,000 km)
 - **r**: same as RingPolar
@@ -358,18 +358,18 @@ else:
 
 **Pillar/Elevator Hubs** (12 stations at regular intervals): ✅ **IMPLEMENTED**
 ```
-Hub 0:  Position 0 km (0 meters)
-Hub 1:  Position 22,000 km (22,000,000 meters)
-Hub 2:  Position 44,000 km (44,000,000 meters)
-Hub 3:  Position 66,000 km (66,000,000 meters)
-Hub 4:  Position 88,000 km (88,000,000 meters)
-Hub 5:  Position 110,000 km (110,000,000 meters)
-Hub 6:  Position 132,000 km (132,000,000 meters)
-Hub 7:  Position 154,000 km (154,000,000 meters)
-Hub 8:  Position 176,000 km (176,000,000 meters)
-Hub 9:  Position 198,000 km (198,000,000 meters)
-Hub 10: Position 220,000 km (220,000,000 meters)
-Hub 11: Position 242,000 km (242,000,000 meters)
+Hub 0:  Pillar of Kongo      - Position 0 km (0 meters, theta = 0°)
+Hub 1:  Pillar of Kilima     - Position 22,000 km (22,000,000 meters, theta = 30°)
+Hub 2:  Pillar of Laccadé   - Position 44,000 km (44,000,000 meters, theta = 60°)
+Hub 3:  Pillar of Nusantara - Position 66,000 km (66,000,000 meters, theta = 90°)
+Hub 4:  Pillar of Makassar   - Position 88,000 km (88,000,000 meters, theta = 120°)
+Hub 5:  Pillar of Arafura    - Position 110,000 km (110,000,000 meters, theta = 150°)
+Hub 6:  Pillar of Kirana     - Position 132,000 km (132,000,000 meters, theta = 180°)
+Hub 7:  Pillar of Polynesya  - Position 154,000 km (154,000,000 meters, theta = 210°)
+Hub 8:  Pillar of Andenor    - Position 176,000 km (176,000,000 meters, theta = 240°)
+Hub 9:  Pillar of Quito Prime - Position 198,000 km (198,000,000 meters, theta = 270°)
+Hub 10: Pillar of Solamazon   - Position 220,000 km (220,000,000 meters, theta = 300°)
+Hub 11: Pillar of Atlantica   - Position 242,000 km (242,000,000 meters, theta = 330°)
 ```
 
 **Implementation Details**:
