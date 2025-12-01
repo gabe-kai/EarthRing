@@ -579,6 +579,137 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     return zones
 
 
+def generate_chunk_agricultural_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate agricultural zones in free space between stations.
+    
+    Creates two agricultural zones on either side of the restricted zone:
+    - North agricultural zone: from north edge of restricted zone to north edge of chunk
+    - South agricultural zone: from south edge of restricted zone to south edge of chunk
+    
+    These zones are only generated outside station flare areas (where there's free space
+    and no industrial/commercial zones). They are NOT system zones, allowing players to
+    dezone or replace them with other zone types.
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if in station flare area)
+    """
+    # Only generate agricultural zones outside station flare areas (free space between stations)
+    if is_within_station_flare_area(chunk_index):
+        return []
+    
+    # Calculate chunk boundaries
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+    
+    # Sample zone width at multiple points along the chunk
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    if sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
+    
+    # Build north agricultural zone (negative Y side)
+    # North zone goes from -half_width (restricted zone edge) to -chunk_half_width (chunk edge)
+    north_inner_edge = []  # Inner edge (touching restricted zone)
+    north_outer_edge = []  # Outer edge (chunk edge)
+    
+    for x_pos in sample_points:
+        # Restricted zone half-width at this position
+        restricted_half_width = calculate_restricted_zone_width(x_pos)
+        
+        # Chunk half-width at this position (using stations.calculate_flare_width)
+        chunk_width = stations.calculate_flare_width(x_pos)
+        chunk_half_width = chunk_width / 2.0
+        
+        # North zone: from -restricted_half_width to -chunk_half_width
+        north_inner_edge.append([x_pos, -restricted_half_width])
+        north_outer_edge.append([x_pos, -chunk_half_width])
+    
+    # Reverse outer edge to connect in order
+    north_outer_edge.reverse()
+    north_coordinates = [north_inner_edge + north_outer_edge + [north_inner_edge[0]]]
+    
+    # Build south agricultural zone (positive Y side)
+    # South zone goes from +half_width (restricted zone edge) to +chunk_half_width (chunk edge)
+    south_inner_edge = []  # Inner edge (touching restricted zone)
+    south_outer_edge = []  # Outer edge (chunk edge)
+    
+    for x_pos in sample_points:
+        # Restricted zone half-width at this position
+        restricted_half_width = calculate_restricted_zone_width(x_pos)
+        
+        # Chunk half-width at this position
+        chunk_width = stations.calculate_flare_width(x_pos)
+        chunk_half_width = chunk_width / 2.0
+        
+        # South zone: from +restricted_half_width to +chunk_half_width
+        south_inner_edge.append([x_pos, restricted_half_width])
+        south_outer_edge.append([x_pos, chunk_half_width])
+    
+    # Reverse outer edge to connect in order
+    south_outer_edge.reverse()
+    south_coordinates = [south_inner_edge + south_outer_edge + [south_inner_edge[0]]]
+    
+    # Create zone dictionaries
+    # NOTE: is_system_zone = False so players can dezone or replace these zones
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Agricultural Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "agricultural",
+                "floor": floor,
+                "is_system_zone": False,  # NOT a system zone - can be dezoned/replaced
+                "properties": {
+                    "purpose": "default_agricultural",
+                    "description": "Default agricultural zone - can be dezoned or replaced by players",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Agricultural Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "agricultural",
+                "floor": floor,
+                "is_system_zone": False,  # NOT a system zone - can be dezoned/replaced
+                "properties": {
+                    "purpose": "default_agricultural",
+                    "description": "Default agricultural zone - can be dezoned or replaced by players",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+    
+    return zones
+
+
 def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     """
     Generate a chunk with smooth curved ring floor geometry.
@@ -626,8 +757,11 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Generate commercial zones interspersed within industrial zones at chunk centers
     commercial_zones = generate_chunk_commercial_zones(floor, chunk_index)
     
+    # Generate agricultural zones in free space between stations (outside station flare areas)
+    agricultural_zones = generate_chunk_agricultural_zones(floor, chunk_index)
+    
     # Combine all zones
-    all_zones = [restricted_zone] + industrial_zones + commercial_zones
+    all_zones = [restricted_zone] + industrial_zones + commercial_zones + agricultural_zones
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",

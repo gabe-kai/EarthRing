@@ -44,7 +44,7 @@ See [Coordinate System Migration](docs/refactor/coordinate-system-migration.md) 
 - **Seamless chunk wrapping**: The renderer shifts each chunk by whole ring circumferences so the camera always sees the nearest copy (e.g. chunk `263999` renders directly adjacent to chunk `0` with no gap or overlap).
 - **Station flare visualization**: Variable-width geometry coming from the procedural service (including the pillar seam plateau) is rendered directly in the client, so narrow, wide, and taper segments all appear exactly as generated.
 - **Chunk compression**: Geometry is compressed using custom binary format + gzip, achieving 2.6-3.1:1 compression ratios. Compression/decompression is automatic and transparent.
-- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Polygon, Paintbrush, Dezone), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted, Dezone). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
+- **Zone overlays & toolbar**: Authenticated players can load nearby zones from the REST API and view them as world-anchored translucent polygons with colored outlines. A bottom toolbar provides zone type selection, drawing tools (Rectangle, Circle, Polygon, Paintbrush, Dezone), and controls for grid visibility and per-zone-type visibility (Residential, Commercial, Industrial, Mixed-Use, Park, Agricultural, Restricted, Dezone). Zones remain fully visible regardless of camera position, while the grid fades around the camera. Zone editor includes create, update, delete, and selection functionality with an info window for selected zones.
 - **Active Floor System**: The player can select an active floor (-2 to +2) independent of camera elevation. All game content (chunks, zones, grid, buildings, NPCs) is loaded and rendered for the selected floor, allowing the camera to zoom out for a wider view while keeping actions on the chosen floor. The active floor can be changed using the `+`/`−` buttons in the zones toolbar (click "Z" icon to expand).
 - **Chunk mesh reuse & precision fixes**: Chunk geometry is now rendered relative to each chunk’s local origin and we cache meshes while the camera is stable. This eliminated the far-side platform flicker and prevents precision loss when working ~132,000 km away from the origin.
 - **Server-driven streaming**: The client subscribes to chunk/zone streams via `stream_subscribe` and sends `stream_update_pose` messages as the camera moves. The server computes chunk and zone deltas (added/removed) and streams them efficiently via `stream_delta` messages, eliminating the need for client-side chunk selection logic. Chunks automatically unload behind the camera as you move. See [Streaming System Documentation](docs/07-streaming-system.md) for complete details.
@@ -238,7 +238,7 @@ npm run dev
 - **Zones Toolbar**: Click the "Z" icon on the left side of the screen to expand the zones toolbar:
   - Grid visibility toggle (show/hide the 250m circular LineSegments grid with fade + LOD)
   - All Zones toggle (show/hide all zones at once)
-  - Per-zone-type visibility toggles (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
+  - Per-zone-type visibility toggles (Residential, Commercial, Industrial, Mixed-Use, Park, Agricultural, Restricted)
   - Each toggle shows current state (green "Hide" when visible, red "Show" when hidden)
 - **Zone UI Panel**: Click the **Zones** button (user info bar) to launch the management panel:
   - Load & visualize nearby zones using `GET /api/zones/area` (automatically fetches zones around camera)
@@ -250,7 +250,7 @@ npm run dev
   - `GET|PUT|DELETE /api/zones/{zone_id}` – manage a specific zone
   - `GET /api/zones/area?floor&min_x&min_y&max_x&max_y` – bounding-box query (used by overlays)
   - `GET /api/zones/owner/{owner_id}` – list zones for the authenticated owner (restricted to self)
-- **Zone Types**: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
+- **Zone Types**: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Agricultural (sienna brown), Restricted (red)
 - **Rendering**: Zones are rendered as world-anchored translucent polygons with colored outlines, remaining fully visible regardless of camera position
 - **Conflict Resolution**: Player-created zones always claim their selected space from the player's own zones of different types. Zones of the same type and owner automatically merge. System zones and other players' zones are protected from claims.
 - **Rate limit**: 200 requests per minute per user; authentication required for all zone routes

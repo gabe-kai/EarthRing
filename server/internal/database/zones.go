@@ -1462,8 +1462,18 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 		}
 
 		// Check ownership - user must own the zone to modify it
-		if zone.OwnerID == nil || *zone.OwnerID != userID {
-			log.Printf("[Dezone] WARNING: Permission denied - user %d does not own zone %d", userID, zoneID)
+		// Exception: Allow dezone of unowned agricultural zones (default agricultural zones can be dezoned)
+		canDezone := false
+		if zone.OwnerID != nil && *zone.OwnerID == userID {
+			// User owns the zone - can dezone
+			canDezone = true
+		} else if zone.OwnerID == nil && zone.ZoneType == "agricultural" && !zone.IsSystemZone {
+			// Unowned agricultural zones (default agricultural zones) can be dezoned by anyone
+			canDezone = true
+		}
+		
+		if !canDezone {
+			log.Printf("[Dezone] WARNING: Permission denied - user %d cannot dezone zone %d (owner: %v, type: %s, system: %v)", userID, zoneID, zone.OwnerID, zone.ZoneType, zone.IsSystemZone)
 			continue
 		}
 
