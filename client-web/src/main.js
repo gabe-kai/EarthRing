@@ -289,6 +289,8 @@ window.addEventListener('auth:login', async () => {
     console.log('User logged in');
   }
   initializeAuthenticatedUser();
+  // Reset WebSocket auth failure flag on successful login
+  wsClient.resetAuthFailure();
   await connectWebSocket();
 });
 
@@ -297,6 +299,8 @@ window.addEventListener('auth:register', async () => {
     console.log('User registered');
   }
   initializeAuthenticatedUser();
+  // Reset WebSocket auth failure flag on successful registration
+  wsClient.resetAuthFailure();
   await connectWebSocket();
 });
 
