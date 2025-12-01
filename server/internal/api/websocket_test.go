@@ -247,6 +247,101 @@ func TestWebSocketHandlers_HandleWebSocket_Authentication(t *testing.T) {
 	}
 }
 
+func TestWebSocketHandlers_HandleWebSocket_ExpiredTokenRateLimiting(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+
+	// Create players table
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS players (
+			id SERIAL PRIMARY KEY,
+			username VARCHAR(50) UNIQUE NOT NULL,
+			email VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			last_login TIMESTAMP,
+			level INTEGER DEFAULT 1,
+			experience_points BIGINT DEFAULT 0,
+			currency_amount BIGINT DEFAULT 0,
+			current_position POINT,
+			current_floor INTEGER DEFAULT 0,
+			metadata JSONB
+		)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create players table: %v", err)
+	}
+
+	cfg := &config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:     "test-secret-key-for-testing-only",
+			RefreshSecret: "test-refresh-secret-key-for-testing-only",
+			JWTExpiration: -1 * time.Hour, // Negative expiration to create expired tokens
+		},
+	}
+
+	profiler := performance.NewProfiler(false)
+	handlers := NewWebSocketHandlers(db, cfg, profiler)
+	go handlers.GetHub().Run()
+
+	// Create a test player
+	passwordService := auth.NewPasswordService(cfg)
+	hashedPassword, err := passwordService.HashPassword("Password123!")
+	if err != nil {
+		t.Fatalf("Failed to hash password: %v", err)
+	}
+	username := testutil.RandomUsername()
+	email := testutil.RandomEmail()
+
+	var playerID int64
+	err = db.QueryRow(`
+		INSERT INTO players (username, email, password_hash, level, experience_points, currency_amount)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, username, email, hashedPassword, 1, 0, 0).Scan(&playerID)
+	if err != nil {
+		t.Fatalf("Failed to create test player: %v", err)
+	}
+
+	jwtService := auth.NewJWTService(cfg)
+	expiredToken, err := jwtService.GenerateAccessToken(playerID, username, "player")
+	if err != nil {
+		t.Fatalf("Failed to generate expired token: %v", err)
+	}
+
+	// Verify token is expired
+	_, err = jwtService.ValidateAccessToken(expiredToken)
+	if err == nil {
+		t.Fatal("Expected token to be expired, but validation succeeded")
+	}
+	if !strings.Contains(err.Error(), "expired") && !strings.Contains(err.Error(), "Expired") {
+		t.Fatalf("Expected expired token error, got: %v", err)
+	}
+
+	// Test: Multiple requests with expired token from same IP
+	// The rate limiting should suppress log messages but still return 401
+	clientIP := "192.168.1.100"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest("GET", fmt.Sprintf("/ws?token=%s", expiredToken), nil)
+		req.RemoteAddr = clientIP + ":12345"
+		w := httptest.NewRecorder()
+		handlers.HandleWebSocket(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Request %d: Expected status 401, got %d", i+1, w.Code)
+		}
+	}
+
+	// Test: Expired token from different IP should also return 401
+	req := httptest.NewRequest("GET", fmt.Sprintf("/ws?token=%s", expiredToken), nil)
+	req.RemoteAddr = "192.168.1.200:12345"
+	w := httptest.NewRecorder()
+	handlers.HandleWebSocket(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401 for different IP, got %d", w.Code)
+	}
+}
+
 func TestWebSocketHandlers_HandleWebSocket_VersionNegotiation(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	testutil.CloseDB(t, db)

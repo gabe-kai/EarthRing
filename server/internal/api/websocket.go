@@ -34,6 +34,9 @@ const (
 
 	// Write timeout (10 seconds)
 	writeTimeout = 10 * time.Second
+
+	// Rate limit for expired token log messages (log once per minute per IP)
+	expiredTokenLogInterval = 1 * time.Minute
 )
 
 // WebSocketConnection represents an active WebSocket connection
@@ -150,6 +153,9 @@ type WebSocketHandlers struct {
 	streamManager    *streaming.Manager
 	profiler         *performance.Profiler
 	upgrader         websocket.Upgrader
+	// Rate limit expired token log messages per IP
+	expiredTokenLogs map[string]time.Time
+	expiredTokenMu   sync.RWMutex
 }
 
 // NewWebSocketHandlers creates a new WebSocket handlers instance
@@ -176,6 +182,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 		zoneStorage:      database.NewZoneStorage(db),
 		streamManager:    streaming.NewManager(),
 		profiler:         profiler,
+		expiredTokenLogs: make(map[string]time.Time),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -205,7 +212,30 @@ func (h *WebSocketHandlers) HandleWebSocket(w http.ResponseWriter, r *http.Reque
 	// Validate token
 	claims, err := h.jwtService.ValidateAccessToken(token)
 	if err != nil {
-		log.Printf("WebSocket token validation failed: %v", err)
+		// Check if error is due to expired token
+		errStr := err.Error()
+		isExpired := strings.Contains(errStr, "expired") || strings.Contains(errStr, "Expired")
+
+		// Rate limit expired token log messages (log once per minute per IP)
+		if isExpired {
+			clientIP := getClientIP(r)
+
+			h.expiredTokenMu.RLock()
+			lastLog, exists := h.expiredTokenLogs[clientIP]
+			h.expiredTokenMu.RUnlock()
+
+			shouldLog := !exists || time.Since(lastLog) >= expiredTokenLogInterval
+
+			if shouldLog {
+				log.Printf("WebSocket token validation failed: %v (suppressing further expired token logs for this IP for %v)", err, expiredTokenLogInterval)
+				h.expiredTokenMu.Lock()
+				h.expiredTokenLogs[clientIP] = time.Now()
+				h.expiredTokenMu.Unlock()
+			}
+		} else {
+			// Log non-expired token errors normally
+			log.Printf("WebSocket token validation failed: %v", err)
+		}
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
 	}

@@ -11,6 +11,8 @@ import * as authService from '../auth/auth-service.js';
 vi.mock('../auth/auth-service.js', () => ({
   getAccessToken: vi.fn(),
   handleAuthenticationFailure: vi.fn(),
+  isTokenExpired: vi.fn(),
+  ensureValidToken: vi.fn(),
 }));
 
 // Mock WebSocket
@@ -54,10 +56,13 @@ describe('WebSocket Client - Authentication Error Handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authService.getAccessToken.mockReturnValue('test-token');
+    authService.isTokenExpired.mockReturnValue(false);
+    authService.ensureValidToken.mockResolvedValue(true);
     // Reset wsClient state
     if (wsClient.ws) {
       wsClient.disconnect();
     }
+    wsClient.resetAuthFailure(); // Reset auth failure flag
   });
 
   afterEach(() => {
@@ -268,6 +273,204 @@ describe('WebSocket Client - Authentication Error Handling', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(authService.handleAuthenticationFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Token expiration handling', () => {
+    it('should check token expiration before connecting', async () => {
+      authService.isTokenExpired.mockReturnValue(false);
+      
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      expect(authService.isTokenExpired).toHaveBeenCalled();
+    });
+
+    it('should attempt token refresh if expired before connecting', async () => {
+      authService.isTokenExpired.mockReturnValue(true);
+      authService.ensureValidToken.mockResolvedValue(true);
+      
+      const connectPromise = wsClient.connect();
+      // Wait a bit for WebSocket to be created
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const mockWS = wsClient.ws;
+      expect(mockWS).not.toBeNull();
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      expect(authService.isTokenExpired).toHaveBeenCalled();
+      expect(authService.ensureValidToken).toHaveBeenCalled();
+    });
+
+    it('should prevent connection and trigger auth failure if refresh fails', async () => {
+      authService.isTokenExpired.mockReturnValue(true);
+      authService.ensureValidToken.mockResolvedValue(false);
+
+      await expect(wsClient.connect()).rejects.toThrow('Token expired. Please log in again.');
+
+      expect(authService.isTokenExpired).toHaveBeenCalled();
+      expect(authService.ensureValidToken).toHaveBeenCalled();
+      
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Verify auth failure was detected
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should throw error if trying to connect after auth failure', async () => {
+      // Simulate auth failure
+      wsClient.authFailureDetected = true;
+
+      await expect(wsClient.connect()).rejects.toThrow('Authentication failed. Please log in again.');
+    });
+  });
+
+  describe('Authentication failure close codes', () => {
+    it('should detect auth failure on close code 1008', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(1008, 'Policy violation');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close code 4001', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(4001, 'Authentication failed');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close code 4002', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(4002, 'Invalid token');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close code 4003', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(4003, 'Token expired');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close reason containing "authentication"', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      // Use lowercase "authentication" to match the case-sensitive includes check
+      mockWS._simulateClose(1000, 'authentication required');
+
+      // The authFailureDetected flag is set synchronously, but wait a bit for async operations
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // The close handler checks event.reason?.includes('authentication')
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close reason containing "token"', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(1000, 'Invalid token provided');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should detect auth failure on close reason containing "expired"', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(1000, 'Token has expired');
+
+      // Wait for async handleAuthenticationFailure call
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(true);
+    });
+
+    it('should not treat normal close codes as auth failure', async () => {
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      mockWS._simulateClose(1000, 'Normal closure');
+
+      // Wait a bit to ensure no auth failure is triggered
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(wsClient.authFailureDetected).toBe(false);
+    });
+  });
+
+  describe('resetAuthFailure', () => {
+    it('should reset auth failure flag and reconnect attempts', () => {
+      wsClient.authFailureDetected = true;
+      wsClient.reconnectAttempts = 5;
+
+      wsClient.resetAuthFailure();
+
+      expect(wsClient.authFailureDetected).toBe(false);
+      expect(wsClient.reconnectAttempts).toBe(0);
+    });
+
+    it('should allow connection after reset', async () => {
+      // Set auth failure
+      wsClient.authFailureDetected = true;
+      
+      // Verify connection is blocked
+      await expect(wsClient.connect()).rejects.toThrow('Authentication failed');
+
+      // Reset and verify connection is allowed
+      wsClient.resetAuthFailure();
+      
+      const connectPromise = wsClient.connect();
+      const mockWS = wsClient.ws;
+      mockWS._simulateOpen();
+      await connectPromise;
+
+      expect(wsClient.ws).toBeDefined();
     });
   });
 });

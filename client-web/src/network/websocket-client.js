@@ -3,7 +3,7 @@
  * Handles WebSocket connections with version negotiation and authentication
  */
 
-import { getAccessToken } from '../auth/auth-service.js';
+import { getAccessToken, isTokenExpired, ensureValidToken } from '../auth/auth-service.js';
 import { getAPIURL } from '../config.js';
 
 // WebSocket readyState constants
@@ -27,6 +27,7 @@ class WebSocketClient {
     this.onOpenCallbacks = [];
     this.onCloseCallbacks = [];
     this.onErrorCallbacks = [];
+    this.authFailureDetected = false; // Track if we've detected an auth failure to prevent reconnection
   }
 
   /**
@@ -36,6 +37,24 @@ class WebSocketClient {
     if (this.ws && this.ws.readyState === WS_OPEN) {
       console.log('WebSocket already connected');
       return;
+    }
+
+    // Check if we've detected an auth failure - don't try to reconnect
+    if (this.authFailureDetected) {
+      throw new Error('Authentication failed. Please log in again.');
+    }
+
+    // Check if token is expired and attempt refresh before connecting
+    if (isTokenExpired()) {
+      const tokenValid = await ensureValidToken();
+      if (!tokenValid) {
+        // Token refresh failed, authentication is required
+        this.authFailureDetected = true;
+        import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+          handleAuthenticationFailure('Token expired and refresh failed');
+        });
+        throw new Error('Token expired. Please log in again.');
+      }
     }
 
     const token = getAccessToken();
@@ -89,6 +108,16 @@ class WebSocketClient {
 
         this.ws.onerror = (error) => {
           console.error('WebSocket error:', error);
+          // If connection fails to open, check if token is expired
+          // This handles cases where the HTTP handshake fails with 401
+          if (this.ws.readyState === WS_CLOSED || this.ws.readyState === WS_CLOSING) {
+            if (isTokenExpired()) {
+              this.authFailureDetected = true;
+              import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+                handleAuthenticationFailure('WebSocket connection failed - token expired');
+              });
+            }
+          }
           this.onErrorCallbacks.forEach(callback => callback(error));
         };
 
@@ -96,11 +125,33 @@ class WebSocketClient {
           console.log('WebSocket closed:', event.code, event.reason);
           this.ws = null;
           
+          // Check for authentication failure close codes
+          // 1008 = Policy Violation (often used for auth failures)
+          // 1003 = Invalid Data (can be used for invalid tokens)
+          // 4001-4003 = Custom codes for authentication errors
+          const isAuthFailure = event.code === 1008 || event.code === 1003 || 
+                                (event.code >= 4001 && event.code <= 4003) ||
+                                event.reason?.includes('authentication') ||
+                                event.reason?.includes('token') ||
+                                event.reason?.includes('expired');
+          
+          if (isAuthFailure) {
+            console.error('[WebSocket] Authentication failure detected:', event.code, event.reason);
+            this.authFailureDetected = true;
+            // Import and call handleAuthenticationFailure
+            import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+              handleAuthenticationFailure('WebSocket authentication failed');
+            });
+            // Don't attempt to reconnect on auth failure
+            this.onCloseCallbacks.forEach(callback => callback(event));
+            return;
+          }
+          
           // Call all close callbacks
           this.onCloseCallbacks.forEach(callback => callback(event));
           
-          // Attempt to reconnect if not a normal closure
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          // Attempt to reconnect if not a normal closure and no auth failure
+          if (event.code !== 1000 && !this.authFailureDetected && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
             setTimeout(() => this.connect(), this.reconnectDelay);
@@ -120,6 +171,16 @@ class WebSocketClient {
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
     }
+    // Reset auth failure flag on manual disconnect
+    this.authFailureDetected = false;
+  }
+
+  /**
+   * Reset auth failure flag (called after successful login)
+   */
+  resetAuthFailure() {
+    this.authFailureDetected = false;
+    this.reconnectAttempts = 0;
   }
 
   /**
