@@ -82,6 +82,12 @@ Detailed specifications for system components.
 **Key Topics**: Zone types, polygon definition, overlap detection, area calculation, floor spanning, transportation integration  
 **Related**: [Game Mechanics](10-game-mechanics.md), [Database Schema](03-database-schema.md)
 
+### Structure System
+**Status**: ✅ **PARTIALLY IMPLEMENTED** (CRUD + validation + zone checks complete; collision/height/access rules pending)  
+**Description**: Structure placement, validation, and rendering system.  
+**Key Topics**: Structure placement API, validation (zones, collisions, height limits), storage (PostGIS), rendering (3D models, LOD), procedural integration  
+**Related**: [Database Schema](03-database-schema.md), [Client Architecture](06-client-architecture.md), [Implementation Phases](../implementation-phases.md)
+
 ---
 
 ## Game Mechanics
@@ -189,7 +195,7 @@ Located in [`performance/`](performance/):
 - [`grid-overlay-performance-analysis.md`](performance/grid-overlay-performance-analysis.md) - Grid overlay performance analysis
 
 ### Documentation Analysis
-- [`DOCUMENTATION_GAP_ANALYSIS.md`](DOCUMENTATION_GAP_ANALYSIS.md) - Comprehensive documentation review and gap analysis
+- [`DOCUMENTATION_REVIEW_2024.md`](DOCUMENTATION_REVIEW_2024.md) - Comprehensive documentation review and gap analysis (December 2024)
 
 ---
 

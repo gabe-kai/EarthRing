@@ -499,7 +499,7 @@ The client implements server-driven streaming for efficient chunk and zone loadi
    - Prevents "Not authenticated" errors on cold starts
    - Client shows auth UI until tokens are present, then automatically subscribes
 
-**See**: [Streaming System Documentation](docs/07-streaming-system.md) for complete server-side implementation details.
+**See**: [Streaming System Documentation](07-streaming-system.md) for complete server-side implementation details.
 
 **Chunk UI** (`client-web/src/ui/chunk-ui.js`):
 - Chunk metadata retrieval interface
@@ -1044,7 +1044,7 @@ setCameraPositionFromEarthRing(camera, { x: 1000, y: 0, z: 0 });
 
 Abstract graphics operations to support multiple rendering backends (Three.js, Unreal, etc.). This layer also handles coordinate system conversion between EarthRing's convention (X=ring, Y=width, Z=floor) and each rendering engine's native convention.
 
-**Coordinate Conversion**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js` and rendering utilities in `client-web/src/utils/rendering.js`. See [Map System Design](../docs/02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements.
+**Coordinate Conversion**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js` and rendering utilities in `client-web/src/utils/rendering.js`. See [Map System Design](02-map-system.md#coordinate-system-convention) for details on coordinate system conventions and conversion requirements.
 
 The coordinate conversion utilities provide:
 - **EarthRing ↔ Three.js**: `toThreeJS()` and `fromThreeJS()` functions (Y-up, Z-forward)

@@ -32,8 +32,8 @@ def test_get_chunk_width():
     assert width_at_hub <= 25000.0
 
 
-def test_generate_empty_chunk():
-    """Test chunk generation (now generates smooth curved geometry in Phase 2)"""
+def test_generate_chunk():
+    """Test chunk generation (generates smooth curved geometry in Phase 2)"""
     floor = 0
     chunk_index = 100
     chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
@@ -59,7 +59,13 @@ def test_generate_empty_chunk():
     assert chunk["geometry"]["vertices"][0][0] == chunk_index * 1000.0  # X position
     assert chunk["geometry"]["vertices"][0][2] == floor  # Z position (floor)
     assert chunk["structures"] == []
-    assert chunk["zones"] == []
+    # Chunks now include default zones (restricted maglev zones)
+    assert isinstance(chunk["zones"], list)
+    assert len(chunk["zones"]) > 0  # Should have at least one default zone
+    # Check that zones have required fields
+    for zone in chunk["zones"]:
+        assert "geometry" in zone
+        assert "properties" in zone
     assert chunk["metadata"]["generated"] is True
     assert chunk["metadata"]["version"] == 2  # Phase 2 version
 

@@ -985,7 +985,7 @@ All WebSocket messages use JSON:
 2. **chunk_request** ❌ **REMOVED** (Replaced by server-driven streaming)
    - Legacy message type removed
    - Use `stream_subscribe` and `stream_update_pose` instead
-   - See [Streaming System documentation](docs/07-streaming-system.md) for current implementation
+   - See [Streaming System documentation](07-streaming-system.md) for current implementation
 
 3. **stream_subscribe** ✅ **IMPLEMENTED** (Server-Driven Streaming)
    ```json
@@ -1016,7 +1016,7 @@ All WebSocket messages use JSON:
    - **width_meters**: Width slice to include zones/procedural objects (future use)
    - **include_chunks** / **include_zones**: Opt into whichever streams the client supports
    - **Server Response**: `stream_ack` with `subscription_id` and initial `chunk_ids`
-   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#server-driven-streaming-contracts) for complete details
+   - **See**: [Streaming System Documentation](07-streaming-system.md#server-driven-streaming-contracts) for complete details
 
 4. **stream_update_pose** ✅ **IMPLEMENTED** (Server-Driven Streaming)
    ```json
@@ -1043,7 +1043,7 @@ All WebSocket messages use JSON:
    - **pose**: Updated camera/active floor snapshot
    - **Server Response**: `stream_pose_ack` with chunk deltas (`AddedChunks`, `RemovedChunks`)
    - **Delta Delivery**: Added chunks/zones sent asynchronously via `stream_delta` messages
-   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#pose-updates) for complete details
+   - **See**: [Streaming System Documentation](07-streaming-system.md#pose-updates) for complete details
 
 5. **player_move** ✅ **IMPLEMENTED**
    ```json
@@ -1158,7 +1158,7 @@ All WebSocket messages use JSON:
    - **Purpose**: Acknowledgment response to `stream_subscribe`
    - **subscription_id**: Server-assigned handle used for future `stream_update_pose` messages
    - **chunk_ids**: Current chunk window (derived using shared coordinate helpers)
-   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#acknowledgement) for complete details
+   - **See**: [Streaming System Documentation](07-streaming-system.md#acknowledgement) for complete details
 
 4. **stream_pose_ack** ✅ **IMPLEMENTED** (Server-Driven Streaming)
    ```json
@@ -1179,7 +1179,7 @@ All WebSocket messages use JSON:
    - **subscription_id**: Subscription ID from the pose update request
    - **chunk_delta**: Chunk IDs added and removed based on pose change
    - **Delta Delivery**: Added chunks/zones sent asynchronously via `stream_delta` messages
-   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#pose-updates) for complete details
+   - **See**: [Streaming System Documentation](07-streaming-system.md#pose-updates) for complete details
 
 5. **stream_delta** ✅ **IMPLEMENTED** (Server-Driven Streaming)
    ```json
@@ -1228,7 +1228,7 @@ All WebSocket messages use JSON:
    - **Zone-Chunk Binding**: Zones are embedded within chunk data in the `chunks` array, not sent separately. Each chunk object may contain a `zones` array with zones associated with that chunk.
    - **Delivery**: Sent asynchronously after `stream_pose_ack` when chunks/zones are ready
    - **Client Handling**: Client processes deltas automatically, extracting zones from chunk data and adding them to the zone manager. Zones are removed when their associated chunks are removed.
-   - **See**: [Streaming System Documentation](docs/07-streaming-system.md#delta-messages) for complete details
+   - **See**: [Streaming System Documentation](07-streaming-system.md#delta-messages) for complete details
 
 6. **chunk_data** ✅ **IMPLEMENTED** (Legacy - Still supported for compatibility)
    ```json

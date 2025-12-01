@@ -788,13 +788,3 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         },
     }
 
-
-# Backward compatibility: keep generate_empty_chunk for tests
-def generate_empty_chunk(floor: int, chunk_index: int, chunk_seed: int):
-    """
-    Generate an empty chunk (deprecated, use generate_chunk instead).
-
-    This function is kept for backward compatibility with tests.
-    New code should use generate_chunk().
-    """
-    return generate_chunk(floor, chunk_index, chunk_seed)

@@ -101,9 +101,9 @@ The EarthRing map represents an orbital ring structure around Earth, consisting 
 **Status**: ✅ **MIGRATION COMPLETE** - The coordinate system has been migrated from legacy X/Y/Z to ER0/EarthRing coordinates. Legacy coordinate support is maintained for backward compatibility. 
 
 **Related Documentation**:
-- [Coordinate System Migration](../refactor/coordinate-system-migration.md) - Migration process details
-- [Coordinate System Status](../refactor/coordinate-system-status.md) - Current implementation status
-- [Database Coordinate Migration](../refactor/database-coordinate-migration.md) - Database migration details
+- [Coordinate System Migration](refactor/coordinate-system-migration.md) - Migration process details
+- [Coordinate System Status](refactor/coordinate-system-status.md) - Current implementation status
+- [Database Coordinate Migration](refactor/database-coordinate-migration.md) - Database migration details
 - Server Implementation: `server/internal/ringmap/coordinates.go`
 - Client Implementation: `client-web/src/utils/coordinates-new.js`
 
@@ -214,7 +214,7 @@ Different 3D rendering engines use different coordinate conventions, requiring c
 - Conversion functions should be centralized and well-documented
 - Consider using a coordinate transform matrix for efficiency
 
-**Implementation Status**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js`. See [Client Architecture](../docs/06-client-architecture.md#utility-modules) for details.
+**Implementation Status**: ✅ **IMPLEMENTED** - Coordinate conversion utilities are available in `client-web/src/utils/coordinates.js`. See [Client Architecture](06-client-architecture.md#utility-modules) for details.
 
 **Important**: This conversion is **only** for rendering. All game logic, database queries, API responses, and internal calculations use the EarthRing convention (X=ring position, Y=width, Z=floor).
 
@@ -641,7 +641,7 @@ chunks := ringmap.ChunksInRange(5000.0, 2000)
 - Database-first loading strategy (generates only if not found)
 - Chunk deletion support (forces regeneration on next request)
 
-**Compression Details**: See `docs/07-streaming-system.md` for complete compression specification.
+**Compression Details**: See [Streaming System](07-streaming-system.md) for complete compression specification.
 
 ### Chunk Loading (Original Specification)
 - Load chunks in viewport plus buffer zone

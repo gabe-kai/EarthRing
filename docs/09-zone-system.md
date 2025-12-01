@@ -381,6 +381,37 @@ During rendering, zone coordinates are wrapped relative to the camera position:
 - Ensures zones and chunks appear/disappear together at boundaries
 - Prevents synchronization issues between zones and chunks
 
+## Zone Modifications
+
+### Editing Zones
+
+Players can edit existing zones using the zone editor tools. The zone editor provides:
+
+1. **Zone Selection**: Click on any zone to select it and view its details in the info window
+2. **Zone Deletion**: Delete selected zones using the "Dezone" button in the info window or zone UI panel
+3. **Zone Updates**: Modify zone properties (name, type, density) via the zone UI panel
+4. **Zone Creation**: Create new zones using drawing tools (Rectangle, Circle, Polygon, Paintbrush)
+
+**Note**: Advanced editing features (vertex manipulation, zone splitting) are planned for future implementation. The current system focuses on zone creation, selection, and deletion.
+
+### Zone Merging
+
+When zones of the same type and owner overlap, they are automatically merged into a single zone:
+
+- **Automatic Merging**: Zones of the same type and owner that overlap are merged during creation
+- **Conflict Resolution**: When zones of different types overlap, conflict resolution rules apply (see Zone Overlap section)
+- **Bisection**: When a new zone splits an existing zone, the existing zone is bisected into multiple zones
+
+### Zone Splitting
+
+Zone splitting occurs automatically when a new zone bisects an existing zone:
+
+- **Bisection Detection**: The system detects when a new zone splits an existing zone into multiple parts
+- **Automatic Splitting**: The existing zone is automatically split into multiple zones that don't overlap with the new zone
+- **Zone Preservation**: All original zone properties are preserved in the split zones
+
+**Status**: ✅ **IMPLEMENTED** - Zone merging and bisection are fully implemented in the server-side conflict resolution system.
+
 ## Transportation System
 
 [Rest of the document continues...]
