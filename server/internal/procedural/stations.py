@@ -76,21 +76,39 @@ class Station:
         self.station_type = station_type
 
 
-# Pillar/Elevator Hub locations (12 stations at regular intervals)
+# Pillar/Elevator Hub locations (12 stations at regular intervals, 30° apart)
 # Positions in meters: 0, 22,000 km, 44,000 km, etc.
+# Hub 0 is Pillar of Kongo (s = 0, theta = 0°)
 PILLAR_HUB_POSITIONS = [
-    0,  # Hub 0
-    22000000,  # Hub 1: 22,000 km
-    44000000,  # Hub 2: 44,000 km
-    66000000,  # Hub 3: 66,000 km
-    88000000,  # Hub 4: 88,000 km
-    110000000,  # Hub 5: 110,000 km
-    132000000,  # Hub 6: 132,000 km
-    154000000,  # Hub 7: 154,000 km
-    176000000,  # Hub 8: 176,000 km
-    198000000,  # Hub 9: 198,000 km
-    220000000,  # Hub 10: 220,000 km
-    242000000,  # Hub 11: 242,000 km
+    0,  # Hub 0: Pillar of Kongo (theta = 0°)
+    22000000,  # Hub 1: Pillar of Kilima (theta = 30°)
+    44000000,  # Hub 2: Pillar of Laccadé (theta = 60°)
+    66000000,  # Hub 3: Pillar of Nusantara (theta = 90°)
+    88000000,  # Hub 4: Pillar of Makassar (theta = 120°)
+    110000000,  # Hub 5: Pillar of Arafura (theta = 150°)
+    132000000,  # Hub 6: Pillar of Kirana (theta = 180°)
+    154000000,  # Hub 7: Pillar of Polynesya (theta = 210°)
+    176000000,  # Hub 8: Pillar of Andenor (theta = 240°)
+    198000000,  # Hub 9: Pillar of Quito Prime (theta = 270°)
+    220000000,  # Hub 10: Pillar of Solamazon (theta = 300°)
+    242000000,  # Hub 11: Pillar of Atlantica (theta = 330°)
+]
+
+# Pillar/Elevator Hub names (12 stations at regular intervals)
+# Names correspond to PILLAR_HUB_POSITIONS by index
+PILLAR_HUB_NAMES = [
+    "Pillar of Kongo",      # Hub 0 (theta = 0°)
+    "Pillar of Kilima",     # Hub 1 (theta = 30°)
+    "Pillar of Laccadé",    # Hub 2 (theta = 60°)
+    "Pillar of Nusantara",  # Hub 3 (theta = 90°)
+    "Pillar of Makassar",   # Hub 4 (theta = 120°)
+    "Pillar of Arafura",    # Hub 5 (theta = 150°)
+    "Pillar of Kirana",     # Hub 6 (theta = 180°)
+    "Pillar of Polynesya",  # Hub 7 (theta = 210°)
+    "Pillar of Andenor",    # Hub 8 (theta = 240°)
+    "Pillar of Quito Prime", # Hub 9 (theta = 270°)
+    "Pillar of Solamazon",  # Hub 10 (theta = 300°)
+    "Pillar of Atlantica",  # Hub 11 (theta = 330°)
 ]
 
 # Create station objects for pillar/elevator hubs

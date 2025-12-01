@@ -6,19 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 )
 
 // SetupAdminRoutes registers admin management routes.
 func SetupAdminRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	handlers := NewAdminHandlers(db, cfg)
-
-	jwtService := auth.NewJWTService(cfg)
-	passwordService := auth.NewPasswordService(cfg)
-	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-
-	authMiddleware := authHandlers.AuthMiddleware
+	authMiddleware := setupAuthMiddleware(db, cfg)
 	userRateLimit := UserRateLimitMiddleware(10, 1*time.Minute) // Lower rate limit for admin operations
 
 	adminHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

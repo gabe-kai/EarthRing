@@ -6,21 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 )
 
 // SetupChunkRoutes registers chunk metadata routes.
 func SetupChunkRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	handlers := NewChunkHandlers(db, cfg)
-
-	// Create auth handlers for middleware
-	jwtService := auth.NewJWTService(cfg)
-	passwordService := auth.NewPasswordService(cfg)
-	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-
-	// Apply authentication middleware to all chunk routes
-	authMiddleware := authHandlers.AuthMiddleware
+	authMiddleware := setupAuthMiddleware(db, cfg)
 
 	// Apply per-user rate limiting (100 requests per minute per user for chunk requests)
 	userRateLimit := UserRateLimitMiddleware(100, 1*time.Minute)

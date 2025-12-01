@@ -13,6 +13,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
+const (
+	healthCheckResponse = `{"status":"ok","service":"earthring-server"}`
+)
+
 // main starts the EarthRing game server.
 // It loads configuration, sets up HTTP routes for health checks and WebSocket connections,
 // then starts listening on the configured port.
@@ -104,7 +108,7 @@ func main() {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintf(w, `{"status":"ok","service":"earthring-server"}`); err != nil {
+	if _, err := fmt.Fprint(w, healthCheckResponse); err != nil {
 		log.Printf("Error writing health check response: %v", err)
 	}
 }

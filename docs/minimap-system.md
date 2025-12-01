@@ -11,7 +11,7 @@ The minimap system provides a 2D top-down view of the player's position and surr
 The minimap displays a title overlay at the bottom center showing:
 - **First line**: Location name (Ring or Hub name) and Floor number
   - Format: `"{Location} - F: {Floor}"`
-  - Example: `"Kongo Hub - F: 0"` or `"Ring - F: 0"`
+  - Example: `"Pillar of Kongo - F: 0"` or `"Ring - F: 0"`
 - **Second line**: Current coordinates
   - Format: `"s: {s}km; r: {r}m"`
   - Example: `"s: 125.5km; r: 200m"`

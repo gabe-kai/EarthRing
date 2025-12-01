@@ -24,9 +24,8 @@ func TestHealthHandler(t *testing.T) {
 			status, http.StatusOK)
 	}
 
-	expected := `{"status":"ok","service":"earthring-server"}`
-	if rr.Body.String() != expected {
+	if rr.Body.String() != healthCheckResponse {
 		t.Errorf("handler returned unexpected body: got %v want %v",
-			rr.Body.String(), expected)
+			rr.Body.String(), healthCheckResponse)
 	}
 }

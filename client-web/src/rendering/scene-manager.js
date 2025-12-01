@@ -82,9 +82,6 @@ export class SceneManager {
     directionalLight.shadow.camera.bottom = -2000;
     
     this.scene.add(directionalLight);
-    
-    // Store reference to directional light for potential updates
-    this.directionalLight = directionalLight;
   }
   
   /**
@@ -218,4 +215,3 @@ export class SceneManager {
     return this.renderer;
   }
 }
-

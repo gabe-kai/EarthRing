@@ -4,10 +4,8 @@
  * Supports: rectangle, circle, dezone, polygon, and paintbrush tools
  */
 
-// Debug toggle for preview logging (set window.DEBUG_ZONE_PREVIEW = true to enable)
-if (typeof window !== 'undefined' && window.DEBUG_ZONE_PREVIEW) {
-  console.log('=== ZONE-EDITOR.JS FILE LOADED ===');
-}
+// Debug toggles are initialized in main.js
+// Set window.DEBUG_ZONE_PREVIEW = true or window.DEBUG_ZONE_COORDS = true to enable debug logging
 
 import * as THREE from 'three';
 import { fromThreeJS, toThreeJS, DEFAULT_FLOOR_HEIGHT, wrapRingPosition, normalizeRelativeToCamera, denormalizeFromCamera } from '../utils/coordinates-new.js';
@@ -205,10 +203,9 @@ export class ZoneEditor {
     if (intersects.length > 0) {
       const worldPos = intersects[0].point;
       // Convert Three.js coordinates to EarthRing coordinates
-      // Note: floorHeight is used to calculate floor from Y, but we already know the floor
-      // So we use DEFAULT_FLOOR_HEIGHT and then override z with currentFloor
+      // We use DEFAULT_FLOOR_HEIGHT for the conversion, then override z with the actual floor
       const earthRingPos = fromThreeJS(worldPos, DEFAULT_FLOOR_HEIGHT);
-      earthRingPos.z = this.currentFloor; // Override with actual floor
+      earthRingPos.z = this.currentFloor;
       
       // Get camera position to normalize coordinates relative to camera
       // This prevents zones from appearing mirrored on the other side of the ring
@@ -346,7 +343,6 @@ export class ZoneEditor {
     
     // Don't interfere if clicking on UI elements
     if (event.target !== this.renderer.domElement) {
-      console.log('[ZoneEditor] onMouseDown: Ignoring click on UI element');
       return;
     }
     
@@ -927,14 +923,6 @@ export class ZoneEditor {
       }
     }
     
-    // DEBUG: Log which tool is being used
-    console.log('[ZoneEditor] finishDrawing CALLED', {
-      currentTool: this.currentTool,
-      startPoint: this.startPoint,
-      endPos,
-      paintbrushPathLength: this.paintbrushPath?.length,
-    });
-    
     // Remove preview immediately when starting to finish drawing
     // This prevents the preview from continuing to follow the mouse
     if (this.previewMesh) {
@@ -961,22 +949,16 @@ export class ZoneEditor {
     
     switch (this.currentTool) {
       case TOOLS.RECTANGLE:
-        console.log('[ZoneEditor] Using RECTANGLE tool');
         geometry = this.createRectangleGeometry(this.startPoint, endPos);
         break;
       case TOOLS.CIRCLE:
-        console.log('[ZoneEditor] Using CIRCLE tool');
         geometry = this.createCircleGeometry(this.startPoint, endPos);
         break;
       case TOOLS.PAINTBRUSH:
-        console.log('[ZoneEditor] Using PAINTBRUSH tool', {
-          pathLength: this.paintbrushPath?.length,
-          path: this.paintbrushPath,
-        });
         geometry = this.createPaintbrushGeometry(this.paintbrushPath);
         break;
       default:
-        console.log('[ZoneEditor] Unknown tool or NONE:', this.currentTool);
+        console.warn('[ZoneEditor] Unknown tool or NONE:', this.currentTool);
         this.isDrawing = false;
         return;
     }
@@ -1146,13 +1128,17 @@ export class ZoneEditor {
           response.updated_zones.forEach(updatedZone => {
             this.gameStateManager.upsertZone(updatedZone);
             this.zoneManager.renderZone(updatedZone);
-            console.log(`[ZoneEditor] Updated zone ${updatedZone.id} after conflict resolution`);
+            if (window.DEBUG_ZONE_COORDS) {
+              console.log(`[ZoneEditor] Updated zone ${updatedZone.id} after conflict resolution`);
+            }
           });
         }
         
         // If multiple zones were created (bisection), log it
         if (zones.length > 1) {
-          console.log(`[ZoneEditor] Zone was bisected into ${zones.length} parts`);
+          if (window.DEBUG_ZONE_COORDS) {
+            console.log(`[ZoneEditor] Zone was bisected into ${zones.length} parts`);
+          }
         } else if (zones.length === 1) {
           // Single zone returned - might be a merge
           const zone = zones[0];
@@ -1160,7 +1146,7 @@ export class ZoneEditor {
           // If this zone already existed, it was merged with other zones
           // The server handles deletion of merged zones, so we don't need to clean up here
           // The client will receive zone updates via WebSocket chunks
-          if (existingZoneIDs.has(zone.id)) {
+          if (existingZoneIDs.has(zone.id) && window.DEBUG_ZONE_COORDS) {
             console.log(`[ZoneEditor] Zone ${zone.id} was merged with other zones - server will handle deletions`);
           }
         }
@@ -1270,7 +1256,7 @@ export class ZoneEditor {
       });
       
       // If multiple zones were created (bisection), log it
-      if (zones.length > 1) {
+      if (zones.length > 1 && window.DEBUG_ZONE_COORDS) {
         console.log(`[ZoneEditor] Zone was bisected into ${zones.length} parts`);
       }
       
@@ -1394,12 +1380,6 @@ export class ZoneEditor {
    * Set current tool
    */
   setTool(tool) {
-    console.log('[ZoneEditor] setTool called', {
-      oldTool: this.currentTool,
-      newTool: tool,
-      isDrawing: this.isDrawing
-    });
-    
     // Cancel current drawing if switching tools
     if (this.isDrawing) {
       this.cancelDrawing();
@@ -1704,14 +1684,6 @@ export class ZoneEditor {
     let maxX = Math.max(start.x, end.x);
     const minY = Math.min(start.y, end.y);
     const maxY = Math.max(start.y, end.y);
-    
-    // DEBUG: Log geometry input
-    console.log('[ZoneEditor] createRectangleGeometry CALLED', {
-      start: { ...start },
-      end: { ...end },
-      minX, maxX, minY, maxY,
-      DEBUG_FLAG: window.DEBUG_ZONE_COORDS,
-    });
     
     if (window.DEBUG_ZONE_COORDS) {
       console.log('[ZoneEditor] createRectangleGeometry input:', {

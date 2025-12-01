@@ -7,11 +7,11 @@
  * 1. ER0: Earth-Centered, Earth-Fixed Frame
  *    - Origin: (0,0,0) = center of Earth
  *    - +X axis: intersection of equator and prime meridian (Kongo Pillar vertical line)
- *    - +Y axis: 90Â°E on the equator
+ *    - +Y axis: 90°E on the equator
  *    - +Z axis: North Pole
  * 
  * 2. RingPolar: (theta, r, z)
- *    - theta: angle around ring in radians (0 at Kongo Hub, wraps at Â±Ï€)
+ *    - theta: angle around ring in radians (0 at Kongo Hub, wraps at ±π)
  *    - r: radial offset from ring centerline in meters
  *    - z: vertical offset from equatorial plane in meters
  * 
@@ -31,12 +31,6 @@ export const CHUNK_LENGTH = 1000; // Chunk length in meters (1 km)
 export const CHUNK_COUNT = 264000; // Total number of chunks around the ring
 export const DEFAULT_FLOOR_HEIGHT = 20; // Default floor height in meters (20 meters per level for main ring structure)
 
-// Kongo Hub ER0 coordinates
-export const KONGO_HUB_ER0 = {
-  x: KONGO_HUB_RADIUS,
-  y: 0,
-  z: 0,
-};
 
 /**
  * ER0Point represents a point in Earth-Centered, Earth-Fixed coordinates
@@ -49,7 +43,7 @@ export const KONGO_HUB_ER0 = {
 /**
  * RingPolar represents a position in EarthRing polar coordinates
  * @typedef {Object} RingPolar
- * @property {number} theta - Angle around ring in radians (0 at Kongo Hub, wraps at Â±Ï€)
+ * @property {number} theta - Angle around ring in radians (0 at Kongo Hub, wraps at ±π)
  * @property {number} r - Radial offset from ring centerline in meters
  * @property {number} z - Vertical offset from equatorial plane in meters
  */
@@ -106,7 +100,7 @@ export function er0ToRingPolar(er0) {
 
 /**
  * Convert RingArc coordinates to RingPolar coordinates
- * Formula: theta = (s / RingCircumference) * 2Ï€, then normalize to [-Ï€, Ï€)
+ * Formula: theta = (s / RingCircumference) * 2π, then normalize to [-π, π)
  * 
  * @param {RingArc} arc - RingArc coordinates
  * @returns {RingPolar} RingPolar coordinates
@@ -114,7 +108,7 @@ export function er0ToRingPolar(er0) {
 export function ringArcToRingPolar(arc) {
   // Convert arc length to theta: theta = (s / C) * 2Ï€
   let theta = (arc.s / RING_CIRCUMFERENCE) * 2 * Math.PI;
-  // Normalize theta to [-Ï€, Ï€)
+  // Normalize theta to [-π, π)
   theta = wrapTheta(theta);
   return {
     theta: theta,
@@ -125,7 +119,7 @@ export function ringArcToRingPolar(arc) {
 
 /**
  * Convert RingPolar coordinates to RingArc coordinates
- * Formula: s = (theta / 2Ï€) * RingCircumference, wrapped to [0, RingCircumference)
+ * Formula: s = (theta / 2π) * RingCircumference, wrapped to [0, RingCircumference)
  * 
  * @param {RingPolar} polar - RingPolar coordinates
  * @returns {RingArc} RingArc coordinates
@@ -145,7 +139,7 @@ export function ringPolarToRingArc(polar) {
 }
 
 /**
- * Wrap theta to the range [-Ï€, Ï€)
+ * Wrap theta to the range [-π, π)
  * 
  * @param {number} theta - Angle in radians
  * @returns {number} Wrapped angle in [-Ï€, Ï€)
@@ -167,7 +161,7 @@ export function wrapArcLength(s) {
 /**
  * Convert legacy X position (0 to 264,000,000) to RingPolar
  * Legacy X=0 corresponds to Kongo Hub (theta=0)
- * Legacy X increases eastward, so theta = (X / RingCircumference) * 2Ï€
+ * Legacy X increases eastward, so theta = (X / RingCircumference) * 2π
  * Legacy Y (width position) maps to R (radial offset)
  * Legacy Z (floor/level) maps to Z (vertical offset)
  * 
@@ -192,7 +186,7 @@ export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
 
 /**
  * Convert RingPolar to legacy position
- * Legacy X = (theta / 2Ï€) * RingCircumference, wrapped to [0, RingCircumference)
+ * Legacy X = (theta / 2π) * RingCircumference, wrapped to [0, RingCircumference)
  * Legacy Y = R (radial offset)
  * Legacy Z = Z (vertical offset)
  * 
@@ -200,18 +194,11 @@ export function legacyPositionToRingPolar(legacyX, legacyY, legacyZ) {
  * @returns {Object} Legacy position {x, y, z}
  */
 export function ringPolarToLegacyPosition(polar) {
-  // Normalize theta to [0, 2Ï€)
-  let theta = polar.theta;
-  if (theta < 0) {
-    theta += 2 * Math.PI;
-  }
-  
-  // Convert to legacy X
-  let x = (theta / (2 * Math.PI)) * RING_CIRCUMFERENCE;
-  x = ((x % RING_CIRCUMFERENCE) + RING_CIRCUMFERENCE) % RING_CIRCUMFERENCE;
+  // Convert to RingArc first, then extract arc length as legacy X
+  const arc = ringPolarToRingArc(polar);
   
   return {
-    x: x,
+    x: arc.s, // Legacy X is the arc length (wrapped to [0, RING_CIRCUMFERENCE))
     y: polar.r, // Legacy Y is the radial offset (R)
     z: polar.z, // Legacy Z is the vertical offset (Z)
   };
@@ -276,11 +263,9 @@ export function validateRingArc(arc) {
  */
 export function ringArcToChunkIndex(arc) {
   const wrappedS = wrapArcLength(arc.s);
-  let chunkIndex = Math.floor(wrappedS / CHUNK_LENGTH);
-  if (chunkIndex >= CHUNK_COUNT) {
-    chunkIndex = chunkIndex % CHUNK_COUNT;
-  }
-  return chunkIndex;
+  // Since wrappedS is in [0, RING_CIRCUMFERENCE) and CHUNK_COUNT = RING_CIRCUMFERENCE / CHUNK_LENGTH,
+  // chunkIndex will always be in [0, CHUNK_COUNT), so no additional wrapping needed
+  return Math.floor(wrappedS / CHUNK_LENGTH);
 }
 
 /**
@@ -509,11 +494,11 @@ export function chunkIndexToPositionRange(chunkIndex) {
 export function normalizeRelativeToCamera(ringPosition, cameraPosition) {
   const dx = ringPosition - cameraPosition;
   const half = RING_CIRCUMFERENCE / 2;
-  let adjusted = dx;
   
-  // Normalize to [-half, half] range
-  while (adjusted > half) adjusted -= RING_CIRCUMFERENCE;
-  while (adjusted < -half) adjusted += RING_CIRCUMFERENCE;
+  // Normalize dx to [-half, half] range using modulo arithmetic
+  // This is equivalent to wrapping dx to [-half, half)
+  let adjusted = ((dx + half) % RING_CIRCUMFERENCE) - half;
+  if (adjusted >= half) adjusted -= RING_CIRCUMFERENCE;
   
   return cameraPosition + adjusted;
 }

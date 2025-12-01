@@ -12,7 +12,6 @@ import { showAdminModal } from './ui/admin-modal.js';
 import { initializeZonesTab } from './ui/zone-ui.js';
 import { initializeStructuresTab } from './ui/structure-ui.js';
 import { createBottomToolbar } from './ui/bottom-toolbar.js';
-import * as THREE from 'three';
 import { SceneManager } from './rendering/scene-manager.js';
 import { CameraController } from './input/camera-controller.js';
 import { GameStateManager } from './state/game-state.js';
@@ -26,9 +25,8 @@ import { Minimap } from './ui/minimap.js';
 import { createZonesToolbar } from './ui/zones-toolbar.js';
 import { createInfoBox } from './ui/info-box.js';
 import { wsClient } from './network/websocket-client.js';
-import { createMeshAtEarthRingPosition } from './utils/rendering.js';
 import { positionToChunkIndex } from './utils/coordinates-new.js';
-import { findNearestStation, getStationPosition, getAllStationPositions } from './utils/stations.js';
+import { findNearestStation, getStationPosition, getAllStationPositions, getStationName } from './utils/stations.js';
 
 // Initialize game state manager
 const gameStateManager = new GameStateManager();
@@ -67,10 +65,6 @@ const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateMan
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 // Expose zone editor globally for debugging/access
 window.zoneEditor = zoneEditor;
-if (!window.earthring) {
-  window.earthring = {};
-}
-window.earthring.zoneEditor = zoneEditor;
 createZonesToolbar(zoneManager, gridOverlay, gameStateManager);
 
 // Initialize debug info panel
@@ -83,8 +77,8 @@ const debugPanel = new DebugInfoPanel(
   zoneManager
 );
 
-// Initialize minimap
-const minimap = new Minimap(cameraController, gameStateManager, sceneManager, chunkManager);
+// Initialize minimap (manages its own lifecycle)
+const _minimap = new Minimap(cameraController, gameStateManager, sceneManager, chunkManager);
 
 // Global mouse position tracker for debug panel
 const globalMousePosition = { x: 0, y: 0 };
@@ -114,6 +108,7 @@ window.earthring = {
     findNearestStation,
     getStationPosition,
     getAllStationPositions,
+    getStationName,
     // Helper function to navigate to a station
     navigateToStation: (index) => {
       const stationPos = getStationPosition(index);
@@ -124,7 +119,8 @@ window.earthring = {
           y: 0,
           z: 0,
         }, 3); // 3 second smooth movement
-        console.log(`Navigating to Station Hub ${index} at position ${stationPos}m`);
+        const stationName = getStationName(index) || `Hub ${index}`;
+        console.log(`Navigating to ${stationName} at position ${stationPos}m`);
       } else {
         console.error(`Invalid station index: ${index}`);
       }
@@ -132,32 +128,14 @@ window.earthring = {
   },
 };
 
-// Add a test cube at EarthRing position (0, 0, 0) for demonstration
-const scene = sceneManager.getScene();
-
-const earthringPosition = { x: 0, y: 0, z: 0 };
-const geometry = new THREE.BoxGeometry(2, 2, 2); // Make cube bigger (2x2x2)
-const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-const cube = createMeshAtEarthRingPosition(geometry, material, earthringPosition);
-scene.add(cube);
-
-// Set camera to look at the cube and set OrbitControls target
-const cubeThreeJSPos = cube.position;
-cameraController.setTargetFromEarthRing(earthringPosition);
-const camera = sceneManager.getCamera();
-
-// Position camera for better view of the ring
+// Set initial camera position for better view of the ring
 // EarthRing position: 100m along ring, 0 width, floor 0
 const cameraEarthRingPos = { x: 100, y: 0, z: 0 };
 cameraController.setPositionFromEarthRing(cameraEarthRingPos);
+const camera = sceneManager.getCamera();
 // Adjust camera to be elevated and angled for better view
 camera.position.y += 20; // Higher up for better overview
 camera.position.z += 30; // Back from the ring
-camera.lookAt(cubeThreeJSPos.x, cubeThreeJSPos.y, cubeThreeJSPos.z);
-
-// Add axes helper for reference
-const axesHelper = new THREE.AxesHelper(10);
-scene.add(axesHelper);
 
 // Track last camera position for chunk loading (throttle to avoid excessive requests)
 let lastCameraChunkIndex = null;
@@ -175,16 +153,6 @@ sceneManager.onRender((deltaTime) => {
     ? gameStateManager.isUserAuthenticated()
     : isAuthenticated();
   
-  // Rotate test cube
-  cube.rotation.x += 0.01;
-  cube.rotation.y += 0.01;
-  
-  // Disabled automatic re-rendering for wrapping to prevent z-fighting
-  // Chunks are wrapped when first rendered based on camera position
-  // Re-enable this if needed, but it causes flickering due to overlapping chunks
-  // if (chunkManager.shouldReRenderChunks()) {
-  //   chunkManager.reRenderAllChunks();
-  // }
   
   // Check if camera has moved enough to load new chunks
   // Throttle chunk loading to avoid excessive requests
@@ -269,98 +237,74 @@ sceneManager.start();
 // Create info box (permanent UI element)
 createInfoBox();
 
+// Helper function to connect WebSocket and update game state
+const connectWebSocket = async () => {
+  try {
+    await wsClient.connect();
+    gameStateManager.updateConnectionState('websocket', { connected: true });
+    if (window.earthring?.debug) {
+      console.log('WebSocket connected');
+    }
+  } catch (error) {
+    console.error('Failed to connect WebSocket:', error);
+    gameStateManager.updateConnectionState('websocket', { 
+      connected: false, 
+      lastError: error.message 
+    });
+  }
+};
+
+// Helper function to initialize authenticated user UI
+const initializeAuthenticatedUser = () => {
+  showUserInfo();
+  gameStateManager.updateConnectionState('api', { authenticated: true });
+  initializeZonesTab();
+  initializeStructuresTab();
+};
+
 // Authentication initialization
 if (isAuthenticated()) {
-  showUserInfo();
-  console.log('User is authenticated');
+  if (window.earthring?.debug) {
+    console.log('User is authenticated');
+  }
   
   // Update game state
   const token = localStorage.getItem('access_token');
   if (token) {
-    gameStateManager.updateConnectionState('api', { authenticated: true });
+    initializeAuthenticatedUser();
   }
   
-  // Initialize zones tab in toolbar
-  initializeZonesTab();
-  // Initialize structures tab in toolbar
-  initializeStructuresTab();
+  // Connect WebSocket if already authenticated
+  connectWebSocket();
 } else {
   showAuthUI();
-  console.log('Showing authentication UI');
-}
-
-// Check if user is already authenticated on page load
-if (isAuthenticated()) {
-  console.log('User already authenticated on page load');
-  showUserInfo();
-  gameStateManager.updateConnectionState('api', { authenticated: true });
-  
-  // Initialize zones tab in toolbar
-  initializeZonesTab();
-  // Initialize structures tab in toolbar
-  initializeStructuresTab();
-  
-  // Connect WebSocket if already authenticated
-  wsClient.connect().then(() => {
-    gameStateManager.updateConnectionState('websocket', { connected: true });
-    console.log('WebSocket connected');
-  }).catch(error => {
-    console.error('Failed to connect WebSocket:', error);
-    gameStateManager.updateConnectionState('websocket', { 
-      connected: false, 
-      lastError: error.message 
-    });
-  });
+  if (window.earthring?.debug) {
+    console.log('Showing authentication UI');
+  }
 }
 
 // Listen for authentication events
 window.addEventListener('auth:login', async () => {
-  console.log('User logged in');
-  showUserInfo();
-  gameStateManager.updateConnectionState('api', { authenticated: true });
-  
-  // Initialize zones tab in toolbar
-  initializeZonesTab();
-  
-  // Connect WebSocket after authentication
-  try {
-    await wsClient.connect();
-    gameStateManager.updateConnectionState('websocket', { connected: true });
-    console.log('WebSocket connected');
-  } catch (error) {
-    console.error('Failed to connect WebSocket:', error);
-    gameStateManager.updateConnectionState('websocket', { 
-      connected: false, 
-      lastError: error.message 
-    });
+  if (window.earthring?.debug) {
+    console.log('User logged in');
   }
+  initializeAuthenticatedUser();
+  await connectWebSocket();
 });
 
 window.addEventListener('auth:register', async () => {
-  console.log('User registered');
-  showUserInfo();
-  gameStateManager.updateConnectionState('api', { authenticated: true });
-  
-  // Initialize zones tab in toolbar
-  initializeZonesTab();
-  
-  // Connect WebSocket after registration
-  try {
-    await wsClient.connect();
-    gameStateManager.updateConnectionState('websocket', { connected: true });
-    console.log('WebSocket connected');
-  } catch (error) {
-    console.error('Failed to connect WebSocket:', error);
-    gameStateManager.updateConnectionState('websocket', { 
-      connected: false, 
-      lastError: error.message 
-    });
+  if (window.earthring?.debug) {
+    console.log('User registered');
   }
+  initializeAuthenticatedUser();
+  await connectWebSocket();
 });
 
 window.addEventListener('auth:logout', async (event) => {
   const reason = event.detail?.reason || 'Session expired';
-  console.log(`[Auth] User logged out: ${reason}`);
+  if (window.earthring?.debug) {
+    console.log(`[Auth] User logged out: ${reason}`);
+  }
   
   // Disconnect WebSocket
   try {
@@ -390,7 +334,9 @@ window.addEventListener('auth:logout', async (event) => {
   showAuthUI();
   
   // Stop any ongoing operations
-  console.log('[Auth] Cleared game state and disconnected from server. Please log in again.');
+  if (window.earthring?.debug) {
+    console.log('[Auth] Cleared game state and disconnected from server. Please log in again.');
+  }
 });
 
 // Listen for panel show events
@@ -406,10 +352,11 @@ window.addEventListener('show:admin-modal', () => {
   showAdminModal();
 });
 
-
 // WebSocket connection event handlers
 wsClient.onOpen(async () => {
-  console.log('WebSocket opened');
+  if (window.earthring?.debug) {
+    console.log('WebSocket opened');
+  }
   gameStateManager.updateConnectionState('websocket', { 
     connected: true, 
     connecting: false 
@@ -446,7 +393,9 @@ wsClient.onOpen(async () => {
 });
 
 wsClient.onClose(() => {
-  console.log('WebSocket closed');
+  if (window.earthring?.debug) {
+    console.log('WebSocket closed');
+  }
   gameStateManager.updateConnectionState('websocket', { 
     connected: false, 
     connecting: false 
@@ -461,12 +410,12 @@ wsClient.onError((error) => {
   });
 });
 
-// window.earthring is already set up earlier (after zoneEditor initialization)
-// This ensures it's available when initializeZonesTab() is called
-
-// Global debug flag for zone coordinates (accessible via window.DEBUG_ZONE_COORDS)
-// Enable by running: window.DEBUG_ZONE_COORDS = true in the browser console
+// Global debug flags for zone editor debugging
+// Enable by running: window.DEBUG_ZONE_COORDS = true or window.DEBUG_ZONE_PREVIEW = true in the browser console
 window.DEBUG_ZONE_COORDS = false;
+window.DEBUG_ZONE_PREVIEW = false;
 
 // Client initialization complete
-console.log('EarthRing client initialized');
+if (window.earthring?.debug) {
+  console.log('EarthRing client initialized');
+}

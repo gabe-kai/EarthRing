@@ -9,19 +9,21 @@ import {
   fromThreeJS,
   DEFAULT_FLOOR_HEIGHT,
   wrapRingPosition,
-  ringArcToThreeJS,
-  threeJSToRingArc,
-  ringPolarToThreeJS,
-  threeJSToRingPolar,
   legacyPositionToRingPolar, 
   ringPolarToRingArc,
   ringPolarToLegacyPosition,
   ringArcToRingPolar,
   er0ToRingPolar,
-  ringPolarToER0,
-  normalizeRelativeToCamera,
-  denormalizeFromCamera
+  ringPolarToER0
 } from './coordinates-new.js';
+
+/**
+ * Helper function to set position on any Three.js object (object or camera)
+ * @private
+ */
+function setPositionFromThreeJS(target, threeJSPosition) {
+  target.position.set(threeJSPosition.x, threeJSPosition.y, threeJSPosition.z);
+}
 
 /**
  * Set Three.js object position from EarthRing coordinates
@@ -32,7 +34,7 @@ import {
  */
 export function setObjectPositionFromEarthRing(object, earthringPosition, floorHeight = DEFAULT_FLOOR_HEIGHT) {
   const threeJSPosition = toThreeJS(earthringPosition, floorHeight);
-  object.position.set(threeJSPosition.x, threeJSPosition.y, threeJSPosition.z);
+  setPositionFromThreeJS(object, threeJSPosition);
 }
 
 /**
@@ -43,12 +45,7 @@ export function setObjectPositionFromEarthRing(object, earthringPosition, floorH
  * @returns {Object} EarthRing position {x, y, z}
  */
 export function getEarthRingPositionFromObject(object, floorHeight = DEFAULT_FLOOR_HEIGHT) {
-  const threeJSPosition = {
-    x: object.position.x,
-    y: object.position.y,
-    z: object.position.z,
-  };
-  return fromThreeJS(threeJSPosition, floorHeight);
+  return fromThreeJS(object.position, floorHeight);
 }
 
 /**
@@ -60,7 +57,7 @@ export function getEarthRingPositionFromObject(object, floorHeight = DEFAULT_FLO
  */
 export function setCameraPositionFromEarthRing(camera, earthringPosition, floorHeight = DEFAULT_FLOOR_HEIGHT) {
   const threeJSPosition = toThreeJS(earthringPosition, floorHeight);
-  camera.position.set(threeJSPosition.x, threeJSPosition.y, threeJSPosition.z);
+  setPositionFromThreeJS(camera, threeJSPosition);
 }
 
 /**
@@ -73,7 +70,8 @@ export function setCameraPositionFromEarthRing(camera, earthringPosition, floorH
 export function setCameraPositionFromRingArc(camera, ringArc, floorHeight = DEFAULT_FLOOR_HEIGHT) {
   const polar = ringArcToRingPolar(ringArc);
   const legacyPos = ringPolarToLegacyPosition(polar);
-  setCameraPositionFromEarthRing(camera, legacyPos, floorHeight);
+  const threeJSPosition = toThreeJS(legacyPos, floorHeight);
+  setPositionFromThreeJS(camera, threeJSPosition);
 }
 
 /**
@@ -85,7 +83,8 @@ export function setCameraPositionFromRingArc(camera, ringArc, floorHeight = DEFA
  */
 export function setCameraPositionFromRingPolar(camera, ringPolar, floorHeight = DEFAULT_FLOOR_HEIGHT) {
   const legacyPos = ringPolarToLegacyPosition(ringPolar);
-  setCameraPositionFromEarthRing(camera, legacyPos, floorHeight);
+  const threeJSPosition = toThreeJS(legacyPos, floorHeight);
+  setPositionFromThreeJS(camera, threeJSPosition);
 }
 
 /**
@@ -96,12 +95,7 @@ export function setCameraPositionFromRingPolar(camera, ringPolar, floorHeight = 
  * @returns {Object} EarthRing position {x, y, z} (legacy coordinates)
  */
 export function getEarthRingPositionFromCamera(camera, floorHeight = DEFAULT_FLOOR_HEIGHT) {
-  const threeJSPosition = {
-    x: camera.position.x,
-    y: camera.position.y,
-    z: camera.position.z,
-  };
-  const earthRingPos = fromThreeJS(threeJSPosition, floorHeight);
+  const earthRingPos = fromThreeJS(camera.position, floorHeight);
   // Wrap the X coordinate (ring position) to valid range [0, 264000000)
   earthRingPos.x = wrapRingPosition(earthRingPos.x);
   return earthRingPos;
@@ -143,7 +137,8 @@ export function setObjectPositionFromER0(object, er0, floorHeight = DEFAULT_FLOO
   // Convert ER0 → RingPolar → Legacy → Three.js
   const polar = er0ToRingPolar(er0);
   const legacyPos = ringPolarToLegacyPosition(polar);
-  setObjectPositionFromEarthRing(object, legacyPos, floorHeight);
+  const threeJSPosition = toThreeJS(legacyPos, floorHeight);
+  setPositionFromThreeJS(object, threeJSPosition);
 }
 
 /**
@@ -171,7 +166,8 @@ export function setCameraPositionFromER0(camera, er0, floorHeight = DEFAULT_FLOO
   // Convert ER0 → RingPolar → Legacy → Three.js
   const polar = er0ToRingPolar(er0);
   const legacyPos = ringPolarToLegacyPosition(polar);
-  setCameraPositionFromEarthRing(camera, legacyPos, floorHeight);
+  const threeJSPosition = toThreeJS(legacyPos, floorHeight);
+  setPositionFromThreeJS(camera, threeJSPosition);
 }
 
 /**
@@ -217,4 +213,3 @@ export function createMeshAtER0Position(geometry, material, er0, floorHeight = D
   setObjectPositionFromER0(mesh, er0, floorHeight);
   return mesh;
 }
-

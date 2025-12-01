@@ -6,19 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/earthring/server/internal/auth"
 	"github.com/earthring/server/internal/config"
 )
 
 // SetupStructureRoutes registers structure management routes.
 func SetupStructureRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	handlers := NewStructureHandlers(db, cfg)
-
-	jwtService := auth.NewJWTService(cfg)
-	passwordService := auth.NewPasswordService(cfg)
-	authHandlers := auth.NewAuthHandlers(db, jwtService, passwordService)
-
-	authMiddleware := authHandlers.AuthMiddleware
+	authMiddleware := setupAuthMiddleware(db, cfg)
 	userRateLimit := UserRateLimitMiddleware(200, 1*time.Minute)
 
 	structureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

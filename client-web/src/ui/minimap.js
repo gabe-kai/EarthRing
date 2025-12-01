@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { legacyPositionToRingPolar, ringPolarToRingArc, chunkIndexToRingArc, threeJSToRingArc, CHUNK_LENGTH, CHUNK_COUNT } from '../utils/coordinates-new.js';
-import { findNearestStation, PILLAR_HUB_POSITIONS } from '../utils/stations.js';
+import { findNearestStation, PILLAR_HUB_POSITIONS, getStationName } from '../utils/stations.js';
 import { RING_CIRCUMFERENCE } from '../utils/coordinates-new.js';
 import { addNotification } from './info-box.js';
 
@@ -363,7 +363,7 @@ export class Minimap {
         const rM = arc.r.toFixed(0);
         let locationName;
         if (isOnStation) {
-          locationName = nearestStation.index === 0 ? 'Kongo Hub' : `Hub ${nearestStation.index}`;
+          locationName = getStationName(nearestStation.index) || `Hub ${nearestStation.index}`;
         } else {
           locationName = 'Ring';
         }

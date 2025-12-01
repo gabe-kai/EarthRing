@@ -12,6 +12,10 @@ import (
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 )
 
+const (
+	rateLimitExceededJSON = `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`
+)
+
 // RateLimitConfig holds rate limit configuration
 type RateLimitConfig struct {
 	// Global rate limit (all endpoints)
@@ -81,7 +85,7 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 				}
 
 				// Write JSON response
-				if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+				if _, err := fmt.Fprintf(w, rateLimitExceededJSON, retryAfter); err != nil {
 					// Error writing response - connection may be closed
 					return
 				}
@@ -129,7 +133,7 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					if retryAfter < 0 {
 						retryAfter = 0
 					}
-					if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+					if _, err := fmt.Fprintf(w, rateLimitExceededJSON, retryAfter); err != nil {
 						log.Printf("Error writing rate limit response: %v", err)
 					}
 					return
@@ -165,7 +169,7 @@ func UserRateLimitMiddleware(limit int, window time.Duration) func(http.Handler)
 					retryAfter = 0
 				}
 
-				if _, err := fmt.Fprintf(w, `{"error":"Rate limit exceeded","message":"Too many requests. Please try again later.","retry_after":%d}`, retryAfter); err != nil {
+				if _, err := fmt.Fprintf(w, rateLimitExceededJSON, retryAfter); err != nil {
 					log.Printf("Error writing rate limit response: %v", err)
 				}
 				return
