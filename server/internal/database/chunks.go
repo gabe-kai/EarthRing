@@ -316,19 +316,45 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					}
 				}
 
-				// Check if zone already exists for this chunk (by metadata chunk_index)
+				// Check if zone already exists for this chunk (by metadata chunk_index and side if present)
 				// If it exists, use its ID; otherwise create it
 				var zoneID int64
-				checkZoneQuery := `
-					SELECT id FROM zones
-					WHERE floor = $1 
-					  AND zone_type = $2
-					  AND is_system_zone = $3
-					  AND metadata->>'chunk_index' = $4
-					  AND metadata->>'default_zone' = 'true'
-					LIMIT 1
-				`
-				err = tx.QueryRow(checkZoneQuery, floor, zoneType, isSystemZone, fmt.Sprintf("%d", chunkIndex)).Scan(&zoneID)
+				// Extract side from metadata if present (for industrial zones)
+				var side string
+				if metadataObj, ok := props["metadata"].(map[string]interface{}); ok {
+					if sideVal, ok := metadataObj["side"].(string); ok {
+						side = sideVal
+					}
+				}
+
+				var checkZoneQuery string
+				if side != "" {
+					// For zones with a side (e.g., north/south industrial zones), include side in the check
+					checkZoneQuery = `
+						SELECT id FROM zones
+						WHERE floor = $1 
+						  AND zone_type = $2
+						  AND is_system_zone = $3
+						  AND metadata->>'chunk_index' = $4
+						  AND metadata->>'default_zone' = 'true'
+						  AND metadata->>'side' = $5
+						LIMIT 1
+					`
+					err = tx.QueryRow(checkZoneQuery, floor, zoneType, isSystemZone, fmt.Sprintf("%d", chunkIndex), side).Scan(&zoneID)
+				} else {
+					// For zones without a side (e.g., restricted zones), use the original query
+					checkZoneQuery = `
+						SELECT id FROM zones
+						WHERE floor = $1 
+						  AND zone_type = $2
+						  AND is_system_zone = $3
+						  AND metadata->>'chunk_index' = $4
+						  AND metadata->>'default_zone' = 'true'
+						  AND (metadata->>'side' IS NULL OR metadata->>'side' = '')
+						LIMIT 1
+					`
+					err = tx.QueryRow(checkZoneQuery, floor, zoneType, isSystemZone, fmt.Sprintf("%d", chunkIndex)).Scan(&zoneID)
+				}
 				if err == nil {
 					// Zone already exists, use it
 					zoneIDs = append(zoneIDs, zoneID)

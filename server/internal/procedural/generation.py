@@ -146,13 +146,84 @@ def generate_ring_floor_geometry(chunk_index: int, floor: int) -> dict:
     }
 
 
+def calculate_restricted_zone_width(x_position: float) -> float:
+    """
+    Calculate the width of the restricted zone at a given X position.
+    
+    The zone width varies based on proximity to stations:
+    - Base width: 20m (Y: -10 to +10) for normal areas (outside station flares)
+    - Within station flare areas, zones scale based on percentage of flare length:
+      - 160m wide (80m half-width): 20% of station length (centered)
+      - 120m wide (60m half-width): 40% of station length
+      - 100m wide (50m half-width): 60% of station length
+      - 80m wide (40m half-width): 80% of station length
+    
+    Args:
+        x_position: X position along the ring in meters
+    
+    Returns:
+        Zone half-width in meters (actual Y range is [-half_width, +half_width])
+    """
+    # Base width: 20m total (10m on each side)
+    base_half_width = 10.0
+    
+    # Find nearest station
+    station_result = stations.find_nearest_station(x_position)
+    if station_result is None:
+        return base_half_width
+    
+    nearest_station, distance = station_result
+    
+    # Check if we're within the station flare area
+    flare_range = nearest_station.station_type.flare_length / 2.0
+    if distance >= flare_range:
+        # Outside flare area: use base width
+        return base_half_width
+    
+    # Within station flare area: calculate width based on percentage of flare length
+    # Distance from center as percentage of flare range (0.0 = center, 1.0 = edge)
+    distance_percentage = distance / flare_range
+    
+    # Zone widths and their coverage percentages (from center outward):
+    # - 160m wide: 20% of station length (0% to 10% from center)
+    # - 120m wide: 40% of station length (0% to 20% from center)
+    # - 100m wide: 60% of station length (0% to 30% from center)
+    # - 80m wide: 80% of station length (0% to 40% from center)
+    # - 20m wide: 100% of station length (base, used outside or as fallback)
+    
+    # Determine which zone width to use based on distance from center
+    if distance_percentage <= 0.10:  # Within 10% of flare range (20% of station length)
+        # 160m wide (80m half-width)
+        return 80.0
+    elif distance_percentage <= 0.20:  # Within 20% of flare range (40% of station length)
+        # 120m wide (60m half-width)
+        return 60.0
+    elif distance_percentage <= 0.30:  # Within 30% of flare range (60% of station length)
+        # 100m wide (50m half-width)
+        return 50.0
+    elif distance_percentage <= 0.40:  # Within 40% of flare range (80% of station length)
+        # 80m wide (40m half-width)
+        return 40.0
+    else:
+        # Beyond 40% but still within flare: use base width
+        # This handles the transition area between station zones and normal areas
+        return base_half_width
+
+
 def generate_chunk_restricted_zone(floor: int, chunk_index: int) -> dict:
     """
     Generate a default restricted zone for a chunk.
     
-    Creates a restricted zone that spans the full chunk length (1000m) and is 20m wide
-    (Y: -10 to +10), centered on the ring. This zone reserves space for maglev transit
-    and prevents building in that area.
+    Creates a restricted zone that spans the full chunk length (1000m) with variable width
+    based on proximity to stations. The zone widens near stations based on flare length percentages.
+    
+    Zone width specifications:
+    - Base width: 20m (Y: -10 to +10) for normal areas (outside station flares)
+    - Within station flare areas, zones scale based on percentage of flare length:
+      - 160m wide: 20% of station length (centered on station)
+      - 120m wide: 40% of station length
+      - 100m wide: 60% of station length
+      - 80m wide: 80% of station length
     
     Args:
         floor: Floor number
@@ -170,24 +241,34 @@ def generate_chunk_restricted_zone(floor: int, chunk_index: int) -> dict:
     # This is valid - coordinates can be stored up to the ring circumference
     # The client will wrap coordinates relative to camera during rendering
     
-    # Zone specifications:
-    # - Width: 20m (Y: -10 to +10)
-    # - Length: Full chunk (X: chunk_start to chunk_end)
-    # - Type: Restricted (prevents building)
-    # - System zone: Yes (protected from player modifications)
+    # Sample zone width at multiple points along the chunk to create a smooth polygon
+    # Sample every 50m to capture width transitions accurately
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    # Ensure we include the end point
+    if sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
     
-    # Create polygon coordinates in GeoJSON format
-    # GeoJSON coordinates are [longitude, latitude] but we use [X, Y] for EarthRing
-    # Polygon is a closed ring, so first and last coordinates are the same
-    coordinates = [
-        [
-            [chunk_start_position, -10.0],  # Bottom-left
-            [chunk_end_position, -10.0],     # Bottom-right
-            [chunk_end_position, 10.0],       # Top-right
-            [chunk_start_position, 10.0],    # Top-left
-            [chunk_start_position, -10.0],    # Close polygon
-        ]
-    ]
+    # Build polygon coordinates with variable width
+    # We'll create vertices along the top and bottom edges
+    bottom_edge = []  # Bottom edge (negative Y)
+    top_edge = []     # Top edge (positive Y)
+    
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        bottom_edge.append([x_pos, -half_width])
+        top_edge.append([x_pos, half_width])
+    
+    # Reverse top edge so we can connect them in order
+    top_edge.reverse()
+    
+    # Combine edges to form closed polygon
+    # Start at first bottom point, go along bottom, then along top, then close
+    coordinates = [bottom_edge + top_edge + [bottom_edge[0]]]
     
     return {
         "type": "Feature",
@@ -211,6 +292,422 @@ def generate_chunk_restricted_zone(floor: int, chunk_index: int) -> dict:
             "coordinates": coordinates,
         },
     }
+
+
+def is_within_hub_platform_area(chunk_index: int) -> bool:
+    """
+    Check if a chunk is within a hub platform area (within 1500m of any hub center).
+    
+    Args:
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        True if chunk is within hub platform area, False otherwise
+    """
+    # Calculate chunk center position
+    chunk_center_position = chunk_index * CHUNK_LENGTH + (CHUNK_LENGTH / 2.0)
+    
+    # Check distance to nearest hub station
+    hub_positions = stations.PILLAR_HUB_POSITIONS
+    min_distance = float('inf')
+    for hub_x in hub_positions:
+        distance = stations.distance_with_wrapping(chunk_center_position, hub_x)
+        min_distance = min(min_distance, distance)
+    
+    # Within 1500m of hub center
+    return min_distance < 1500.0
+
+
+def is_within_station_flare_area(chunk_index: int) -> bool:
+    """
+    Check if a chunk is within a station flare area (within flare_length/2 of any hub center).
+    
+    For pillar/elevator hubs, the flare extends 25km (25,000m) on each side of the hub center.
+    
+    Args:
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        True if chunk is within station flare area, False otherwise
+    """
+    # Calculate chunk center position
+    chunk_center_position = chunk_index * CHUNK_LENGTH + (CHUNK_LENGTH / 2.0)
+    
+    # Check distance to nearest hub station
+    hub_positions = stations.PILLAR_HUB_POSITIONS
+    min_distance = float('inf')
+    for hub_x in hub_positions:
+        distance = stations.distance_with_wrapping(chunk_center_position, hub_x)
+        min_distance = min(min_distance, distance)
+    
+    # Station flare extends flare_length/2 on each side
+    # For PILLAR_ELEVATOR_HUB: flare_length = 50000.0, so flare_range = 25000.0
+    flare_range = stations.PILLAR_ELEVATOR_HUB.flare_length / 2.0
+    
+    # Within flare range of hub center
+    return min_distance < flare_range
+
+
+def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate industrial zones on either side of the restricted zone within station flare areas.
+    
+    Creates two 20m-wide industrial zones that line the restricted zone:
+    - North industrial zone: from north edge of restricted zone outward by 20m
+    - South industrial zone: from south edge of restricted zone outward by 20m
+    
+    These zones are generated within station flare areas (within flare_length/2 of hub centers,
+    which is 25km for pillar/elevator hubs).
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
+    """
+    # Only generate industrial zones within station flare areas
+    if not is_within_station_flare_area(chunk_index):
+        return []
+    
+    # Calculate chunk boundaries
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+    
+    # Sample zone width at multiple points along the chunk
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    if sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
+    
+    # Build north industrial zone (negative Y side)
+    # North zone goes from -half_width - 20 to -half_width
+    north_bottom_edge = []  # Outer edge (further from center)
+    north_top_edge = []     # Inner edge (touching restricted zone)
+    
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        # North zone: from -half_width - 20 to -half_width
+        north_bottom_edge.append([x_pos, -half_width - 20.0])
+        north_top_edge.append([x_pos, -half_width])
+    
+    # Reverse top edge to connect in order
+    north_top_edge.reverse()
+    north_coordinates = [north_bottom_edge + north_top_edge + [north_bottom_edge[0]]]
+    
+    # Build south industrial zone (positive Y side)
+    # South zone goes from +half_width to +half_width + 20
+    south_bottom_edge = []  # Inner edge (touching restricted zone)
+    south_top_edge = []     # Outer edge (further from center)
+    
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        # South zone: from +half_width to +half_width + 20
+        south_bottom_edge.append([x_pos, half_width])
+        south_top_edge.append([x_pos, half_width + 20.0])
+    
+    # Reverse top edge to connect in order
+    south_top_edge.reverse()
+    south_coordinates = [south_bottom_edge + south_top_edge + [south_bottom_edge[0]]]
+    
+    # Create zone dictionaries
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Industrial Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "industrial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_industrial",
+                    "description": "Industrial zone lining maglev transit area at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Industrial Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "industrial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_industrial",
+                    "description": "Industrial zone lining maglev transit area at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+    
+    return zones
+
+
+def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate commercial zones interspersed within industrial zones at chunk centers.
+    
+    Creates two 10m x 20m commercial zones at the center of each chunk:
+    - North commercial zone: 10m long (X), 20m wide (Y) on the north side of restricted zone
+    - South commercial zone: 10m long (X), 20m wide (Y) on the south side of restricted zone
+    
+    These zones are only generated within station flare areas (where industrial zones exist).
+    They create 20m x 20m squares of commercial zone breaking up the industrial zone every chunk.
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
+    """
+    # Only generate commercial zones within station flare areas (where industrial zones exist)
+    if not is_within_station_flare_area(chunk_index):
+        return []
+    
+    # Calculate chunk boundaries and center
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    
+    # Commercial zone dimensions: 10m long (X), 20m wide (Y)
+    commercial_length = 10.0  # 10m along X axis
+    commercial_width = 20.0   # 20m along Y axis
+    
+    # Calculate restricted zone width at chunk center to position commercial zones correctly
+    half_width = calculate_restricted_zone_width(chunk_center_position)
+    
+    # North commercial zone: from -half_width - 20 to -half_width (20m wide)
+    # Positioned at chunk center, 10m long (5m on each side of center)
+    north_zone_x_start = chunk_center_position - (commercial_length / 2.0)
+    north_zone_x_end = chunk_center_position + (commercial_length / 2.0)
+    
+    north_coordinates = [[
+        [north_zone_x_start, -half_width - commercial_width],  # Bottom-left (outer edge)
+        [north_zone_x_end, -half_width - commercial_width],    # Bottom-right (outer edge)
+        [north_zone_x_end, -half_width],                       # Top-right (inner edge, touching restricted)
+        [north_zone_x_start, -half_width],                    # Top-left (inner edge, touching restricted)
+        [north_zone_x_start, -half_width - commercial_width]  # Close polygon
+    ]]
+    
+    # South commercial zone: from +half_width to +half_width + 20 (20m wide)
+    # Positioned at chunk center, 10m long (5m on each side of center)
+    south_zone_x_start = chunk_center_position - (commercial_length / 2.0)
+    south_zone_x_end = chunk_center_position + (commercial_length / 2.0)
+    
+    south_coordinates = [[
+        [south_zone_x_start, half_width],                      # Bottom-left (inner edge, touching restricted)
+        [south_zone_x_end, half_width],                        # Bottom-right (inner edge, touching restricted)
+        [south_zone_x_end, half_width + commercial_width],     # Top-right (outer edge)
+        [south_zone_x_start, half_width + commercial_width],   # Top-left (outer edge)
+        [south_zone_x_start, half_width]                       # Close polygon
+    ]]
+    
+    # Create zone dictionaries
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Commercial Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "commercial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_commercial",
+                    "description": "Commercial zone interspersed within industrial zone at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Commercial Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "commercial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_commercial",
+                    "description": "Commercial zone interspersed within industrial zone at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+    
+    return zones
+
+
+def generate_chunk_agricultural_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate agricultural zones in free space between stations.
+    
+    Creates two agricultural zones on either side of the restricted zone:
+    - North agricultural zone: from north edge of restricted zone to north edge of chunk
+    - South agricultural zone: from south edge of restricted zone to south edge of chunk
+    
+    These zones are only generated outside station flare areas (where there's free space
+    and no industrial/commercial zones). They are NOT system zones, allowing players to
+    dezone or replace them with other zone types.
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if in station flare area)
+    """
+    # Only generate agricultural zones outside station flare areas (free space between stations)
+    if is_within_station_flare_area(chunk_index):
+        return []
+    
+    # Calculate chunk boundaries
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+    
+    # Sample zone width at multiple points along the chunk
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    if sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
+    
+    # Build north agricultural zone (negative Y side)
+    # North zone goes from -half_width (restricted zone edge) to -chunk_half_width (chunk edge)
+    north_inner_edge = []  # Inner edge (touching restricted zone)
+    north_outer_edge = []  # Outer edge (chunk edge)
+    
+    for x_pos in sample_points:
+        # Restricted zone half-width at this position
+        restricted_half_width = calculate_restricted_zone_width(x_pos)
+        
+        # Chunk half-width at this position (using stations.calculate_flare_width)
+        chunk_width = stations.calculate_flare_width(x_pos)
+        chunk_half_width = chunk_width / 2.0
+        
+        # North zone: from -restricted_half_width to -chunk_half_width
+        north_inner_edge.append([x_pos, -restricted_half_width])
+        north_outer_edge.append([x_pos, -chunk_half_width])
+    
+    # Reverse outer edge to connect in order
+    north_outer_edge.reverse()
+    north_coordinates = [north_inner_edge + north_outer_edge + [north_inner_edge[0]]]
+    
+    # Build south agricultural zone (positive Y side)
+    # South zone goes from +half_width (restricted zone edge) to +chunk_half_width (chunk edge)
+    south_inner_edge = []  # Inner edge (touching restricted zone)
+    south_outer_edge = []  # Outer edge (chunk edge)
+    
+    for x_pos in sample_points:
+        # Restricted zone half-width at this position
+        restricted_half_width = calculate_restricted_zone_width(x_pos)
+        
+        # Chunk half-width at this position
+        chunk_width = stations.calculate_flare_width(x_pos)
+        chunk_half_width = chunk_width / 2.0
+        
+        # South zone: from +restricted_half_width to +chunk_half_width
+        south_inner_edge.append([x_pos, restricted_half_width])
+        south_outer_edge.append([x_pos, chunk_half_width])
+    
+    # Reverse outer edge to connect in order
+    south_outer_edge.reverse()
+    south_coordinates = [south_inner_edge + south_outer_edge + [south_inner_edge[0]]]
+    
+    # Create zone dictionaries
+    # NOTE: is_system_zone = False so players can dezone or replace these zones
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Agricultural Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "agricultural",
+                "floor": floor,
+                "is_system_zone": False,  # NOT a system zone - can be dezoned/replaced
+                "properties": {
+                    "purpose": "default_agricultural",
+                    "description": "Default agricultural zone - can be dezoned or replaced by players",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Agricultural Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "agricultural",
+                "floor": floor,
+                "is_system_zone": False,  # NOT a system zone - can be dezoned/replaced
+                "properties": {
+                    "purpose": "default_agricultural",
+                    "description": "Default agricultural zone - can be dezoned or replaced by players",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+    
+    return zones
 
 
 def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
@@ -253,6 +750,18 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     
     # Generate default restricted zone for this chunk
     restricted_zone = generate_chunk_restricted_zone(floor, chunk_index)
+    
+    # Generate industrial zones for hub platform areas (within station flare areas)
+    industrial_zones = generate_chunk_industrial_zones(floor, chunk_index)
+    
+    # Generate commercial zones interspersed within industrial zones at chunk centers
+    commercial_zones = generate_chunk_commercial_zones(floor, chunk_index)
+    
+    # Generate agricultural zones in free space between stations (outside station flare areas)
+    agricultural_zones = generate_chunk_agricultural_zones(floor, chunk_index)
+    
+    # Combine all zones
+    all_zones = [restricted_zone] + industrial_zones + commercial_zones + agricultural_zones
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",
@@ -261,7 +770,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "seed": chunk_seed,
         "geometry": geometry,
         "structures": [],
-        "zones": [restricted_zone],  # Include default restricted zone
+        "zones": all_zones,  # Include restricted zone and industrial zones (if in hub area)
         "metadata": {
             "generated": True,
             "version": CURRENT_GEOMETRY_VERSION,

@@ -18,6 +18,7 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
     industrial: true,
     'mixed-use': true,
     park: true,
+    agricultural: true,
     restricted: true,
   };
 
@@ -329,6 +330,7 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
     { label: 'Industrial', key: 'industrial' },
     { label: 'Mixed-Use', key: 'mixed-use' },
     { label: 'Park', key: 'park' },
+    { label: 'Agricultural', key: 'agricultural' },
     { label: 'Restricted', key: 'restricted' },
     { label: 'Dezone', key: 'dezone' },
   ];

@@ -22,6 +22,7 @@ describe('ZoneManager', () => {
     gameStateManager = {
       getActiveFloor: () => 0,
       getAllZones: () => [],
+      getZone: vi.fn(() => undefined), // Returns undefined by default (zone doesn't exist)
       upsertZone: vi.fn(),
       removeZone: vi.fn(),
       on: vi.fn(),
