@@ -92,30 +92,31 @@ Players can create zones of various types with freeform polygon shapes:
    - NPC Behavior: NPCs can live and work in same area
    - Density Levels: Low, Medium, High
 
-5. **Cargo Loading/Unloading Zones**
+5. **Agricultural Zones**
+   - Purpose: Farming, food production, green spaces
+   - Characteristics: Generates agricultural plots, greenhouses, farms
+   - NPC Behavior: NPCs work here, food production operations
+   - Density Levels: Low, Medium, High
+   - Special: Default agricultural zones are generated procedurally in free space between stations
+   - Player Modifications: Default agricultural zones can be dezoned or replaced by players
+
+6. **Cargo Loading/Unloading Zones**
    - Purpose: Designated cargo handling areas
    - Characteristics: Cargo docks, loading bays, storage
    - NPC Behavior: Cargo vehicles, workers
    - Special: Can connect to maglev for cargo transport
 
-6. **Local Transit Zones**
+7. **Local Transit Zones**
    - Purpose: Secondary transportation networks
    - Characteristics: Roads, transit stops, parking
    - NPC Behavior: High traffic, transit usage
    - Special: Roads grow here based on traffic
 
-7. **Park/Recreation Zones**
+8. **Park/Recreation Zones**
    - Purpose: Green spaces, recreation
    - Characteristics: Parks, playgrounds, sports facilities
    - NPC Behavior: NPCs visit for recreation, improves happiness
    - Special: No buildings, only recreational structures
-
-8. **Agricultural Zones**
-   - Purpose: Default agricultural areas between stations
-   - Characteristics: Brown/earth-tone overlay indicating agricultural area
-   - NPC Behavior: Agricultural activities, farming operations
-   - Special: Can be dezoned or replaced by players (not system zones)
-   - Default Zones: Automatically generated in free space between stations
 
 9. **Restricted Zones**
    - Purpose: Prevent or limit procedural spawning
