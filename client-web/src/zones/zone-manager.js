@@ -14,14 +14,15 @@ const DEFAULT_ZONE_RANGE = 5000; // meters along ring
 const DEFAULT_WIDTH_RANGE = 3000; // meters across width
 
 const ZONE_STYLES = {
-  residential: { fill: 'rgba(111,207,151,0.35)', stroke: 'rgba(111,207,151,0.95)' },
-  commercial: { fill: 'rgba(86,204,242,0.35)', stroke: 'rgba(86,204,242,0.95)' },
-  industrial: { fill: 'rgba(242,201,76,0.4)', stroke: 'rgba(242,201,76,0.95)' },
-  'mixed-use': { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
-  mixed_use: { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' },
-  park: { fill: 'rgba(39,174,96,0.3)', stroke: 'rgba(46,204,113,0.95)' },
-  restricted: { fill: 'rgba(231,76,60,0.4)', stroke: 'rgba(192,57,43,0.95)' },
-  dezone: { fill: 'rgba(139,69,19,0.3)', stroke: 'rgba(139,69,19,0.8)' }, // Brown for dezone (subtraction zones)
+  residential: { fill: 'rgba(111,207,151,0.35)', stroke: 'rgba(111,207,151,0.95)' }, // Light green
+  commercial: { fill: 'rgba(86,204,242,0.35)', stroke: 'rgba(86,204,242,0.95)' }, // Cyan/light blue
+  industrial: { fill: 'rgba(242,201,76,0.4)', stroke: 'rgba(242,201,76,0.95)' }, // Golden yellow
+  'mixed-use': { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' }, // Warm yellow-orange
+  mixed_use: { fill: 'rgba(255,214,102,0.4)', stroke: 'rgba(255,159,67,0.95)' }, // Warm yellow-orange
+  park: { fill: 'rgba(39,174,96,0.3)', stroke: 'rgba(46,204,113,0.95)' }, // Forest green
+  agricultural: { fill: 'rgba(160,82,45,0.4)', stroke: 'rgba(139,69,19,0.95)' }, // Sienna brown (earth/soil tone)
+  restricted: { fill: 'rgba(231,76,60,0.4)', stroke: 'rgba(192,57,43,0.95)' }, // Red (warning)
+  dezone: { fill: 'rgba(139,69,19,0.3)', stroke: 'rgba(139,69,19,0.8)' }, // Dark brown (subtraction zones)
   default: { fill: 'rgba(255,255,255,0.2)', stroke: 'rgba(255,255,255,0.9)' },
 };
 
@@ -59,6 +60,7 @@ export class ZoneManager {
       ['mixed-use', true],
       ['mixed_use', true],
       ['park', true],
+      ['agricultural', true],
       ['restricted', true],
       ['dezone', true],
     ]);

@@ -1281,6 +1281,7 @@ function categorizeZones(zones) {
     'Industrial': [],
     'Mixed-Use': [],
     'Park': [],
+    'Agricultural': [],
     'Restricted': [],
     'Other': [],
   };
@@ -1323,6 +1324,7 @@ function formatZoneTypeCategory(zoneType) {
     'industrial': 'Industrial',
     'mixed-use': 'Mixed-Use',
     'park': 'Park',
+    'agricultural': 'Agricultural',
     'restricted': 'Restricted',
   };
   
@@ -1393,6 +1395,7 @@ function getCategoryIcon(categoryName) {
     'Industrial': '🏭',
     'Mixed-Use': '🏢',
     'Park': '🌳',
+    'Agricultural': '🌾',
     'Restricted': '🚫',
     'Other': '📦',
   };

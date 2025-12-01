@@ -71,6 +71,7 @@ function createZonesToolbarContent() {
     { id: 'industrial', icon: '🏭', label: 'Industrial' },
     { id: 'mixed-use', icon: '🏢', label: 'Mixed-Use' },
     { id: 'park', icon: '🌳', label: 'Park' },
+    { id: 'agricultural', icon: '🌾', label: 'Agricultural' },
     { id: 'restricted', icon: '🚫', label: 'Restricted' },
     { id: 'dezone', icon: '⊖', label: 'Dezone' },
   ];
@@ -193,6 +194,7 @@ function selectZoneType(zoneType) {
       industrial: 'Industrial',
       'mixed-use': 'Mixed-Use',
       park: 'Park',
+      agricultural: 'Agricultural',
       restricted: 'Restricted',
       dezone: 'Dezone',
     };
