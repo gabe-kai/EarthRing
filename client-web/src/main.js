@@ -358,16 +358,39 @@ window.addEventListener('auth:register', async () => {
   }
 });
 
-window.addEventListener('auth:logout', () => {
-  console.log('User logged out');
-  wsClient.disconnect();
+window.addEventListener('auth:logout', async (event) => {
+  const reason = event.detail?.reason || 'Session expired';
+  console.log(`[Auth] User logged out: ${reason}`);
+  
+  // Disconnect WebSocket
+  try {
+    wsClient.disconnect();
+    gameStateManager.updateConnectionState('websocket', { 
+      connected: false,
+      connecting: false 
+    });
+  } catch (error) {
+    console.warn('Error disconnecting WebSocket:', error);
+  }
+  
+  // Clear game state
   gameStateManager.reset();
-  gameStateManager.updateConnectionState('websocket', { 
-    connected: false, 
-    connecting: false 
-  });
   gameStateManager.updateConnectionState('api', { authenticated: false });
-  zoneManager.clearAllZones();
+  
+  // Clear zones
+  if (typeof zoneManager !== 'undefined' && zoneManager) {
+    zoneManager.clearAllZones();
+  }
+  
+  // Hide user info and show auth UI
+  const userBar = document.getElementById('user-info-bar');
+  if (userBar) {
+    userBar.remove();
+  }
+  showAuthUI();
+  
+  // Stop any ongoing operations
+  console.log('[Auth] Cleared game state and disconnected from server. Please log in again.');
 });
 
 // Listen for panel show events

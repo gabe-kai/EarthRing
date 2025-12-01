@@ -4,7 +4,7 @@
  */
 
 import { getAPIURL } from '../config.js';
-import { getAccessToken, ensureValidToken } from '../auth/auth-service.js';
+import { getAccessToken, ensureValidToken, handleAuthenticationFailure } from '../auth/auth-service.js';
 
 /**
  * Get current player's profile
@@ -31,9 +31,27 @@ export async function getCurrentPlayerProfile() {
       const error = await response.json();
       // Server returns { "error": "...", "message": "...", "code": "..." }
       errorMessage = error.message || error.error || errorMessage;
-      // If it's an authentication error, suggest re-login
+      // If it's an authentication error, handle it
       if (response.status === 401 || error.code === 'InvalidToken' || error.code === 'MissingToken') {
-        errorMessage = 'Session expired. Please log in again.';
+        // Try to refresh token once
+        const refreshed = await ensureValidToken();
+        if (!refreshed) {
+          // ensureValidToken already handled logout and redirect
+          throw new Error('Session expired');
+        }
+        // Retry the request with new token
+        const newToken = getAccessToken();
+        const retryResponse = await fetch(getAPIURL('/api/players/me'), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${newToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!retryResponse.ok) {
+          throw new Error('Session expired');
+        }
+        return await retryResponse.json();
       }
     } catch (e) {
       errorMessage = `HTTP ${response.status}: ${response.statusText}`;

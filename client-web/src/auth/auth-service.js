@@ -245,6 +245,7 @@ export async function attemptTokenRefresh() {
       console.error('[Auth] Token refresh failed:', error.message);
       // Clear tokens on refresh failure
       logout();
+      // Don't call handleAuthenticationFailure here - it will be called by ensureValidToken
       return false;
     } finally {
       refreshInProgress = false;
@@ -253,6 +254,34 @@ export async function attemptTokenRefresh() {
   })();
   
   return refreshPromise;
+}
+
+// Track if we're currently handling an auth failure to prevent loops
+let handlingAuthFailure = false;
+
+/**
+ * Handle authentication failure - logout and redirect to sign-in
+ * This is called when token refresh fails or authentication errors occur
+ */
+export function handleAuthenticationFailure(reason = 'Session expired') {
+  // Prevent multiple simultaneous auth failure handlers
+  if (handlingAuthFailure) {
+    return;
+  }
+  handlingAuthFailure = true;
+
+  console.log(`[Auth] Authentication failed: ${reason}. Logging out...`);
+  
+  // Clear tokens immediately
+  logout();
+  
+  // Dispatch logout event to notify other systems (main.js will handle showing auth UI)
+  window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason } }));
+  
+  // Reset flag after a short delay to allow the event to propagate
+  setTimeout(() => {
+    handlingAuthFailure = false;
+  }, 100);
 }
 
 /**
@@ -268,7 +297,9 @@ export async function ensureValidToken() {
   if (isTokenExpired()) {
     const refreshed = await attemptTokenRefresh();
     if (!refreshed) {
-      return false; // Refresh failed, need to re-authenticate
+      // Refresh failed - handle authentication failure
+      handleAuthenticationFailure('Token refresh failed');
+      return false; // Need to re-authenticate
     }
   }
   

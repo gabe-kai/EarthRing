@@ -735,7 +735,9 @@ gridOverlay.setVisible(false); // Hide grid
 - Automatic token refresh: Tokens are automatically refreshed 2 minutes before expiration
 - Token expiration checking: `isTokenExpired()` validates token expiration with configurable buffer
 - Rate-limited refresh: Refresh attempts are rate-limited (5 second minimum between attempts) to prevent server overload
-- Graceful error handling: Failed refresh attempts clear tokens and require re-authentication
+- **Centralized timeout handling**: `handleAuthenticationFailure()` function centralizes logout logic when authentication fails
+- **Automatic logout on timeout**: When token refresh fails or authentication errors occur, user is automatically logged out and redirected to sign-in page
+- **Prevents console spam**: Stops all API requests and WebSocket connections when authentication fails, preventing repeated error messages
 - API request integration: All API requests automatically check and refresh tokens before making requests
 - Stops pinging server: Zone loading stops making requests when authentication fails, preventing "too many requests" errors
 

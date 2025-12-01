@@ -917,6 +917,7 @@ Handshake: Include JWT token in query parameter or header
 - Client should respond to ping frames with pong frames
 - Client can also send `ping` messages for application-level heartbeat
 - Connection timeout: 60 seconds without pong response triggers disconnect
+- **Authentication Error Handling**: If server sends authentication errors (`InvalidToken`, `MissingToken`, or authentication-related messages), client automatically logs out user and redirects to sign-in page, preventing console spam
 
 #### Protocol Version Negotiation
 

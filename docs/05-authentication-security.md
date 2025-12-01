@@ -165,7 +165,8 @@ type Claims struct {
 **Token Expiration Handling:**
 - Server returns `401 Unauthorized` with `TokenExpired` error
 - Client automatically attempts refresh
-- If refresh fails, user must re-authenticate
+- If refresh fails, client automatically logs out user and redirects to sign-in page
+- Prevents console spam and provides clear user feedback
 
 ### Token Signing
 
@@ -672,7 +673,15 @@ element.innerHTML = userInput;
 
 ## WebSocket Security
 
+**Implementation Status:** ✅ **IMPLEMENTED** (see `server/internal/api/websocket.go`)
+
 ### Authentication
+
+**Client-Side Authentication Error Handling:**
+- WebSocket client detects authentication errors in messages (`InvalidToken`, `MissingToken`, or authentication-related error text)
+- On authentication errors, client automatically calls `handleAuthenticationFailure()` to log out user
+- WebSocket connection is closed on authentication errors to prevent reconnection attempts
+- Prevents console spam and provides clear user feedback when authentication fails
 
 **Token in Handshake:**
 - Token passed as query parameter: `wss://api.earthring.game/ws?token=<jwt_token>`

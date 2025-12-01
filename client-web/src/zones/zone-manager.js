@@ -470,8 +470,9 @@ export class ZoneManager {
     } catch (error) {
       // Only log authentication errors once, and stop making requests
       if (error.message.includes('Not authenticated') || error.message.includes('Session expired')) {
-        this.logErrorOnce(error);
-        // Stop making requests when not authenticated
+        // Don't log - handleAuthenticationFailure already logged and redirected
+        // Just stop making requests
+        this.pendingFetch = false;
         return;
       }
       // Don't retry on invalid bounding box or rate limit errors - these indicate a problem with our request

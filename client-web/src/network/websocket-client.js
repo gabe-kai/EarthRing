@@ -67,6 +67,23 @@ class WebSocketClient {
         };
 
         this.ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            // Check for authentication errors in WebSocket messages
+            if (message.type === 'error' && 
+                (message.code === 'InvalidToken' || message.code === 'MissingToken' || 
+                 message.message?.includes('authentication') || message.message?.includes('unauthorized'))) {
+              console.error('[WebSocket] Authentication error:', message.message || message.error);
+              // Import and call handleAuthenticationFailure
+              import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+                handleAuthenticationFailure('WebSocket authentication failed');
+              });
+              this.disconnect();
+              return;
+            }
+          } catch (e) {
+            // Not JSON, continue with normal handling
+          }
           this.handleMessage(event.data);
         };
 
@@ -162,7 +179,17 @@ class WebSocketClient {
         this.pendingRequests.delete(message.id);
 
         if (message.type === 'error') {
-          pending.reject(new Error(message.message || message.error));
+          const error = new Error(message.message || message.error);
+          // Check if it's an authentication error
+          if (message.code === 'InvalidToken' || message.code === 'MissingToken' || 
+              message.message?.includes('authentication') || message.message?.includes('unauthorized')) {
+            // Import and call handleAuthenticationFailure
+            import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+              handleAuthenticationFailure('WebSocket authentication failed');
+            });
+            this.disconnect();
+          }
+          pending.reject(error);
         } else {
           pending.resolve(message.data);
         }

@@ -4,7 +4,7 @@
  */
 
 import { getAPIURL } from '../config.js';
-import { getAccessToken, ensureValidToken } from '../auth/auth-service.js';
+import { getAccessToken, ensureValidToken, handleAuthenticationFailure } from '../auth/auth-service.js';
 
 async function authorizedRequest(path, { method = 'GET', body } = {}) {
   // Ensure token is valid before making request
@@ -33,7 +33,8 @@ async function authorizedRequest(path, { method = 'GET', body } = {}) {
       // Try to refresh token once
       const refreshed = await ensureValidToken();
       if (!refreshed) {
-        throw new Error('Session expired. Please log in again.');
+        // ensureValidToken already handled logout and redirect
+        throw new Error('Session expired');
       }
       // Retry request with new token
       const newToken = getAccessToken();
