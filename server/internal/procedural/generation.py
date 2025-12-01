@@ -467,6 +467,118 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     return zones
 
 
+def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate commercial zones interspersed within industrial zones at chunk centers.
+    
+    Creates two 10m x 20m commercial zones at the center of each chunk:
+    - North commercial zone: 10m long (X), 20m wide (Y) on the north side of restricted zone
+    - South commercial zone: 10m long (X), 20m wide (Y) on the south side of restricted zone
+    
+    These zones are only generated within station flare areas (where industrial zones exist).
+    They create 20m x 20m squares of commercial zone breaking up the industrial zone every chunk.
+    
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+    
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
+    """
+    # Only generate commercial zones within station flare areas (where industrial zones exist)
+    if not is_within_station_flare_area(chunk_index):
+        return []
+    
+    # Calculate chunk boundaries and center
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    
+    # Commercial zone dimensions: 10m long (X), 20m wide (Y)
+    commercial_length = 10.0  # 10m along X axis
+    commercial_width = 20.0   # 20m along Y axis
+    
+    # Calculate restricted zone width at chunk center to position commercial zones correctly
+    half_width = calculate_restricted_zone_width(chunk_center_position)
+    
+    # North commercial zone: from -half_width - 20 to -half_width (20m wide)
+    # Positioned at chunk center, 10m long (5m on each side of center)
+    north_zone_x_start = chunk_center_position - (commercial_length / 2.0)
+    north_zone_x_end = chunk_center_position + (commercial_length / 2.0)
+    
+    north_coordinates = [[
+        [north_zone_x_start, -half_width - commercial_width],  # Bottom-left (outer edge)
+        [north_zone_x_end, -half_width - commercial_width],    # Bottom-right (outer edge)
+        [north_zone_x_end, -half_width],                       # Top-right (inner edge, touching restricted)
+        [north_zone_x_start, -half_width],                    # Top-left (inner edge, touching restricted)
+        [north_zone_x_start, -half_width - commercial_width]  # Close polygon
+    ]]
+    
+    # South commercial zone: from +half_width to +half_width + 20 (20m wide)
+    # Positioned at chunk center, 10m long (5m on each side of center)
+    south_zone_x_start = chunk_center_position - (commercial_length / 2.0)
+    south_zone_x_end = chunk_center_position + (commercial_length / 2.0)
+    
+    south_coordinates = [[
+        [south_zone_x_start, half_width],                      # Bottom-left (inner edge, touching restricted)
+        [south_zone_x_end, half_width],                        # Bottom-right (inner edge, touching restricted)
+        [south_zone_x_end, half_width + commercial_width],     # Top-right (outer edge)
+        [south_zone_x_start, half_width + commercial_width],   # Top-left (outer edge)
+        [south_zone_x_start, half_width]                       # Close polygon
+    ]]
+    
+    # Create zone dictionaries
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Commercial Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "commercial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_commercial",
+                    "description": "Commercial zone interspersed within industrial zone at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Commercial Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "commercial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_commercial",
+                    "description": "Commercial zone interspersed within industrial zone at hub platform",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+    
+    return zones
+
+
 def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     """
     Generate a chunk with smooth curved ring floor geometry.
@@ -508,11 +620,14 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Generate default restricted zone for this chunk
     restricted_zone = generate_chunk_restricted_zone(floor, chunk_index)
     
-    # Generate industrial zones for hub platform areas (within 1500m of hub centers)
+    # Generate industrial zones for hub platform areas (within station flare areas)
     industrial_zones = generate_chunk_industrial_zones(floor, chunk_index)
     
+    # Generate commercial zones interspersed within industrial zones at chunk centers
+    commercial_zones = generate_chunk_commercial_zones(floor, chunk_index)
+    
     # Combine all zones
-    all_zones = [restricted_zone] + industrial_zones
+    all_zones = [restricted_zone] + industrial_zones + commercial_zones
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",
