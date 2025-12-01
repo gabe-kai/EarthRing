@@ -536,7 +536,7 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 - Converts GeoJSON polygons/multipolygons to `THREE.ShapeGeometry` meshes with translucent fills and colored outlines
 - Per-zone-type visibility controls (Residential, Commercial, Industrial, Mixed-Use, Park, Restricted)
 - Keeps zone meshes in sync with `GameStateManager` events (`zoneAdded`, `zoneUpdated`, `zoneRemoved`, `zonesCleared`)
-- Zone colors: Residential (green), Commercial (blue), Industrial (orange), Mixed-Use (yellow-orange gradient), Park (light green), Restricted (red)
+- Zone colors: Residential (light green), Commercial (cyan/light blue), Industrial (golden yellow), Mixed-Use (warm yellow-orange), Park (forest green), Agricultural (sienna brown), Restricted (red), Dezone (dark brown)
 - Exposes `loadZonesAroundCamera()`, `setVisibility()`, `setZoneTypeVisibility()` for UI control
 - **Authentication-aware**: Defers all API calls until user is authenticated (prevents "Not authenticated" spam)
 - **Stream delta handling**: Listens for `stream_delta` messages and processes `zones` array automatically

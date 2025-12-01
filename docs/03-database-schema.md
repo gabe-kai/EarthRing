@@ -247,17 +247,47 @@ CREATE INDEX idx_zones_floor ON zones(floor);
 
 The `metadata` JSONB field stores zone-specific metadata:
 
-- **Default Zones** (system-generated per-chunk restricted zones):
-  ```json
-  {
-    "default_zone": "true",
-    "chunk_index": "50000",
-    "maglev_zone": "true"
-  }
-  ```
-  - `default_zone`: Indicates this is a system-generated default zone
-  - `chunk_index`: The chunk index this zone belongs to (as string)
-  - `maglev_zone`: Indicates this zone is for maglev transit (legacy, may be present)
+- **Default Zones** (system-generated per-chunk zones):
+  - **Restricted Zones**:
+    ```json
+    {
+      "default_zone": "true",
+      "chunk_index": "50000",
+      "maglev_zone": "true"
+    }
+    ```
+  - **Industrial Zones** (hub platforms):
+    ```json
+    {
+      "default_zone": "true",
+      "hub_zone": "true",
+      "chunk_index": "50000",
+      "side": "north"  // or "south"
+    }
+    ```
+  - **Commercial Zones** (hub platforms):
+    ```json
+    {
+      "default_zone": "true",
+      "hub_zone": "true",
+      "chunk_index": "50000",
+      "side": "north"  // or "south"
+    }
+    ```
+  - **Agricultural Zones**:
+    ```json
+    {
+      "default_zone": "true",
+      "chunk_index": "50000",
+      "side": "north"  // or "south"
+    }
+    ```
+  - Metadata fields:
+    - `default_zone`: Indicates this is a system-generated default zone
+    - `chunk_index`: The chunk index this zone belongs to (as string)
+    - `maglev_zone`: Indicates this zone is for maglev transit (legacy, may be present)
+    - `hub_zone`: Indicates this zone is part of a hub platform (industrial/commercial zones)
+    - `side`: Distinguishes north/south zones for industrial, commercial, and agricultural zones
 
 - **Player-Defined Zones**:
   ```json
