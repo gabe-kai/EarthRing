@@ -1471,7 +1471,7 @@ func (s *ZoneStorage) SubtractDezoneFromAllOverlapping(floor int, dezoneGeometry
 			// Unowned agricultural zones (default agricultural zones) can be dezoned by anyone
 			canDezone = true
 		}
-		
+
 		if !canDezone {
 			log.Printf("[Dezone] WARNING: Permission denied - user %d cannot dezone zone %d (owner: %v, type: %s, system: %v)", userID, zoneID, zone.OwnerID, zone.ZoneType, zone.IsSystemZone)
 			continue

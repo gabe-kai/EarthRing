@@ -326,7 +326,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 						side = sideVal
 					}
 				}
-				
+
 				var checkZoneQuery string
 				if side != "" {
 					// For zones with a side (e.g., north/south industrial zones), include side in the check
