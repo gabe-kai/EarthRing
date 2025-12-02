@@ -156,10 +156,12 @@ sceneManager.onRender((deltaTime) => {
   
   // Check if camera has moved enough to load new chunks
   // Throttle chunk loading to avoid excessive requests
+  // Skip chunk loading during teleport animation to prevent flickering
   const now = performance.now();
   if (userAuthenticated &&
       wsClient.isConnected() && 
       !pendingChunkLoad && 
+      !cameraController.isTeleporting &&
       (now - lastChunkLoadTime) >= CHUNK_LOAD_THROTTLE_MS) {
     const cameraPos = cameraController.getEarthRingPosition();
     const currentChunkIndex = positionToChunkIndex(cameraPos.x);

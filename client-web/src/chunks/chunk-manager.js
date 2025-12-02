@@ -106,6 +106,11 @@ export class ChunkManager {
   setupWebSocketHandlers() {
     // Handle stream_delta messages (server-driven streaming)
     wsClient.on('stream_delta', (data) => {
+      // Skip chunk updates during teleport to prevent flickering
+      if (this.cameraController?.isTeleporting) {
+        return;
+      }
+      
       // stream_delta can contain chunks, zones, or both
       if (data.chunks && Array.isArray(data.chunks)) {
         console.log(`[Chunks] stream_delta received: ${data.chunks.length} chunks`);
@@ -129,6 +134,11 @@ export class ChunkManager {
     // Note: This is also handled in updateStreamingPose via request/response,
     // but we keep this handler for any async acknowledgments
     wsClient.on('stream_pose_ack', (data) => {
+      // Skip chunk updates during teleport to prevent flickering
+      if (this.cameraController?.isTeleporting) {
+        return;
+      }
+      
       if (window.earthring?.debug) {
         console.log('[Chunks] Pose update acknowledged (async):', data);
       }

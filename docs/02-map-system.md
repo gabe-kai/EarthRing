@@ -37,6 +37,7 @@
   - [Chunk Loading](#chunk-loading)
   - [Spatial Indexing](#spatial-indexing)
   - [Caching](#caching)
+  - [Floating Origin Pattern](#floating-origin-pattern)
 - [Orbital Mechanics and Lighting](#orbital-mechanics-and-lighting)
   - [Ring Position](#ring-position)
   - [Coordinate Reference Point](#coordinate-reference-point)
@@ -657,6 +658,57 @@ chunks := ringmap.ChunksInRange(5000.0, 2000)
 - Cache frequently accessed chunks
 - Cache zone lookups
 - Invalidate cache on modifications
+
+### Floating Origin Pattern
+
+**⚠️ CRITICAL: Floating-Point Precision Loss at Large Distances**
+
+When rendering geometry at large distances from the origin (e.g., X=22,000,000m at theta 30°), using absolute world coordinates directly causes severe floating-point precision loss in JavaScript (64-bit IEEE 754 floats have ~15-17 decimal digits of precision).
+
+**Symptoms**:
+- **Flickering**: Geometry appears to flicker or "jump" between slightly different positions
+- **Double Layer Artifact**: Geometry appears as two slightly offset layers (similar to z-fighting but caused by precision loss)
+- **Inconsistent Rendering**: Geometry renders correctly at X≈0 but flickers badly at other pillar hub locations
+
+**Solution**: Use a **floating origin pattern** for all geometry rendering:
+
+1. **Set Group Origin**: Position the THREE.Group at the camera's X position
+2. **Local Coordinates**: Build all vertices relative to this origin (subtract origin from absolute coordinates)
+3. **Small Vertex Range**: Keep vertex coordinates in a small range (typically -500m to +500m)
+4. **World Position**: Three.js translates the entire group to the correct world position
+
+**Implementation Pattern**:
+```javascript
+// Set geometry group origin at camera position
+const originX = cameraX;
+geometryGroup.position.x = originX;
+
+// Convert absolute coordinates to local coordinates
+const toLocal = (absoluteX) => {
+  const wrapped = normalizeRelativeToCamera(absoluteX, cameraX);
+  return wrapped - originX;  // Local coordinate (small range)
+};
+
+// Build vertices using local coordinates
+vertices.forEach(vertex => {
+  const localX = toLocal(vertex.absoluteX);
+  // ... build geometry with localX (small values)
+});
+```
+
+**When to Use**:
+- ✅ **Always** when rendering Three.js meshes at large distances (>1,000,000m)
+- ✅ **Always** for zones, chunks, and structures
+- ✅ **Always** when precision is critical
+
+**When NOT to Use**:
+- ❌ Camera position tracking (can use absolute coordinates)
+- ❌ Distance calculations (use wrapped distances)
+- ❌ Coordinate conversions (use absolute coordinates)
+
+**Related Documentation**:
+- See [Zone System Design](09-zone-system.md#floating-origin-pattern) for detailed zone rendering implementation
+- Chunk rendering uses the same pattern (see `chunk-manager.js`)
 
 ## Orbital Mechanics and Lighting
 
