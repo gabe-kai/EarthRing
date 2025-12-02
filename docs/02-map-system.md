@@ -38,6 +38,8 @@
   - [Spatial Indexing](#spatial-indexing)
   - [Caching](#caching)
   - [Floating Origin Pattern](#floating-origin-pattern)
+- [Structure System](#structure-system)
+  - [Structure Placement and Validation](#structure-placement-and-validation)
 - [Orbital Mechanics and Lighting](#orbital-mechanics-and-lighting)
   - [Ring Position](#ring-position)
   - [Coordinate Reference Point](#coordinate-reference-point)

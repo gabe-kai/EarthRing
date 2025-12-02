@@ -218,8 +218,9 @@ func TestStructureStorage_ZoneRelationship(t *testing.T) {
 
 	// Test updating structure to add zone_id
 	// First, move structure2 inside the zone, then add zone_id
+	// Use position (1200.0, 0.0) to avoid collision with structure1 at (1500.0, 0.0)
 	updateInput := &StructureUpdateInput{
-		Position: &Position{X: 1500.0, Y: 0.0}, // Move inside zone
+		Position: &Position{X: 1200.0, Y: 0.0}, // Move inside zone, avoiding collision
 	}
 	_, err = storage.UpdateStructure(structure2.ID, updateInput)
 	if err != nil {
