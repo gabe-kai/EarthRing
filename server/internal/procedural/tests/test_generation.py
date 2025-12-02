@@ -68,7 +68,7 @@ def test_generate_chunk():
     # Chunk 100 is outside hub areas, so no structures expected
     assert isinstance(chunk["structures"], list)
     assert chunk["metadata"]["generated"] is True
-    assert chunk["metadata"]["version"] == 3  # Phase 2 with buildings version
+    assert chunk["metadata"]["version"] == 5  # Phase 2 with building variability version
 
 
 def test_generate_ring_floor_geometry():
@@ -103,6 +103,31 @@ def test_generate_ring_floor_geometry():
     # Check normals point up (Z direction in EarthRing)
     assert geometry["normals"][0] == [0.0, 0.0, 1.0]
     assert geometry["normals"][1] == [0.0, 0.0, 1.0]
+
+
+def test_structure_format_includes_building_subtype():
+    """Test that structures generated include building_subtype"""
+    floor = 0
+    chunk_index = 0  # Hub chunk that should have buildings
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    # Should have structures at hub
+    assert len(chunk["structures"]) > 0
+    
+    for structure in chunk["structures"]:
+        assert "id" in structure
+        assert "structure_type" in structure
+        assert "dimensions" in structure
+        assert "building_subtype" in structure
+        # Heights should be valid (5, 10, 15, or 20m)
+        assert structure["dimensions"]["height"] in [5.0, 10.0, 15.0, 20.0]
+        # Verify building_subtype matches expected values
+        if structure["structure_type"] == "industrial":
+            assert structure["building_subtype"] in ["warehouse", "factory"]
+        elif structure["structure_type"] == "agricultural":
+            assert structure["building_subtype"] in ["residence", "agri_industrial"]
 
 
 def test_generate_chunk_with_buildings():

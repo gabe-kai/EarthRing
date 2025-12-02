@@ -684,7 +684,7 @@ func DecompressMetadata(data []byte) (*ChunkMetadata, error) {
   "chunks": [
     {
       "id": "0_12345",
-      "version": 3,
+      "version": 5,
       "geometry": {
         "format": "binary_gzip",
         "data": "<base64_encoded_compressed_geometry>",

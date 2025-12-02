@@ -158,6 +158,12 @@ export class StructureManager {
 
     // Calculate structure dimensions from properties
     const dimensions = this.getStructureDimensions(structure);
+    
+    // Debug: Log building variability
+    if (window.earthring?.debug && structure.structure_type === 'building') {
+      const subtype = structure.building_subtype || 'N/A';
+      console.log(`[Structures] Building ${structure.id}: ${subtype} - ${dimensions.width.toFixed(1)}x${dimensions.depth.toFixed(1)}x${dimensions.height.toFixed(1)}m`);
+    }
     const structureX = structure.position.x;
     const structureY = structure.position.y;
     const floor = structure.floor ?? 0;
@@ -290,7 +296,16 @@ export class StructureManager {
     const structureType = structure.structure_type?.toLowerCase() || 'building';
     const defaultDims = defaults[structureType] || defaults.building;
 
-    // Extract dimensions from properties JSONB
+    // First, try to get dimensions directly from structure.dimensions (new format)
+    if (structure.dimensions && typeof structure.dimensions === 'object') {
+      return {
+        width: structure.dimensions.width ?? defaultDims.width,
+        depth: structure.dimensions.depth ?? defaultDims.depth,
+        height: structure.dimensions.height ?? defaultDims.height,
+      };
+    }
+
+    // Fallback: Extract dimensions from properties JSONB (legacy format)
     if (structure.properties) {
       try {
         const props = typeof structure.properties === 'string' 

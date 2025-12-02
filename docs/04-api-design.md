@@ -1294,7 +1294,7 @@ All WebSocket messages use JSON:
      "type": "chunk_updated",
      "data": {
        "chunk_id": "0_12345",
-       "version": 3,
+       "version": 5,
        "changes": {
          "structures": ["added", "removed"],
          "zones": ["modified"]
@@ -1530,6 +1530,9 @@ See `docs/05-authentication-security.md` for detailed rate limiting specificatio
 **Version History:**
 - Version 1: Initial rectangular geometry (4 vertices, 2 faces)
 - Version 2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
+- Version 3: Phase 2 - Added building generation (grid-based city generation with buildings)
+- Version 4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
+- Version 5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
 
 **Bulk Operations:**
 - `GET /api/chunks/invalidate-outdated`: Delete all outdated chunks (supports filtering)

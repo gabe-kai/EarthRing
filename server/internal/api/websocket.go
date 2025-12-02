@@ -882,10 +882,10 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 
 						// Convert structure to format expected by client
 						structureFeature := map[string]interface{}{
-							"id":            fmt.Sprintf("%d", structure.ID),
-							"type":          "building",
+							"id":             fmt.Sprintf("%d", structure.ID),
+							"type":           "building",
 							"structure_type": structure.StructureType,
-							"floor":         structure.Floor,
+							"floor":          structure.Floor,
 							"position": map[string]interface{}{
 								"x": structure.Position.X,
 								"y": structure.Position.Y,
@@ -905,6 +905,16 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								}
 								if windows, ok := modelDataMap["windows"].([]interface{}); ok {
 									structureFeature["windows"] = windows
+								}
+							}
+						}
+
+						// Extract building_subtype from properties if present
+						if len(structure.Properties) > 0 {
+							var propertiesMap map[string]interface{}
+							if err := json.Unmarshal(structure.Properties, &propertiesMap); err == nil {
+								if buildingSubtype, ok := propertiesMap["building_subtype"].(string); ok {
+									structureFeature["building_subtype"] = buildingSubtype
 								}
 							}
 						}

@@ -6,12 +6,19 @@
 
 #### Building Generation (`test_buildings.py`)
 - ✅ `test_get_building_seed` - Seed generation for buildings
-- ✅ `test_generate_building_industrial` - Industrial building generation
+- ✅ `test_generate_building_agricultural` - Agricultural building generation with subtypes
+- ✅ `test_generate_building_industrial` - Industrial building generation with subtypes
 - ✅ `test_generate_building_commercial` - Commercial building generation
 - ✅ `test_generate_building_mixed_use` - Mixed-use building generation
 - ✅ `test_building_deterministic` - Deterministic generation (same seed = same building)
 - ✅ `test_building_windows` - Window pattern generation
 - ✅ `test_building_corners` - Building corner validation
+- ✅ `test_building_height_constraints` - Validates all buildings have heights of 5, 10, 15, or 20m
+- ✅ `test_building_footprint_variability` - Verifies warehouses are larger than factories
+- ✅ `test_window_density_by_subtype` - Ensures window density varies by building subtype
+- ✅ `test_building_subtype_distribution` - Confirms correct subtype distribution
+- ✅ `test_residential_building_height_range` - Validates residential building height variety
+- ✅ `test_building_subtype_in_properties` - Verifies building_subtype is in properties
 
 #### Grid Generation (`test_grid.py`)
 - ✅ `test_generate_city_grid_basic` - Basic grid generation
@@ -35,6 +42,7 @@
 - ✅ `test_generate_chunk_mixed_use_zones` - Mixed-use zone generation at hubs
 - ✅ `test_generate_chunk_structures` - Structure generation in zones
 - ✅ `test_generate_chunk_building_validation` - Building boundary validation
+- ✅ `test_structure_format_includes_building_subtype` - Verifies structures include building_subtype
 
 ### ✅ Go Server Tests
 
@@ -44,19 +52,20 @@
   - ✅ `stores chunk with empty structures` - Empty structure list handled
   - ✅ `updates chunk structure_ids when regenerating` - Structure ID updates on regeneration
   - ✅ `stores structures with windows and dimensions in model_data` - Full structure data persistence
+  - ✅ `stores structures with building_subtype and validates height` - Building subtype and height validation
 
 ## Test Organization
 
 ### Current Structure
 ```
 server/internal/procedural/tests/
-├── test_buildings.py (7 tests)
+├── test_buildings.py (14 tests)
 ├── test_grid.py (6 tests)
 ├── test_api.py (5 tests)
-└── test_generation.py (6 tests)
+└── test_generation.py (7 tests)
 
 server/internal/database/
-└── chunks_test.go (includes TestChunkStorage_StoreChunk_WithStructures - 4 subtests)
+└── chunks_test.go (includes TestChunkStorage_StoreChunk_WithStructures - 5 subtests)
 ```
 
 ### Test File Locations
@@ -67,9 +76,12 @@ server/internal/database/
 
 ### ✅ Building Generation
 - Basic building shapes (rectangular)
-- Building types (industrial, commercial, mixed-use)
-- Building dimensions based on zone type and importance
-- Window pattern generation
+- Building types (industrial, commercial, mixed-use, agricultural, residential)
+- Building subtypes (warehouse, factory, residence, agri_industrial, retail, mixed_use)
+- Building dimensions based on zone type, subtype, and importance
+- Building heights: 5, 10, 15, or 20m (within single 20m level)
+- Varied footprints: 10-80m width/depth depending on type and subtype
+- Window pattern generation with density varying by subtype
 - Building seed derivation
 - Deterministic generation
 - Building corner validation
@@ -214,13 +226,17 @@ server/internal/database/
 ## Test Quality Metrics
 
 ### Current Coverage
-- **Python service**: ~80% (24/30 potential core tests) ✅
-- **Go persistence**: ~60% (4/6 potential structure persistence tests) ✅
+- **Python service**: ~90% (27/30 potential core tests) ✅
+  - Building generation: 14 tests (all core functionality)
+  - Grid generation: 6 tests
+  - API integration: 5 tests (includes structure format validation)
+  - Generation service: 7 tests
+- **Go persistence**: ~83% (5/6 potential structure persistence tests) ✅
 - **Integration**: ~20% (1/5 potential integration tests) ⚠️
 
 ### Target Coverage
-- **Python service**: 95% (all core functionality tested)
-- **Go persistence**: 100% (all persistence paths tested)
+- **Python service**: 95% (all core functionality tested) - **CLOSE**
+- **Go persistence**: 100% (all persistence paths tested) - **CLOSE**
 - **Integration**: 80% (all critical flows tested)
 
 ## Running Tests

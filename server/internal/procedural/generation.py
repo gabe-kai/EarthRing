@@ -27,7 +27,9 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 #   1: Initial rectangular geometry (4 vertices, 2 faces)
 #   2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
 #   3: Phase 2 - Added building generation (grid-based city generation with buildings)
-CURRENT_GEOMETRY_VERSION = 3
+#   4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
+#   5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
+CURRENT_GEOMETRY_VERSION = 5
 
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
@@ -1046,6 +1048,7 @@ def _generate_structures_for_zones(
                         "id": structure_id,
                         "type": "building",
                         "structure_type": building["building_type"],
+                        "building_subtype": building.get("building_subtype"),  # Include building subtype for variety
                         "position": {
                             "x": building["position"][0],
                             "y": building["position"][1],

@@ -889,7 +889,7 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 				Floor:      0,
 				ChunkIndex: 20000,
 				Width:      400.0,
-				Version:    3,
+				Version:    5, // Updated to version 5 (building variability)
 			},
 			Geometry: &procedural.ChunkGeometry{
 				Type:     "ring_floor",
@@ -901,34 +901,36 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 			},
 			Structures: []interface{}{
 				map[string]interface{}{
-					"id":            "proc_0_20000_0_-3",
-					"type":          "building",
+					"id":             "proc_0_20000_0_-3",
+					"type":           "building",
 					"structure_type": "industrial",
 					"position": map[string]interface{}{
 						"x": 25.0,
 						"y": -175.0,
 					},
-					"floor":         0,
-					"dimensions":    map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 30.0},
-					"windows":       []interface{}{},
-					"properties":    map[string]interface{}{"seed": 12345, "zone_type": "industrial"},
-					"is_procedural": true,
-					"procedural_seed": float64(12345),
+					"floor":            0,
+					"dimensions":       map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 10.0}, // Valid height (5, 10, 15, or 20m)
+					"windows":          []interface{}{},
+					"properties":       map[string]interface{}{"seed": 12345, "zone_type": "industrial", "building_subtype": "warehouse"},
+					"building_subtype": "warehouse",
+					"is_procedural":    true,
+					"procedural_seed":  float64(12345),
 				},
 				map[string]interface{}{
-					"id":            "proc_0_20000_1_-3",
-					"type":          "building",
+					"id":             "proc_0_20000_1_-3",
+					"type":           "building",
 					"structure_type": "commercial",
 					"position": map[string]interface{}{
 						"x": 75.0,
 						"y": -175.0,
 					},
-					"floor":         0,
-					"dimensions":    map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 50.0},
-					"windows":       []interface{}{},
-					"properties":    map[string]interface{}{"seed": 67890, "zone_type": "commercial"},
-					"is_procedural": true,
-					"procedural_seed": float64(67890),
+					"floor":            0,
+					"dimensions":       map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 15.0}, // Valid height (5, 10, 15, or 20m)
+					"windows":          []interface{}{},
+					"properties":       map[string]interface{}{"seed": 67890, "zone_type": "commercial", "building_subtype": "retail"},
+					"building_subtype": "retail",
+					"is_procedural":    true,
+					"procedural_seed":  float64(67890),
 				},
 			},
 			Zones: []interface{}{},
@@ -1010,7 +1012,7 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 				Floor:      0,
 				ChunkIndex: 20001,
 				Width:      400.0,
-				Version:    3,
+				Version:    5, // Updated to version 5 (building variability)
 			},
 			Geometry: &procedural.ChunkGeometry{
 				Type:     "ring_floor",
@@ -1054,7 +1056,7 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 				Floor:      0,
 				ChunkIndex: 20002,
 				Width:      400.0,
-				Version:    3,
+				Version:    5, // Updated to version 5 (building variability)
 			},
 			Geometry: &procedural.ChunkGeometry{
 				Type:     "ring_floor",
@@ -1066,19 +1068,20 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 			},
 			Structures: []interface{}{
 				map[string]interface{}{
-					"id":            "proc_0_20002_0_0",
-					"type":          "building",
+					"id":             "proc_0_20002_0_0",
+					"type":           "building",
 					"structure_type": "industrial",
 					"position": map[string]interface{}{
 						"x": 25.0,
 						"y": -150.0,
 					},
-					"floor":         0,
-					"dimensions":    map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 30.0},
-					"windows":       []interface{}{},
-					"properties":    map[string]interface{}{"seed": 11111},
-					"is_procedural": true,
-					"procedural_seed": float64(11111),
+					"floor":            0,
+					"dimensions":       map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 5.0}, // Valid height (5, 10, 15, or 20m)
+					"windows":          []interface{}{},
+					"properties":       map[string]interface{}{"seed": 11111, "building_subtype": "warehouse"},
+					"building_subtype": "warehouse",
+					"is_procedural":    true,
+					"procedural_seed":  float64(11111),
 				},
 			},
 			Zones: []interface{}{},
@@ -1112,24 +1115,25 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 				Floor:      0,
 				ChunkIndex: 20002,
 				Width:      400.0,
-				Version:    3,
+				Version:    5, // Updated to version 5 (building variability)
 			},
 			Geometry: genResponse1.Geometry,
 			Structures: []interface{}{
 				map[string]interface{}{
-					"id":            "proc_0_20002_1_0",
-					"type":          "building",
+					"id":             "proc_0_20002_1_0",
+					"type":           "building",
 					"structure_type": "commercial",
 					"position": map[string]interface{}{
 						"x": 75.0,
 						"y": -150.0,
 					},
-					"floor":         0,
-					"dimensions":    map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 50.0},
-					"windows":       []interface{}{},
-					"properties":    map[string]interface{}{"seed": 22222},
-					"is_procedural": true,
-					"procedural_seed": float64(22222),
+					"floor":            0,
+					"dimensions":       map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 20.0}, // Valid height (5, 10, 15, or 20m)
+					"windows":          []interface{}{},
+					"properties":       map[string]interface{}{"seed": 22222, "building_subtype": "factory"},
+					"building_subtype": "factory",
+					"is_procedural":    true,
+					"procedural_seed":  float64(22222),
 				},
 			},
 			Zones: []interface{}{},
@@ -1181,7 +1185,7 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 				Floor:      0,
 				ChunkIndex: 20003,
 				Width:      400.0,
-				Version:    3,
+				Version:    5, // Updated to version 5 (building variability)
 			},
 			Geometry: &procedural.ChunkGeometry{
 				Type:     "ring_floor",
@@ -1193,19 +1197,20 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 			},
 			Structures: []interface{}{
 				map[string]interface{}{
-					"id":            "proc_0_20003_0_0",
-					"type":          "building",
+					"id":             "proc_0_20003_0_0",
+					"type":           "building",
 					"structure_type": "industrial",
 					"position": map[string]interface{}{
 						"x": 50.0,
 						"y": -200.0,
 					},
-					"floor":         0,
-					"dimensions":    map[string]interface{}{"width": 30.0, "depth": 30.0, "height": 40.0},
-					"windows":       windowsData,
-					"properties":    map[string]interface{}{"seed": 55555},
-					"is_procedural": true,
-					"procedural_seed": float64(55555),
+					"floor":            0,
+					"dimensions":       map[string]interface{}{"width": 30.0, "depth": 30.0, "height": 10.0}, // Updated to valid height (5, 10, 15, or 20m)
+					"windows":          windowsData,
+					"properties":       map[string]interface{}{"seed": 55555, "building_subtype": "warehouse"},
+					"building_subtype": "warehouse",
+					"is_procedural":    true,
+					"procedural_seed":  float64(55555),
 				},
 			},
 			Zones: []interface{}{},
@@ -1260,6 +1265,141 @@ func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
 			}
 		} else {
 			t.Error("model_data should contain windows")
+		}
+
+		// Verify building_subtype is stored in properties
+		if len(structRecord.Properties) > 0 {
+			var propertiesMap map[string]interface{}
+			if err := json.Unmarshal(structRecord.Properties, &propertiesMap); err == nil {
+				if buildingSubtype, ok := propertiesMap["building_subtype"].(string); ok {
+					if buildingSubtype != "warehouse" {
+						t.Errorf("Expected building_subtype 'warehouse', got '%s'", buildingSubtype)
+					}
+				} else {
+					t.Error("Structure properties should contain building_subtype")
+				}
+			}
+		}
+
+		// Verify height is valid (5, 10, 15, or 20m)
+		if dimensions, ok := modelData["dimensions"].(map[string]interface{}); ok {
+			if height, ok := dimensions["height"].(float64); ok {
+				validHeights := []float64{5.0, 10.0, 15.0, 20.0}
+				isValid := false
+				for _, validHeight := range validHeights {
+					if height == validHeight {
+						isValid = true
+						break
+					}
+				}
+				if !isValid {
+					t.Errorf("Height %v is not a valid height (must be 5, 10, 15, or 20m)", height)
+				}
+			}
+		}
+	})
+
+	t.Run("stores structures with building_subtype and validates height", func(t *testing.T) {
+		genResponse := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20004",
+				Floor:      0,
+				ChunkIndex: 20004,
+				Width:      400.0,
+				Version:    5,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{
+				map[string]interface{}{
+					"id":               "proc_0_20004_0_0",
+					"type":             "building",
+					"structure_type":   "industrial",
+					"building_subtype": "factory",
+					"position": map[string]interface{}{
+						"x": 50.0,
+						"y": -200.0,
+					},
+					"floor":           0,
+					"dimensions":      map[string]interface{}{"width": 40.0, "depth": 35.0, "height": 15.0},
+					"windows":         []interface{}{},
+					"properties":      map[string]interface{}{"seed": 66666, "building_subtype": "factory"},
+					"is_procedural":   true,
+					"procedural_seed": float64(66666),
+				},
+			},
+			Zones: []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 20004, genResponse, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk: %v", err)
+		}
+
+		// Verify structure was stored with building_subtype
+		metadata, err := storage.GetChunkMetadata(0, 20004)
+		if err != nil {
+			t.Fatalf("Failed to get metadata: %v", err)
+		}
+
+		data, err := storage.GetChunkData(metadata.ID)
+		if err != nil {
+			t.Fatalf("Failed to get chunk data: %v", err)
+		}
+
+		if len(data.StructureIDs) != 1 {
+			t.Fatalf("Expected 1 structure, got %d", len(data.StructureIDs))
+		}
+
+		structRecord, err := NewStructureStorage(db).GetStructure(data.StructureIDs[0])
+		if err != nil {
+			t.Fatalf("Failed to get structure: %v", err)
+		}
+
+		// Verify building_subtype is in properties
+		if len(structRecord.Properties) == 0 {
+			t.Fatal("Structure should have properties")
+		}
+
+		var propertiesMap map[string]interface{}
+		if err := json.Unmarshal(structRecord.Properties, &propertiesMap); err != nil {
+			t.Fatalf("Failed to unmarshal properties: %v", err)
+		}
+
+		buildingSubtype, ok := propertiesMap["building_subtype"].(string)
+		if !ok {
+			t.Error("Structure properties should contain building_subtype")
+		} else if buildingSubtype != "factory" {
+			t.Errorf("Expected building_subtype 'factory', got '%s'", buildingSubtype)
+		}
+
+		// Verify height is valid (5, 10, 15, or 20m)
+		if len(structRecord.ModelData) > 0 {
+			var modelData map[string]interface{}
+			if err := json.Unmarshal(structRecord.ModelData, &modelData); err == nil {
+				if dimensions, ok := modelData["dimensions"].(map[string]interface{}); ok {
+					if height, ok := dimensions["height"].(float64); ok {
+						validHeights := []float64{5.0, 10.0, 15.0, 20.0}
+						isValid := false
+						for _, validHeight := range validHeights {
+							if height == validHeight {
+								isValid = true
+								break
+							}
+						}
+						if !isValid {
+							t.Errorf("Height %v is not a valid height (must be 5, 10, 15, or 20m)", height)
+						}
+					}
+				}
+			}
 		}
 	})
 }

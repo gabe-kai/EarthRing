@@ -40,7 +40,7 @@ def test_generate_chunk():
     assert data["chunk"]["chunk_index"] == 12345
     # Chunk 12345 is far from any hub, should have base width
     assert data["chunk"]["width"] == 400.0
-    assert data["chunk"]["version"] == 3  # Phase 2 with buildings version
+    assert data["chunk"]["version"] == 5  # Phase 2 with building variability version
     # Geometry should be present (Phase 2) - now with smooth curved geometry
     assert data["geometry"] is not None
     assert data["geometry"]["type"] == "ring_floor"
@@ -77,6 +77,15 @@ def test_generate_chunk_at_hub_center():
     # Hub chunks should have structures (buildings)
     assert isinstance(data["structures"], list)
     assert len(data["structures"]) > 0
+    # Verify structures have correct format with dimensions and subtypes
+    for structure in data["structures"]:
+        assert "id" in structure
+        assert "structure_type" in structure
+        assert "dimensions" in structure
+        assert structure["dimensions"]["height"] in [5.0, 10.0, 15.0, 20.0]  # Valid heights
+        # Buildings should have building_subtype
+        if structure.get("structure_type") in ["industrial", "agricultural"]:
+            assert "building_subtype" in structure
     # Hub chunks should have multiple zones (restricted, industrial, commercial, mixed-use)
     assert len(data["zones"]) > 1
 

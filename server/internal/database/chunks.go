@@ -393,7 +393,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 		// Create structures from generation response if any (before storing chunk_data)
 		var structureIDs []int64
 		if len(genResponse.Structures) > 0 {
-
 			for _, structureData := range genResponse.Structures {
 				// Convert structure data to StructureCreateInput
 				structureMap, ok := structureData.(map[string]interface{})
@@ -403,8 +402,8 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				}
 
 				// Extract structure properties
-				structureType, _ := structureMap["structure_type"].(string)
-				if structureType == "" {
+				structureType, ok := structureMap["structure_type"].(string)
+				if !ok || structureType == "" {
 					log.Printf("[StoreChunk] Warning: structure missing structure_type, skipping")
 					continue
 				}
@@ -415,15 +414,29 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					log.Printf("[StoreChunk] Warning: structure position is not a map, skipping")
 					continue
 				}
-				posX, _ := posMap["x"].(float64)
-				posY, _ := posMap["y"].(float64)
+				posX, ok := posMap["x"].(float64)
+				if !ok {
+					log.Printf("[StoreChunk] Warning: structure missing X coordinate, skipping")
+					continue
+				}
+				posY, ok := posMap["y"].(float64)
+				if !ok {
+					log.Printf("[StoreChunk] Warning: structure missing Y coordinate, skipping")
+					continue
+				}
 
-				// Extract floor
-				floorVal, _ := structureMap["floor"].(float64)
+				// Extract floor (default to 0 if missing)
+				floorVal, ok := structureMap["floor"].(float64)
+				if !ok {
+					floorVal = 0.0
+				}
 				structFloor := int(floorVal)
 
 				// Extract optional fields
-				isProcedural, _ := structureMap["is_procedural"].(bool)
+				isProcedural, ok := structureMap["is_procedural"].(bool)
+				if !ok {
+					isProcedural = false // Default to false if missing
+				}
 				var proceduralSeed *int64
 				if seedVal, ok := structureMap["procedural_seed"].(float64); ok {
 					seed := int64(seedVal)
@@ -467,12 +480,12 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				`
 
 				var structID int64
-				rotation, _ := structureMap["rotation"].(float64)
-				if rotation == 0 {
+				rotation, ok := structureMap["rotation"].(float64)
+				if !ok {
 					rotation = 0.0
 				}
-				scale, _ := structureMap["scale"].(float64)
-				if scale == 0 {
+				scale, ok := structureMap["scale"].(float64)
+				if !ok || scale == 0 {
 					scale = 1.0
 				}
 
