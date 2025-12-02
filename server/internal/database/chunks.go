@@ -471,6 +471,8 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 
 				// Insert structure directly into database within transaction
 				// Bypass validation for procedural structures (they're deterministic and guaranteed valid)
+				// Use ST_SetSRID(ST_MakePoint(...), 0) for PostGIS GEOMETRY(POINT, 0) type
+				// (Migration 000023 converts structures.position from POINT to GEOMETRY)
 				structureQuery := `
 					INSERT INTO structures (
 						structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
@@ -507,6 +509,15 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					zoneIDVal = sql.NullInt64{Int64: *zoneID, Valid: true}
 				}
 
+				// Use a savepoint so that if one structure insert fails, we can rollback just that insert
+				// without aborting the entire transaction
+				savepointName := fmt.Sprintf("sp_structure_%d", len(structureIDs))
+				_, spErr := tx.Exec(fmt.Sprintf("SAVEPOINT %s", savepointName))
+				if spErr != nil {
+					log.Printf("[StoreChunk] Warning: failed to create savepoint for structure: %v", spErr)
+					continue
+				}
+
 				err = tx.QueryRow(
 					structureQuery,
 					structureType,
@@ -523,9 +534,21 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					modelDataJSONInterface,
 				).Scan(&structID)
 				if err != nil {
-					log.Printf("[StoreChunk] Warning: failed to create structure for chunk %d_%d: %v", floor, chunkIndex, err)
+					// Rollback to savepoint to recover from the error
+					_, rollbackErr := tx.Exec(fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName))
+					if rollbackErr != nil {
+						log.Printf("[StoreChunk] Warning: failed to rollback to savepoint: %v", rollbackErr)
+					}
+					log.Printf("[StoreChunk] Warning: failed to create structure for chunk %d_%d: %v (skipped)", floor, chunkIndex, err)
 					continue
 				}
+
+				// Release the savepoint on success
+				_, releaseErr := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName))
+				if releaseErr != nil {
+					log.Printf("[StoreChunk] Warning: failed to release savepoint: %v", releaseErr)
+				}
+
 				structureIDs = append(structureIDs, structID)
 			}
 		}

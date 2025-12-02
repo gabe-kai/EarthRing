@@ -25,7 +25,8 @@ import (
 //	3: Phase 2 - Added building generation (grid-based city generation with buildings)
 //	4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
 //	5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
-const CurrentGeometryVersion = 5
+//	6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
+const CurrentGeometryVersion = 6
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {

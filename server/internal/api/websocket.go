@@ -893,7 +893,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							"rotation":      structure.Rotation,
 							"scale":         structure.Scale,
 							"is_procedural": structure.IsProcedural,
-							"properties":    structure.Properties,
+							// Properties will be set below as parsed object
 						}
 
 						// Extract dimensions and windows from model_data if present
@@ -909,14 +909,22 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							}
 						}
 
-						// Extract building_subtype from properties if present
+						// Extract properties and parse as JSON object (not RawMessage) for client
+						var propertiesMap map[string]interface{}
 						if len(structure.Properties) > 0 {
-							var propertiesMap map[string]interface{}
 							if err := json.Unmarshal(structure.Properties, &propertiesMap); err == nil {
+								// Extract building_subtype if present
 								if buildingSubtype, ok := propertiesMap["building_subtype"].(string); ok {
 									structureFeature["building_subtype"] = buildingSubtype
 								}
+								// Set properties as parsed object (not RawMessage) so client can access colors
+								structureFeature["properties"] = propertiesMap
+							} else {
+								// If unmarshal fails, set properties as RawMessage (fallback)
+								structureFeature["properties"] = structure.Properties
 							}
+						} else {
+							structureFeature["properties"] = map[string]interface{}{}
 						}
 
 						// Add procedural seed if present

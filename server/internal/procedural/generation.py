@@ -29,7 +29,8 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 #   3: Phase 2 - Added building generation (grid-based city generation with buildings)
 #   4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
 #   5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
-CURRENT_GEOMETRY_VERSION = 5
+#   6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
+CURRENT_GEOMETRY_VERSION = 6
 
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
@@ -865,6 +866,10 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Calculate chunk position along ring (in meters)
     # Chunk index 0 starts at position 0, each chunk is 1000m long
     chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    
+    # Get hub name for color palette lookup
+    hub_name = stations.get_hub_name_for_position(chunk_center_position)
 
     # Adjust geometry vertices to absolute positions
     # Add chunk start position to X coordinates and set floor level
@@ -904,7 +909,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     if BUILDING_GENERATION_AVAILABLE:
         try:
             all_structures = _generate_structures_for_zones(
-                all_zones, floor, chunk_index, chunk_seed
+                all_zones, floor, chunk_index, chunk_seed, hub_name
             )
         except Exception as e:
             # If building generation fails, return empty structures but still return zones
@@ -940,7 +945,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
 
 
 def _generate_structures_for_zones(
-    zones: list, floor: int, chunk_index: int, chunk_seed: int
+    zones: list, floor: int, chunk_index: int, chunk_seed: int, hub_name: Optional[str] = None
 ) -> list:
     """
     Generate buildings and structures for zones in a chunk.
@@ -1007,13 +1012,14 @@ def _generate_structures_for_zones(
                         chunk_seed, cell_x, cell_y
                     )
                     
-                    # Generate building
+                    # Generate building with hub name for color palette
                     building = buildings.generate_building(
                         tuple(cell["position"]),
                         zone_type,
                         zone_importance,
                         building_seed,
                         floor,
+                        hub_name,
                     )
                     
                     # Validate building footprint is completely within zone
@@ -1043,11 +1049,12 @@ def _generate_structures_for_zones(
                     
                     # Convert building to structure format expected by client
                     # Client expects: { id, structure_type, position: {x, y}, floor, ... }
+                    # structure_type must be "building" (not zone type) for client to recognize it
                     structure_id = f"proc_{floor}_{chunk_index}_{cell_x}_{cell_y}"
                     structure = {
                         "id": structure_id,
                         "type": "building",
-                        "structure_type": building["building_type"],
+                        "structure_type": "building",  # Always "building" for client recognition
                         "building_subtype": building.get("building_subtype"),  # Include building subtype for variety
                         "position": {
                             "x": building["position"][0],
@@ -1056,10 +1063,14 @@ def _generate_structures_for_zones(
                         "floor": floor,
                         "dimensions": building["dimensions"],
                         "windows": building["windows"],
-                        "properties": building["properties"],
+                        "properties": building.get("properties", {}),  # Include all properties, including colors
                         "is_procedural": True,
                         "procedural_seed": building_seed,
                     }
+                    # Verify colors are included (debug)
+                    if building.get("properties", {}).get("colors"):
+                        if len(structures) < 3:  # Only log first few
+                            print(f"Structure with colors: {structure_id}, colors present: {bool(structure['properties'].get('colors'))}")
                     structures.append(structure)
         except Exception as e:
             # Log error but continue with other zones

@@ -121,7 +121,7 @@ export class GridOverlay {
   buildGridGroup() {
     this.group = new THREE.Group();
     this.group.name = 'GridOverlay';
-    this.group.renderOrder = 1;
+    this.group.renderOrder = 0; // Render first (lowest layer)
     this.group.frustumCulled = false;
     
     // Create separate groups for major and minor lines
@@ -193,7 +193,7 @@ export class GridOverlay {
         `,
         transparent: true,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true, // Enable depth test so grid respects depth buffer from structures
         side: THREE.DoubleSide, // Render both sides of quads
       });
     };
@@ -249,7 +249,8 @@ export class GridOverlay {
     if (forceUpdate || (movedEnough && throttleExpired)) {
       // Only update grid group position when regenerating grid lines
       // This keeps the grid stable in world space instead of following the camera
-      this.group.position.set(anchorThree.x, floorHeight, anchorThree.z);
+      // Position below floor to avoid z-fighting with platforms and ensure grid renders under structures
+      this.group.position.set(anchorThree.x, floorHeight - 0.03, anchorThree.z);
       
       this.lastUpdatePosition = { x: worldX, y: worldY };
       this.lastUpdateTime = now;

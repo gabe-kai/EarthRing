@@ -68,7 +68,7 @@ def test_generate_chunk():
     # Chunk 100 is outside hub areas, so no structures expected
     assert isinstance(chunk["structures"], list)
     assert chunk["metadata"]["generated"] is True
-    assert chunk["metadata"]["version"] == 5  # Phase 2 with building variability version
+    assert chunk["metadata"]["version"] == 6  # Phase 2 with 4m floor system and new window types version
 
 
 def test_generate_ring_floor_geometry():

@@ -40,7 +40,7 @@ def test_generate_chunk():
     assert data["chunk"]["chunk_index"] == 12345
     # Chunk 12345 is far from any hub, should have base width
     assert data["chunk"]["width"] == 400.0
-    assert data["chunk"]["version"] == 5  # Phase 2 with building variability version
+    assert data["chunk"]["version"] == 6  # Phase 2 with 4m floor system and new window types version
     # Geometry should be present (Phase 2) - now with smooth curved geometry
     assert data["geometry"] is not None
     assert data["geometry"]["type"] == "ring_floor"

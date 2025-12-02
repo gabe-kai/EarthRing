@@ -423,10 +423,52 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
   - Other types: ~60% density (default)
 - Occasional missing windows for variation (10% chance)
 
+**New Window System (4m Floor Height):**
+- Standard floor height changed from 5m to 4m (1m logistics floor, 3m living space)
+- Three window types per floor:
+  - **Full-height windows**: 1.0m to 4.0m (3m tall), do not overlap logistics floor
+  - **Standard windows**: 2.0m to 3.0m (1m tall)
+  - **Ceiling windows**: 3.25m to 3.75m (0.5m tall)
+- Pattern repeats for each floor (buildings can be 1-5 floors, 4m, 8m, 12m, 16m, or 20m tall)
+- Windows only on front facade (performance optimization)
+
+**Hub-Specific Color Palettes:**
+- ✅ **IMPLEMENTED** - Buildings use hub-specific color palettes based on their location
+- Color palettes are stored in `server/config/hub-color-palettes.json`
+- Each of the 12 pillar hubs has unique color schemes for each zone type:
+  - Industrial: Dark, utilitarian colors (metals, concrete, industrial materials)
+  - Commercial: Vibrant, welcoming colors (bright whites, colors, glass)
+  - Residential: Warm, homely colors (earth tones, wood, soft colors)
+  - Parks: Natural, green colors (greens, earth tones, natural materials)
+  - Agricultural: Earthy, functional colors (browns, greens, natural materials)
+- Color components: foundation, walls, roofs, windows_doors, trim
+- Colors are applied via shader-based rendering (foundations, walls, windows, doors, trim rendered procedurally)
+- Colors are loaded by the procedural service during building generation
+- Hub name is determined from chunk position using `stations.get_hub_name_for_position()`
+- Color palettes are loaded via `color_palettes.get_hub_colors()` which handles hub name mapping
+- API endpoint: `GET /api/config/hub-colors` serves the color palettes to clients (public, no auth required)
+- Mixed-use zones use Commercial palette colors (automatically mapped)
+- Zone type normalization handles variations ("mixed-use", "mixed_use", "Mixed-Use" all map correctly)
+- Colors are stored in building properties and passed through to client for rendering
+- Client-side shader uniforms receive color values and apply them to building materials
+
+**Building Rendering:**
+- ✅ **Shader-based rendering** - Windows, doors, foundations, and trim are rendered procedurally in shaders
+- Significantly reduces draw calls and eliminates z-fighting issues
+- Opaque materials for all building components
+- Performance optimized with material caching and geometry reuse
+
 **Files:**
 - `server/internal/procedural/grid.py` - Grid-based city layout generation
-- `server/internal/procedural/buildings.py` - Building generation and window patterns
-- `server/internal/procedural/generation.py` - Integration with zone system and structure generation
+- `server/internal/procedural/buildings.py` - Building generation and window patterns (includes color palette integration)
+- `server/internal/procedural/generation.py` - Integration with zone system and structure generation (determines hub name for chunks)
+- `server/internal/procedural/color_palettes.py` - Color palette loading and management from JSON file
+- `server/internal/procedural/stations.py` - Hub name lookup function `get_hub_name_for_position()`
+- `server/config/hub-color-palettes.json` - Hub-specific color palette definitions (12 hubs × 5 zone types × 5 components)
+- `server/internal/api/config_handlers.go` - API endpoint handler for serving color palettes
+- `server/internal/api/config_routes.go` - Route registration for `/api/config/hub-colors`
+- `server/cmd/earthring-server/main.go` - Server main entry point (registers config routes)
+- `client-web/src/structures/structure-manager.js` - Client-side building rendering with shader-based details and color application
 
 **Structure Storage:**
 - Structures are stored in the `structures` table when chunks are saved
@@ -1422,13 +1464,24 @@ def regenerate_chunk(chunk_id, reason, force=False):
 - ✅ Buildings generate in zones
 - ✅ Building subtypes implemented (warehouse, factory, residence, agri_industrial, retail, mixed_use)
 - ✅ Varied building footprints (10-80m width/depth depending on type)
-- ✅ Discrete building heights (5, 10, 15, or 20m within single 20m level)
+- ✅ Discrete building heights (4m, 8m, 12m, 16m, or 20m - 1 to 5 floors of 4m each)
 - ✅ Windows generate on buildings with density varying by subtype
+- ✅ New window system with full-height, standard, and ceiling windows (4m floor height)
+- ✅ Hub-specific color palettes for building rendering
+  - 12 pillar hubs each with unique color schemes for 5 zone types
+  - Color components: foundation, walls, roofs, windows_doors, trim
+  - Colors stored in building properties and passed to client
+  - Shader uniforms apply colors procedurally (no separate geometry for details)
+  - API endpoint for clients to fetch color palettes
+  - Automatic hub name lookup based on chunk position
+  - Zone type normalization (handles mixed-use variations)
+- ✅ Shader-based rendering for windows, doors, foundations, and trim
+- ✅ Performance optimizations (material caching, geometry reuse, instanced rendering)
 - ⏳ Basic lighting system (pending)
 - ⏳ Parks generate with terrain (pending)
 - ✅ All generation is deterministic
 - ✅ Building boundary validation
-- ✅ Structure persistence with chunks
+- ✅ Structure persistence with chunks (including color information)
 
 ### Phase 3: Enhancement
 

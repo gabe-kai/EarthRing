@@ -7,20 +7,33 @@ import random
 import math
 from typing import Dict, List, Any, Tuple, Optional
 
+# Import color palettes module
+try:
+    from . import color_palettes
+except ImportError:
+    # If import fails, color_palettes will be None and we'll skip color application
+    color_palettes = None
+
 # Constants
 GRID_CELL_SIZE = 50.0  # 50m × 50m cells
 MIN_BUILDING_WIDTH = 10.0  # Minimum building width in meters
 MAX_BUILDING_WIDTH = 80.0  # Maximum building width in meters (increased for warehouses/factories)
 MIN_BUILDING_DEPTH = 10.0  # Minimum building depth in meters
 MAX_BUILDING_DEPTH = 80.0  # Maximum building depth in meters (increased for warehouses/factories)
-LEVEL_HEIGHT = 20.0  # Height of each level/floor in the map (20m)
-# Building heights within a level: 5m, 10m, 15m, or 20m (must fit within the 20m level)
-BUILDING_HEIGHT_OPTIONS = [5.0, 10.0, 15.0, 20.0]
+FLOOR_HEIGHT = 4.0  # Height of each building floor: 4m (1m logistics + 3m living space)
+MAX_FLOORS = 5  # Maximum number of floors (5 floors × 4m = 20m max height)
 
 # Window constants
 WINDOW_WIDTH = 2.5  # Window width in meters
-WINDOW_HEIGHT = 2.5  # Window height in meters
 WINDOW_SPACING = 0.5  # Spacing between windows in meters
+
+# Window type definitions (relative to floor base, 0-4m per floor)
+# Each floor has 1m logistics (0-1m) and 3m living space (1-4m)
+WINDOW_TYPES = {
+    "full_height": {"height": 3.0, "bottom": 1.0, "top": 4.0},  # Spans living space (1-4m)
+    "standard": {"height": 1.0, "bottom": 2.0, "top": 3.0},     # Middle of living space (2-3m)
+    "ceiling": {"height": 0.5, "bottom": 3.25, "top": 3.75},    # Upper part (3.25-3.75m)
+}
 
 
 def seeded_random(seed: int) -> random.Random:
@@ -40,6 +53,7 @@ def generate_building(
     zone_importance: float,
     building_seed: int,
     floor: int,
+    hub_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate a basic rectangular building.
@@ -78,6 +92,27 @@ def generate_building(
     # Warehouses and agri-industrial may have fewer windows
     windows = _generate_window_grid(width, depth, height, building_seed, building_subtype)
     
+    # Load color palette if available
+    colors = None
+    if color_palettes is not None and hub_name is not None:
+        try:
+            # Map zone_type to palette zone_type
+            # Handle different zone_type formats: "mixed-use", "mixed_use", "Mixed-use", "Mixed_Use"
+            zone_type_normalized = zone_type.lower().replace("_", "-").replace(" ", "-")
+            if zone_type_normalized == "mixed-use":
+                palette_zone_type = "Commercial"  # Use commercial palette for mixed-use
+            else:
+                palette_zone_type = zone_type_normalized.title()  # "industrial" -> "Industrial"
+            colors = color_palettes.get_hub_colors(hub_name, palette_zone_type)
+            if colors is None:
+                # Hub or zone type not found in palette - this is OK, use defaults
+                pass
+        except Exception as e:
+            # If color loading fails, log but continue without colors
+            print(f"Warning: Failed to load colors for hub={hub_name}, zone={zone_type}: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # Building properties
     building = {
         "type": "building",
@@ -99,6 +134,13 @@ def generate_building(
             "building_subtype": building_subtype,
         },
     }
+    
+    # Add color information if available
+    if colors:
+        building["properties"]["colors"] = colors
+        # Debug: print first building with colors to verify they're being loaded
+        if building_seed % 1000 == 0:  # Only print occasionally
+            print(f"Building with colors: hub={hub_name}, zone={zone_type}, colors={colors}")
     
     return building
 
@@ -185,8 +227,9 @@ def _get_building_dimensions(
         # Default (park, restricted, etc.)
         base_width = rng.uniform(10.0, 30.0)
         base_depth = rng.uniform(10.0, 30.0)
-        # Heights: any option
-        height = rng.choice(BUILDING_HEIGHT_OPTIONS)
+        # Heights: 1-3 floors
+        num_floors = rng.choice([1, 2, 3])
+        height = num_floors * FLOOR_HEIGHT
         building_subtype = zone_type
     
     # Scale by zone importance (higher importance = larger buildings)
@@ -194,7 +237,7 @@ def _get_building_dimensions(
     
     width = max(MIN_BUILDING_WIDTH, min(MAX_BUILDING_WIDTH, base_width * scale))
     depth = max(MIN_BUILDING_DEPTH, min(MAX_BUILDING_DEPTH, base_depth * scale))
-    # Height is already chosen from discrete options, no scaling needed
+    # Height is already in 4m floor increments, no scaling needed
     
     return (width, depth, height, building_subtype)
 
@@ -203,14 +246,18 @@ def _generate_window_grid(
     width: float, depth: float, height: float, building_seed: int, building_subtype: str = None
 ) -> List[Dict[str, Any]]:
     """
-    Generate simple grid pattern windows for a building.
+    Generate windows for a building using floor-based window patterns.
     
-    Phase 2 MVP: Simple rectangular windows in a grid pattern.
+    Each floor is 4m tall: 1m logistics (bottom) + 3m living space (top).
+    Window types per floor:
+    - Full height: 1.0-4.0m (spans living space)
+    - Standard: 2.0-3.0m (middle of living space)
+    - Ceiling: 3.25-3.75m (upper part of living space)
     
     Args:
         width: Building width in meters
         depth: Building depth in meters
-        height: Building height in meters
+        height: Building height in meters (must be multiple of 4m)
         building_seed: Seed for deterministic generation
         building_subtype: Optional building subtype (warehouse, factory, etc.)
     
@@ -220,6 +267,11 @@ def _generate_window_grid(
     rng = seeded_random(building_seed)
     windows = []
     
+    # Calculate number of floors (each floor is 4m)
+    num_floors = int(height / FLOOR_HEIGHT)
+    if num_floors < 1:
+        return windows  # No floors, no windows
+    
     # Window density based on building subtype
     if building_subtype == "warehouse":
         density = 0.15  # Warehouses have few windows (15% density)
@@ -228,65 +280,82 @@ def _generate_window_grid(
     elif building_subtype == "agri_industrial":
         density = 0.25  # Agri-industrial has limited windows (25% density)
     elif building_subtype == "residence":
-        density = 0.65  # Residences have good window coverage (65% density)
+        density = 0.70  # Residences have good window coverage (70% density)
     else:
-        density = 0.60  # Default: 60% of facade covered
+        density = 0.65  # Default: 65% of facade covered
     
-    # Calculate number of windows that fit
-    # Account for spacing
+    # Calculate horizontal window spacing
     available_width = width - (WINDOW_SPACING * 2)  # Margin from edges
-    available_height = height - (WINDOW_SPACING * 2)
+    windows_per_facade = max(1, int(available_width / (WINDOW_WIDTH + WINDOW_SPACING)))
+    windows_per_facade = max(1, int(windows_per_facade * math.sqrt(density)))
+    window_spacing_x = available_width / max(1, windows_per_facade - 1) if windows_per_facade > 1 else 0
     
-    windows_per_row = max(1, int(available_width / (WINDOW_WIDTH + WINDOW_SPACING)))
-    windows_per_col = max(1, int(available_height / (WINDOW_HEIGHT + WINDOW_SPACING)))
-    
-    # Adjust for density
-    windows_per_row = max(1, int(windows_per_row * math.sqrt(density)))
-    windows_per_col = max(1, int(windows_per_col * math.sqrt(density)))
-    
-    # Generate windows for each facade
-    # We'll generate windows for the front and back facades (along width)
-    # For Phase 2, we'll keep it simple and just do one facade
-    
-    window_spacing_x = available_width / max(1, windows_per_row - 1) if windows_per_row > 1 else 0
-    window_spacing_y = available_height / max(1, windows_per_col - 1) if windows_per_col > 1 else 0
-    
-    # Front facade (positive Y direction)
-    for i in range(windows_per_row):
-        for j in range(windows_per_col):
+    # Generate windows for each floor
+    for floor_num in range(num_floors):
+        # Floor base position (relative to building center)
+        # Building center is at Y=0, building extends from -height/2 to +height/2
+        # Each floor extends from floor_base to floor_base + 4m
+        # Floor 0 starts at -height/2, each subsequent floor is +4m higher
+        floor_base = -height / 2.0 + floor_num * FLOOR_HEIGHT
+        
+        # Determine which window types to use on this floor
+        # Each floor can have: full-height, standard, and/or ceiling windows
+        # Distribution: full-height are common, standard are most common, ceiling are less common
+        use_full_height = rng.random() < 0.4  # 40% chance for full-height windows
+        use_standard = rng.random() < 0.8     # 80% chance for standard windows
+        use_ceiling = rng.random() < 0.3      # 30% chance for ceiling windows
+        
+        # Generate windows horizontally across the facade
+        for i in range(windows_per_facade):
             # Skip some windows randomly for variation (10% chance)
             if rng.random() < 0.1:
                 continue
             
-            # Calculate window position relative to building center
-            # Building center is at (0, 0, 0) for relative positioning
+            # Horizontal position
             offset_x = (i * window_spacing_x) - (available_width / 2.0)
-            offset_y = depth / 2.0  # On the front facade
-            offset_z = (j * window_spacing_y) - (available_height / 2.0)
             
-            window = {
-                "position": [offset_x, offset_y, offset_z],
-                "size": [WINDOW_WIDTH, WINDOW_HEIGHT],
-                "facade": "front",  # front, back, left, right
-            }
-            windows.append(window)
-    
-    # Back facade (negative Y direction) - same pattern
-    for i in range(windows_per_row):
-        for j in range(windows_per_col):
-            if rng.random() < 0.1:
-                continue
+            # Generate window types for this position
+            if use_full_height:
+                win_type = WINDOW_TYPES["full_height"]
+                window = {
+                    "position": [
+                        offset_x,
+                        depth / 2.0,  # Front facade
+                        floor_base + (win_type["bottom"] + win_type["top"]) / 2.0  # Center of window vertically
+                    ],
+                    "size": [WINDOW_WIDTH, win_type["height"]],
+                    "facade": "front",
+                    "type": "full_height",
+                }
+                windows.append(window)
             
-            offset_x = (i * window_spacing_x) - (available_width / 2.0)
-            offset_y = -depth / 2.0  # On the back facade
-            offset_z = (j * window_spacing_y) - (available_height / 2.0)
+            if use_standard:
+                win_type = WINDOW_TYPES["standard"]
+                window = {
+                    "position": [
+                        offset_x,
+                        depth / 2.0,  # Front facade
+                        floor_base + (win_type["bottom"] + win_type["top"]) / 2.0
+                    ],
+                    "size": [WINDOW_WIDTH, win_type["height"]],
+                    "facade": "front",
+                    "type": "standard",
+                }
+                windows.append(window)
             
-            window = {
-                "position": [offset_x, offset_y, offset_z],
-                "size": [WINDOW_WIDTH, WINDOW_HEIGHT],
-                "facade": "back",
-            }
-            windows.append(window)
+            if use_ceiling:
+                win_type = WINDOW_TYPES["ceiling"]
+                window = {
+                    "position": [
+                        offset_x,
+                        depth / 2.0,  # Front facade
+                        floor_base + (win_type["bottom"] + win_type["top"]) / 2.0
+                    ],
+                    "size": [WINDOW_WIDTH, win_type["height"]],
+                    "facade": "front",
+                    "type": "ceiling",
+                }
+                windows.append(window)
     
     return windows
 

@@ -1,0 +1,1346 @@
+{
+  "PillarOfKongo": {
+    "Industrial": {
+      "foundation": {
+        "name": "basalt black",
+        "hex": "#1A1A1C"
+      },
+      "walls": {
+        "name": "bronze oxide",
+        "hex": "#5A3E2B"
+      },
+      "roofs": {
+        "name": "charcoal metal",
+        "hex": "#2E2E30"
+      },
+      "windows_doors": {
+        "name": "blue-tinted glass",
+        "hex": "#3A6C9E"
+      },
+      "trim": {
+        "name": "gold linework",
+        "hex": "#D4A42A"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "warm stone",
+        "hex": "#A38C6D"
+      },
+      "walls": {
+        "name": "sun-ivory",
+        "hex": "#F0E4C0"
+      },
+      "roofs": {
+        "name": "goldleaf white",
+        "hex": "#FFF9E7"
+      },
+      "windows_doors": {
+        "name": "clear-gold glass",
+        "hex": "#D8C06A"
+      },
+      "trim": {
+        "name": "deep green",
+        "hex": "#1F4E32"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "soft clay brown",
+        "hex": "#8A5D3B"
+      },
+      "walls": {
+        "name": "warm terracotta",
+        "hex": "#C46A3F"
+      },
+      "roofs": {
+        "name": "matte gold",
+        "hex": "#D9B451"
+      },
+      "windows_doors": {
+        "name": "warm-clear glass",
+        "hex": "#E7E0CE"
+      },
+      "trim": {
+        "name": "dark wood",
+        "hex": "#4B2E1A"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "dark soil",
+        "hex": "#4A3020"
+      },
+      "walls": {
+        "name": "vine green",
+        "hex": "#3C6E3B"
+      },
+      "roofs": {
+        "name": "canopy green",
+        "hex": "#2E5A28"
+      },
+      "windows_doors": {
+        "name": "amber-tinted glass",
+        "hex": "#D98F3A"
+      },
+      "trim": {
+        "name": "pale gold",
+        "hex": "#E4C873"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "peat brown",
+        "hex": "#5C3A22"
+      },
+      "walls": {
+        "name": "soft olive",
+        "hex": "#7C8B52"
+      },
+      "roofs": {
+        "name": "forest green",
+        "hex": "#1F4A27"
+      },
+      "windows_doors": {
+        "name": "transparent bioglass",
+        "hex": "#CFE8D2"
+      },
+      "trim": {
+        "name": "copper-gold",
+        "hex": "#B97A40"
+      }
+    }
+  },
+  "PillarOfKilima": {
+    "Industrial": {
+      "foundation": {
+        "name": "volcanic black",
+        "hex": "#0F0F11"
+      },
+      "walls": {
+        "name": "ash gray",
+        "hex": "#8A8A8F"
+      },
+      "roofs": {
+        "name": "rust red",
+        "hex": "#8B3A2A"
+      },
+      "windows_doors": {
+        "name": "deep blue glass",
+        "hex": "#2C4F92"
+      },
+      "trim": {
+        "name": "steel silver",
+        "hex": "#C6C6CE"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pale stone",
+        "hex": "#DDD6C9"
+      },
+      "walls": {
+        "name": "snow white",
+        "hex": "#FFFFFF"
+      },
+      "roofs": {
+        "name": "sky blue",
+        "hex": "#7DB6E8"
+      },
+      "windows_doors": {
+        "name": "clear glass",
+        "hex": "#DDE8F2"
+      },
+      "trim": {
+        "name": "savannah gold",
+        "hex": "#CDA64F"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "warm sand",
+        "hex": "#C4A87D"
+      },
+      "walls": {
+        "name": "muted beige",
+        "hex": "#B7A68A"
+      },
+      "roofs": {
+        "name": "slate",
+        "hex": "#50515A"
+      },
+      "windows_doors": {
+        "name": "frost glass",
+        "hex": "#E9F1F5"
+      },
+      "trim": {
+        "name": "indigo",
+        "hex": "#2E3D78"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "clay orange",
+        "hex": "#B75A2B"
+      },
+      "walls": {
+        "name": "acacia green",
+        "hex": "#4D7F32"
+      },
+      "roofs": {
+        "name": "grass green",
+        "hex": "#3B7A29"
+      },
+      "windows_doors": {
+        "name": "soft-clear",
+        "hex": "#EFF7F2"
+      },
+      "trim": {
+        "name": "pale blue",
+        "hex": "#9EC7E4"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "red earth",
+        "hex": "#9A3D28"
+      },
+      "walls": {
+        "name": "straw beige",
+        "hex": "#E4D39E"
+      },
+      "roofs": {
+        "name": "muted green",
+        "hex": "#5F7A58"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "terracotta",
+        "hex": "#B75A33"
+      }
+    }
+  },
+  "PillarOfLaccade": {
+    "Industrial": {
+      "foundation": {
+        "name": "reef gray",
+        "hex": "#6C6F72"
+      },
+      "walls": {
+        "name": "dark driftwood",
+        "hex": "#4A3E34"
+      },
+      "roofs": {
+        "name": "navy metal",
+        "hex": "#1E3455"
+      },
+      "windows_doors": {
+        "name": "aqua glass",
+        "hex": "#56C4C9"
+      },
+      "trim": {
+        "name": "copper",
+        "hex": "#C57C3F"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pale coral",
+        "hex": "#F1D4C8"
+      },
+      "walls": {
+        "name": "turquoise",
+        "hex": "#3FC7C3"
+      },
+      "roofs": {
+        "name": "white-sand",
+        "hex": "#FAF8F3"
+      },
+      "windows_doors": {
+        "name": "clear aqua",
+        "hex": "#C8F5F4"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#E7C447"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "beige sand",
+        "hex": "#D4C0A3"
+      },
+      "walls": {
+        "name": "seafoam",
+        "hex": "#79D5C3"
+      },
+      "roofs": {
+        "name": "driftwood brown",
+        "hex": "#7A5F4A"
+      },
+      "windows_doors": {
+        "name": "pale blue",
+        "hex": "#A8D3F5"
+      },
+      "trim": {
+        "name": "coral red",
+        "hex": "#D94F43"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "wet earth",
+        "hex": "#5B402A"
+      },
+      "walls": {
+        "name": "lush green",
+        "hex": "#2F7D3C"
+      },
+      "roofs": {
+        "name": "banana leaf",
+        "hex": "#4E8A2F"
+      },
+      "windows_doors": {
+        "name": "clear-tropical",
+        "hex": "#E2FFF4"
+      },
+      "trim": {
+        "name": "white coral",
+        "hex": "#F8EFE8"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "muddy brown",
+        "hex": "#4F3A28"
+      },
+      "walls": {
+        "name": "light olive",
+        "hex": "#8B9B6F"
+      },
+      "roofs": {
+        "name": "sea-green",
+        "hex": "#3C8A6F"
+      },
+      "windows_doors": {
+        "name": "hydroglass",
+        "hex": "#CFF0E9"
+      },
+      "trim": {
+        "name": "bronze",
+        "hex": "#B68044"
+      }
+    }
+  },
+  "PillarOfNusantara": {
+    "Industrial": {
+      "foundation": {
+        "name": "lava black",
+        "hex": "#131111"
+      },
+      "walls": {
+        "name": "dark brown",
+        "hex": "#4B3A28"
+      },
+      "roofs": {
+        "name": "matte red",
+        "hex": "#A0322C"
+      },
+      "windows_doors": {
+        "name": "green-tint glass",
+        "hex": "#5CAF8C"
+      },
+      "trim": {
+        "name": "bronze",
+        "hex": "#C08A43"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "bamboo tan",
+        "hex": "#D8C39A"
+      },
+      "walls": {
+        "name": "palm green",
+        "hex": "#2E6C3A"
+      },
+      "roofs": {
+        "name": "gold-brown",
+        "hex": "#B3853D"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#E8FFFF"
+      },
+      "trim": {
+        "name": "bright red",
+        "hex": "#C81F29"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "warm beige",
+        "hex": "#CAB89B"
+      },
+      "walls": {
+        "name": "leafy green",
+        "hex": "#3F8E48"
+      },
+      "roofs": {
+        "name": "dark wood",
+        "hex": "#4B3522"
+      },
+      "windows_doors": {
+        "name": "jade-tint",
+        "hex": "#A9D7B2"
+      },
+      "trim": {
+        "name": "soft gold",
+        "hex": "#E7CB71"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "rich soil",
+        "hex": "#4A301E"
+      },
+      "walls": {
+        "name": "jungle green",
+        "hex": "#1F6A2F"
+      },
+      "roofs": {
+        "name": "canopy",
+        "hex": "#0F4E1E"
+      },
+      "windows_doors": {
+        "name": "humid-clear",
+        "hex": "#F1FFF8"
+      },
+      "trim": {
+        "name": "flower red",
+        "hex": "#E03A43"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "deep mud",
+        "hex": "#3D2818"
+      },
+      "walls": {
+        "name": "moss green",
+        "hex": "#6E8D48"
+      },
+      "roofs": {
+        "name": "straw",
+        "hex": "#D7C86A"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "banana yellow",
+        "hex": "#F6D247"
+      }
+    }
+  },
+  "PillarOfMakassar": {
+    "Industrial": {
+      "foundation": {
+        "name": "slate gray",
+        "hex": "#55585E"
+      },
+      "walls": {
+        "name": "dull steel",
+        "hex": "#7B7E85"
+      },
+      "roofs": {
+        "name": "storm blue",
+        "hex": "#2B5172"
+      },
+      "windows_doors": {
+        "name": "frost glass",
+        "hex": "#DDE5EE"
+      },
+      "trim": {
+        "name": "bronze",
+        "hex": "#C48A55"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pearl white",
+        "hex": "#FFFFFF"
+      },
+      "walls": {
+        "name": "cool gray",
+        "hex": "#C9C9CE"
+      },
+      "roofs": {
+        "name": "azure",
+        "hex": "#6DB7F2"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#E7F8FF"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#D9B759"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "lavender gray",
+        "hex": "#B7B6C8"
+      },
+      "walls": {
+        "name": "soft blue",
+        "hex": "#95B4D7"
+      },
+      "roofs": {
+        "name": "slate",
+        "hex": "#525866"
+      },
+      "windows_doors": {
+        "name": "blue-clear",
+        "hex": "#DAE8F5"
+      },
+      "trim": {
+        "name": "warm bronze",
+        "hex": "#C68F57"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "wet earth",
+        "hex": "#4C3825"
+      },
+      "walls": {
+        "name": "mangrove green",
+        "hex": "#284F2D"
+      },
+      "roofs": {
+        "name": "leaf green",
+        "hex": "#3E8C3D"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#EDFFF9"
+      },
+      "trim": {
+        "name": "cyan",
+        "hex": "#57DDE6"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "peat black",
+        "hex": "#2A221A"
+      },
+      "walls": {
+        "name": "olive",
+        "hex": "#7E8753"
+      },
+      "roofs": {
+        "name": "brown-green",
+        "hex": "#5E7348"
+      },
+      "windows_doors": {
+        "name": "clear hydroglass",
+        "hex": "#D8F8E4"
+      },
+      "trim": {
+        "name": "brass",
+        "hex": "#C89A37"
+      }
+    }
+  },
+  "PillarOfArafura": {
+    "Industrial": {
+      "foundation": {
+        "name": "basalt",
+        "hex": "#1A1A18"
+      },
+      "walls": {
+        "name": "brown-black",
+        "hex": "#3A2E25"
+      },
+      "roofs": {
+        "name": "iron red",
+        "hex": "#7C2A23"
+      },
+      "windows_doors": {
+        "name": "deep aqua",
+        "hex": "#1F6F8A"
+      },
+      "trim": {
+        "name": "teal metal",
+        "hex": "#3F8F8C"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pale shell",
+        "hex": "#F0E8D9"
+      },
+      "walls": {
+        "name": "soft green",
+        "hex": "#8ABF87"
+      },
+      "roofs": {
+        "name": "pure white",
+        "hex": "#FFFFFF"
+      },
+      "windows_doors": {
+        "name": "clear turquoise",
+        "hex": "#C5F5EF"
+      },
+      "trim": {
+        "name": "cobalt",
+        "hex": "#1D47A4"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "sand",
+        "hex": "#DCC7A1"
+      },
+      "walls": {
+        "name": "muted pine",
+        "hex": "#6E8F6A"
+      },
+      "roofs": {
+        "name": "matte black",
+        "hex": "#1A1A1A"
+      },
+      "windows_doors": {
+        "name": "ocean-clear",
+        "hex": "#BDE3F9"
+      },
+      "trim": {
+        "name": "red ochre",
+        "hex": "#A63D2A"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "soil",
+        "hex": "#5A3D26"
+      },
+      "walls": {
+        "name": "bright jungle green",
+        "hex": "#1E7A36"
+      },
+      "roofs": {
+        "name": "mid green",
+        "hex": "#3E9142"
+      },
+      "windows_doors": {
+        "name": "soft-clear",
+        "hex": "#EDFFF7"
+      },
+      "trim": {
+        "name": "lime",
+        "hex": "#CAF749"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "dark clay",
+        "hex": "#3F2918"
+      },
+      "walls": {
+        "name": "olive",
+        "hex": "#79864A"
+      },
+      "roofs": {
+        "name": "palm brown",
+        "hex": "#7D5530"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "sky blue",
+        "hex": "#6AB7E8"
+      }
+    }
+  },
+  "PillarOfKirana": {
+    "Industrial": {
+      "foundation": {
+        "name": "navy",
+        "hex": "#14233B"
+      },
+      "walls": {
+        "name": "pearl-dull",
+        "hex": "#D9D6D2"
+      },
+      "roofs": {
+        "name": "marine steel",
+        "hex": "#2E4A62"
+      },
+      "windows_doors": {
+        "name": "blue glass",
+        "hex": "#4C8ECE"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#D8B440"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pearl white",
+        "hex": "#FFFFFF"
+      },
+      "walls": {
+        "name": "sky blue",
+        "hex": "#7DB9EA"
+      },
+      "roofs": {
+        "name": "ceremonial gold",
+        "hex": "#ECCB4F"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#E7F7FF"
+      },
+      "trim": {
+        "name": "turquoise",
+        "hex": "#37C7C4"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "sandy beige",
+        "hex": "#D6C5A6"
+      },
+      "walls": {
+        "name": "soft blue",
+        "hex": "#A9CAE9"
+      },
+      "roofs": {
+        "name": "pale gray",
+        "hex": "#C5CBCF"
+      },
+      "windows_doors": {
+        "name": "aqua-clear",
+        "hex": "#CDF2F2"
+      },
+      "trim": {
+        "name": "soft gold",
+        "hex": "#E6CE7A"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "coral soil",
+        "hex": "#8F5338"
+      },
+      "walls": {
+        "name": "lagoon green",
+        "hex": "#2E7F64"
+      },
+      "roofs": {
+        "name": "leaf green",
+        "hex": "#4A9B3E"
+      },
+      "windows_doors": {
+        "name": "mist-clear",
+        "hex": "#F0FFF9"
+      },
+      "trim": {
+        "name": "seafoam",
+        "hex": "#8FF1CF"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "brown earth",
+        "hex": "#6A4A2F"
+      },
+      "walls": {
+        "name": "olive",
+        "hex": "#7C8A55"
+      },
+      "roofs": {
+        "name": "sea-teal",
+        "hex": "#2E7E74"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "cobalt",
+        "hex": "#1C46A1"
+      }
+    }
+  },
+  "PillarOfPolynesya": {
+    "Industrial": {
+      "foundation": {
+        "name": "volcanic black",
+        "hex": "#0E0E0F"
+      },
+      "walls": {
+        "name": "driftwood gray",
+        "hex": "#6A6662"
+      },
+      "roofs": {
+        "name": "red metal",
+        "hex": "#B1322D"
+      },
+      "windows_doors": {
+        "name": "deep green",
+        "hex": "#2F6A45"
+      },
+      "trim": {
+        "name": "copper",
+        "hex": "#C9824A"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "pale tan",
+        "hex": "#E7D7B8"
+      },
+      "walls": {
+        "name": "bright coral",
+        "hex": "#FF6A5C"
+      },
+      "roofs": {
+        "name": "white",
+        "hex": "#FFFFFF"
+      },
+      "windows_doors": {
+        "name": "aqua-clear",
+        "hex": "#C7F1EF"
+      },
+      "trim": {
+        "name": "pacific red",
+        "hex": "#D2453C"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "sandy tan",
+        "hex": "#DCC8A9"
+      },
+      "walls": {
+        "name": "palm brown",
+        "hex": "#745437"
+      },
+      "roofs": {
+        "name": "leaf green",
+        "hex": "#4A9B3C"
+      },
+      "windows_doors": {
+        "name": "tropical blue",
+        "hex": "#4EC3F8"
+      },
+      "trim": {
+        "name": "woven gold",
+        "hex": "#D9B966"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "dark soil",
+        "hex": "#4A2F21"
+      },
+      "walls": {
+        "name": "bright green",
+        "hex": "#1F8128"
+      },
+      "roofs": {
+        "name": "palm",
+        "hex": "#5D8E40"
+      },
+      "windows_doors": {
+        "name": "humid-clear",
+        "hex": "#F2FFF8"
+      },
+      "trim": {
+        "name": "floral red",
+        "hex": "#E04A43"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "black soil",
+        "hex": "#1D1A17"
+      },
+      "walls": {
+        "name": "light olive",
+        "hex": "#8F9B63"
+      },
+      "roofs": {
+        "name": "straw",
+        "hex": "#E3D381"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "tan fiber",
+        "hex": "#C6A869"
+      }
+    }
+  },
+  "PillarOfAndenor": {
+    "Industrial": {
+      "foundation": {
+        "name": "granite gray",
+        "hex": "#5A5E63"
+      },
+      "walls": {
+        "name": "dark stone",
+        "hex": "#3F464A"
+      },
+      "roofs": {
+        "name": "deep blue",
+        "hex": "#233C66"
+      },
+      "windows_doors": {
+        "name": "cold-clear glass",
+        "hex": "#DDE8F2"
+      },
+      "trim": {
+        "name": "alpine steel",
+        "hex": "#C0C7CE"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "light stone",
+        "hex": "#DCD7CB"
+      },
+      "walls": {
+        "name": "silver",
+        "hex": "#C9C9C9"
+      },
+      "roofs": {
+        "name": "sky blue",
+        "hex": "#84B8EA"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#E8F8FF"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#D7B44E"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "muted tan",
+        "hex": "#CBB496"
+      },
+      "walls": {
+        "name": "soft gray",
+        "hex": "#B9B9B9"
+      },
+      "roofs": {
+        "name": "slate",
+        "hex": "#5A6069"
+      },
+      "windows_doors": {
+        "name": "frost-clear",
+        "hex": "#EDF5F9"
+      },
+      "trim": {
+        "name": "indigo",
+        "hex": "#2C3A75"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "alpine soil",
+        "hex": "#5B4635"
+      },
+      "walls": {
+        "name": "dark green",
+        "hex": "#214E2D"
+      },
+      "roofs": {
+        "name": "sage green",
+        "hex": "#778F6E"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#F0FFF7"
+      },
+      "trim": {
+        "name": "teal",
+        "hex": "#2E9E98"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "brown clay",
+        "hex": "#6F4A2E"
+      },
+      "walls": {
+        "name": "pale straw",
+        "hex": "#E5D29B"
+      },
+      "roofs": {
+        "name": "olive",
+        "hex": "#7B8651"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "copper",
+        "hex": "#C17646"
+      }
+    }
+  },
+  "PillarOfQuitoPrime": {
+    "Industrial": {
+      "foundation": {
+        "name": "char-black",
+        "hex": "#111111"
+      },
+      "walls": {
+        "name": "basalt gray",
+        "hex": "#4B4F54"
+      },
+      "roofs": {
+        "name": "dark red",
+        "hex": "#732A28"
+      },
+      "windows_doors": {
+        "name": "deep blue",
+        "hex": "#1E3A70"
+      },
+      "trim": {
+        "name": "steel",
+        "hex": "#C0C8CC"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "white stone",
+        "hex": "#F8F5EE"
+      },
+      "walls": {
+        "name": "cloud gray",
+        "hex": "#E6E6E8"
+      },
+      "roofs": {
+        "name": "bright red",
+        "hex": "#D83A32"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#F3FBFF"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#DBB54A"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "warm beige",
+        "hex": "#D6C0A2"
+      },
+      "walls": {
+        "name": "muted white",
+        "hex": "#F0ECE4"
+      },
+      "roofs": {
+        "name": "clay tile",
+        "hex": "#C5613A"
+      },
+      "windows_doors": {
+        "name": "warm-clear",
+        "hex": "#F6F1E6"
+      },
+      "trim": {
+        "name": "terracotta",
+        "hex": "#B4452C"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "rich soil",
+        "hex": "#4A2F1E"
+      },
+      "walls": {
+        "name": "deep green",
+        "hex": "#1F5F2F"
+      },
+      "roofs": {
+        "name": "canopy",
+        "hex": "#135322"
+      },
+      "windows_doors": {
+        "name": "humid-clear",
+        "hex": "#F4FFF4"
+      },
+      "trim": {
+        "name": "bright flower red",
+        "hex": "#E7474D"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "clay",
+        "hex": "#9A6236"
+      },
+      "walls": {
+        "name": "straw",
+        "hex": "#E8D68A"
+      },
+      "roofs": {
+        "name": "olive",
+        "hex": "#7E8652"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "copper",
+        "hex": "#BE6E39"
+      }
+    }
+  },
+  "PillarOfSolamazon": {
+    "Industrial": {
+      "foundation": {
+        "name": "muddy black",
+        "hex": "#1B1A17"
+      },
+      "walls": {
+        "name": "dark brown",
+        "hex": "#4B3325"
+      },
+      "roofs": {
+        "name": "iron red",
+        "hex": "#7F2E25"
+      },
+      "windows_doors": {
+        "name": "green-tinted",
+        "hex": "#2E8F57"
+      },
+      "trim": {
+        "name": "copper",
+        "hex": "#B66E3F"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "soft gold",
+        "hex": "#E2C56E"
+      },
+      "walls": {
+        "name": "forest green",
+        "hex": "#2E6C3A"
+      },
+      "roofs": {
+        "name": "white",
+        "hex": "#FFFFFF"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#F2FFFF"
+      },
+      "trim": {
+        "name": "river blue",
+        "hex": "#3C8BC5"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "warm tan",
+        "hex": "#D5C09C"
+      },
+      "walls": {
+        "name": "light green",
+        "hex": "#9ACF8F"
+      },
+      "roofs": {
+        "name": "brown",
+        "hex": "#6A4A31"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#EAF3F0"
+      },
+      "trim": {
+        "name": "sun-gold",
+        "hex": "#EAC657"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "rich soil",
+        "hex": "#3E2A19"
+      },
+      "walls": {
+        "name": "deep jungle green",
+        "hex": "#154F26"
+      },
+      "roofs": {
+        "name": "leaf green",
+        "hex": "#2F8B3A"
+      },
+      "windows_doors": {
+        "name": "mist-clear",
+        "hex": "#F2FFF9"
+      },
+      "trim": {
+        "name": "teal",
+        "hex": "#2DA6A2"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "mud",
+        "hex": "#5A3C24"
+      },
+      "walls": {
+        "name": "olive",
+        "hex": "#808B50"
+      },
+      "roofs": {
+        "name": "straw-green",
+        "hex": "#C9D178"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "bright green",
+        "hex": "#46BD3E"
+      }
+    }
+  },
+  "PillarOfAtlantica": {
+    "Industrial": {
+      "foundation": {
+        "name": "slate black",
+        "hex": "#161718"
+      },
+      "walls": {
+        "name": "steel gray",
+        "hex": "#6F7379"
+      },
+      "roofs": {
+        "name": "navy",
+        "hex": "#1F3357"
+      },
+      "windows_doors": {
+        "name": "blue glass",
+        "hex": "#4E7CCB"
+      },
+      "trim": {
+        "name": "gold",
+        "hex": "#D4B447"
+      }
+    },
+    "Commercial": {
+      "foundation": {
+        "name": "white",
+        "hex": "#FFFFFF"
+      },
+      "walls": {
+        "name": "cool blue",
+        "hex": "#8BB3E6"
+      },
+      "roofs": {
+        "name": "silver",
+        "hex": "#C7CBD0"
+      },
+      "windows_doors": {
+        "name": "clear",
+        "hex": "#E7F8FF"
+      },
+      "trim": {
+        "name": "dark navy",
+        "hex": "#12203F"
+      }
+    },
+    "Residential": {
+      "foundation": {
+        "name": "pearl",
+        "hex": "#E9E5E0"
+      },
+      "walls": {
+        "name": "blue-gray",
+        "hex": "#A7B3C1"
+      },
+      "roofs": {
+        "name": "white",
+        "hex": "#FFFFFF"
+      },
+      "windows_doors": {
+        "name": "frost-clear",
+        "hex": "#F0F7FA"
+      },
+      "trim": {
+        "name": "steel",
+        "hex": "#A8B0B9"
+      }
+    },
+    "Parks": {
+      "foundation": {
+        "name": "wet soil",
+        "hex": "#4B3825"
+      },
+      "walls": {
+        "name": "teal",
+        "hex": "#2E918A"
+      },
+      "roofs": {
+        "name": "leaf green",
+        "hex": "#3E9A42"
+      },
+      "windows_doors": {
+        "name": "moist-clear",
+        "hex": "#ECFFF8"
+      },
+      "trim": {
+        "name": "bright blue",
+        "hex": "#39A7F8"
+      }
+    },
+    "Agricultural": {
+      "foundation": {
+        "name": "dark clay",
+        "hex": "#3A281A"
+      },
+      "walls": {
+        "name": "pale olive",
+        "hex": "#A7B27C"
+      },
+      "roofs": {
+        "name": "muted green",
+        "hex": "#6E8658"
+      },
+      "windows_doors": {
+        "name": "transparent",
+        "hex": "#FFFFFF"
+      },
+      "trim": {
+        "name": "silver",
+        "hex": "#C4C6CC"
+      }
+    }
+  }
+}
