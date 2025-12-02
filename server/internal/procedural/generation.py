@@ -1,11 +1,21 @@
 """
 Chunk generation functions.
-Phase 2: Basic ring floor geometry generation with station flares.
+Phase 2: Basic ring floor geometry generation with station flares and building generation.
 """
 
 from . import seeds
 from . import stations
 import math
+
+# Optional imports for Phase 2 building generation
+try:
+    from . import grid
+    from . import buildings
+    import shapely.geometry as sg
+    BUILDING_GENERATION_AVAILABLE = True
+except ImportError:
+    # Building generation not available (e.g., missing shapely)
+    BUILDING_GENERATION_AVAILABLE = False
 
 # Constants
 CHUNK_LENGTH = 1000.0  # 1 km chunk length along ring
@@ -16,7 +26,8 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 # Version history:
 #   1: Initial rectangular geometry (4 vertices, 2 faces)
 #   2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
-CURRENT_GEOMETRY_VERSION = 2
+#   3: Phase 2 - Added building generation (grid-based city generation with buildings)
+CURRENT_GEOMETRY_VERSION = 3
 
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
@@ -351,18 +362,18 @@ def is_within_station_flare_area(chunk_index: int) -> bool:
 def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate industrial zones on either side of the restricted zone within station flare areas.
-    
-    Creates two 20m-wide industrial zones that line the restricted zone:
-    - North industrial zone: from north edge of restricted zone outward by 20m
-    - South industrial zone: from south edge of restricted zone outward by 20m
-    
+
+    Creates two 80m-wide industrial zones that line the restricted zone:
+    - North industrial zone: from north edge of restricted zone outward by 80m
+    - South industrial zone: from south edge of restricted zone outward by 80m
+
     These zones are generated within station flare areas (within flare_length/2 of hub centers,
     which is 25km for pillar/elevator hubs).
-    
+
     Args:
         floor: Floor number
         chunk_index: Chunk index (0-263,999)
-    
+
     Returns:
         List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
     """
@@ -385,14 +396,14 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
         sample_points.append(chunk_end_position)
     
     # Build north industrial zone (negative Y side)
-    # North zone goes from -half_width - 20 to -half_width
+    # North zone goes from -half_width - 80 to -half_width
     north_bottom_edge = []  # Outer edge (further from center)
     north_top_edge = []     # Inner edge (touching restricted zone)
     
     for x_pos in sample_points:
         half_width = calculate_restricted_zone_width(x_pos)
-        # North zone: from -half_width - 20 to -half_width
-        north_bottom_edge.append([x_pos, -half_width - 20.0])
+        # North zone: from -half_width - 80 to -half_width
+        north_bottom_edge.append([x_pos, -half_width - 80.0])
         north_top_edge.append([x_pos, -half_width])
     
     # Reverse top edge to connect in order
@@ -400,15 +411,15 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     north_coordinates = [north_bottom_edge + north_top_edge + [north_bottom_edge[0]]]
     
     # Build south industrial zone (positive Y side)
-    # South zone goes from +half_width to +half_width + 20
+    # South zone goes from +half_width to +half_width + 80
     south_bottom_edge = []  # Inner edge (touching restricted zone)
     south_top_edge = []     # Outer edge (further from center)
     
     for x_pos in sample_points:
         half_width = calculate_restricted_zone_width(x_pos)
-        # South zone: from +half_width to +half_width + 20
+        # South zone: from +half_width to +half_width + 80
         south_bottom_edge.append([x_pos, half_width])
-        south_top_edge.append([x_pos, half_width + 20.0])
+        south_top_edge.append([x_pos, half_width + 80.0])
     
     # Reverse top edge to connect in order
     south_top_edge.reverse()
@@ -470,18 +481,18 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
 def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate commercial zones interspersed within industrial zones at chunk centers.
-    
-    Creates two 10m x 20m commercial zones at the center of each chunk:
-    - North commercial zone: 10m long (X), 20m wide (Y) on the north side of restricted zone
-    - South commercial zone: 10m long (X), 20m wide (Y) on the south side of restricted zone
-    
+
+    Creates two 80m x 80m commercial zones at the center of each chunk:
+    - North commercial zone: 80m long (X), 80m wide (Y) on the north side of restricted zone
+    - South commercial zone: 80m long (X), 80m wide (Y) on the south side of restricted zone
+
     These zones are only generated within station flare areas (where industrial zones exist).
-    They create 20m x 20m squares of commercial zone breaking up the industrial zone every chunk.
-    
+    They create 80m x 80m squares of commercial zone breaking up the industrial zone every chunk.
+
     Args:
         floor: Floor number
         chunk_index: Chunk index (0-263,999)
-    
+
     Returns:
         List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
     """
@@ -493,15 +504,15 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     chunk_start_position = chunk_index * CHUNK_LENGTH
     chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
     
-    # Commercial zone dimensions: 10m long (X), 20m wide (Y)
-    commercial_length = 10.0  # 10m along X axis
-    commercial_width = 20.0   # 20m along Y axis
+    # Commercial zone dimensions: 80m long (X), 80m wide (Y)
+    commercial_length = 80.0  # 80m along X axis
+    commercial_width = 80.0   # 80m along Y axis
     
     # Calculate restricted zone width at chunk center to position commercial zones correctly
     half_width = calculate_restricted_zone_width(chunk_center_position)
     
-    # North commercial zone: from -half_width - 20 to -half_width (20m wide)
-    # Positioned at chunk center, 10m long (5m on each side of center)
+    # North commercial zone: from -half_width - 80 to -half_width (80m wide)
+    # Positioned at chunk center, 80m long (40m on each side of center)
     north_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     north_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
@@ -513,8 +524,8 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
         [north_zone_x_start, -half_width - commercial_width]  # Close polygon
     ]]
     
-    # South commercial zone: from +half_width to +half_width + 20 (20m wide)
-    # Positioned at chunk center, 10m long (5m on each side of center)
+    # South commercial zone: from +half_width to +half_width + 80 (80m wide)
+    # Positioned at chunk center, 80m long (40m on each side of center)
     south_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     south_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
@@ -578,6 +589,127 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     
     return zones
 
+
+def generate_chunk_mixed_use_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate mixed-use zones outside the industrial/commercial bands within station flare areas.
+
+    Creates two 80m-wide mixed-use strips:
+    - North mixed-use zone: from outside edge of industrial/commercial bands outward by 80m
+    - South mixed-use zone: from outside edge of industrial/commercial bands outward by 80m
+
+    These zones sit outside the industrial + commercial + restricted stack in hub platforms,
+    providing a mixed-use buffer before transitioning to other zones.
+
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
+    """
+    # Only generate mixed-use zones within station flare areas
+    if not is_within_station_flare_area(chunk_index):
+        return []
+
+    # Calculate chunk boundaries
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+
+    # Sample zone width at multiple points along the chunk
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    if sample_points and sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
+
+    # Build north mixed-use zone (negative Y side)
+    # Restricted: [-half_width, +half_width]
+    # Industrial: [-half_width - 80, -half_width]
+    # Commercial blobs: also within [-half_width - 80, -half_width]
+    # Mixed-use: from -half_width - 160 to -half_width - 80 (80m wide band)
+    north_inner_edge = []  # Inner edge (adjacent to industrial/commercial)
+    north_outer_edge = []  # Outer edge (further from center)
+
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        inner_y = -half_width - 80.0
+        outer_y = -half_width - 160.0
+        north_inner_edge.append([x_pos, inner_y])
+        north_outer_edge.append([x_pos, outer_y])
+
+    # Reverse outer edge so we can connect them in order
+    north_outer_edge.reverse()
+    north_coordinates = [north_inner_edge + north_outer_edge + [north_inner_edge[0]]]
+
+    # Build south mixed-use zone (positive Y side)
+    # Mixed-use: from +half_width + 80 to +half_width + 160
+    south_inner_edge = []  # Inner edge (adjacent to industrial/commercial)
+    south_outer_edge = []  # Outer edge (further from center)
+
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        inner_y = half_width + 80.0
+        outer_y = half_width + 160.0
+        south_inner_edge.append([x_pos, inner_y])
+        south_outer_edge.append([x_pos, outer_y])
+
+    south_outer_edge.reverse()
+    south_coordinates = [south_inner_edge + south_outer_edge + [south_inner_edge[0]]]
+
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Mixed-Use Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "mixed_use",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_mixed_use",
+                    "description": "Mixed-use zone outside hub industrial/commercial bands",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Mixed-Use Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "mixed_use",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_mixed_use",
+                    "description": "Mixed-use zone outside hub industrial/commercial bands",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+
+    return zones
 
 def generate_chunk_agricultural_zones(floor: int, chunk_index: int) -> list:
     """
@@ -757,11 +889,27 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Generate commercial zones interspersed within industrial zones at chunk centers
     commercial_zones = generate_chunk_commercial_zones(floor, chunk_index)
     
+    # Generate mixed-use zones outside the industrial/commercial bands in hub areas
+    mixed_use_zones = generate_chunk_mixed_use_zones(floor, chunk_index)
+    
     # Generate agricultural zones in free space between stations (outside station flare areas)
     agricultural_zones = generate_chunk_agricultural_zones(floor, chunk_index)
     
     # Combine all zones
-    all_zones = [restricted_zone] + industrial_zones + commercial_zones + agricultural_zones
+    all_zones = [restricted_zone] + industrial_zones + commercial_zones + mixed_use_zones + agricultural_zones
+
+    # Phase 2: Generate buildings and structures for zones (if available)
+    if BUILDING_GENERATION_AVAILABLE:
+        try:
+            all_structures = _generate_structures_for_zones(
+                all_zones, floor, chunk_index, chunk_seed
+            )
+        except Exception as e:
+            # If building generation fails, return empty structures but still return zones
+            print(f"Warning: Building generation failed: {e}")
+            all_structures = []
+    else:
+        all_structures = []
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",
@@ -769,7 +917,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "chunk_index": chunk_index,
         "seed": chunk_seed,
         "geometry": geometry,
-        "structures": [],
+        "structures": all_structures,  # Phase 2: Now includes generated buildings
         "zones": all_zones,  # Include restricted zone and industrial zones (if in hub area)
         "metadata": {
             "generated": True,
@@ -787,4 +935,134 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
             },
         },
     }
+
+
+def _generate_structures_for_zones(
+    zones: list, floor: int, chunk_index: int, chunk_seed: int
+) -> list:
+    """
+    Generate buildings and structures for zones in a chunk.
+    
+    Phase 2 MVP: Generates buildings in system zones (industrial, commercial, agricultural).
+    Skips restricted zones.
+    
+    Args:
+        zones: List of zone dictionaries (GeoJSON format)
+        floor: Floor number
+        chunk_index: Chunk index (for structure ID generation)
+        chunk_seed: Chunk seed for deterministic generation
+    
+    Returns:
+        List of structure dictionaries (buildings, parks, etc.)
+    """
+    structures = []
+    
+    for zone in zones:
+        zone_type = zone.get("properties", {}).get("zone_type", "").lower()
+        
+        # Skip restricted zones (no buildings allowed)
+        if zone_type == "restricted":
+            continue
+        
+        # Generate buildings in industrial, commercial, and mixed-use zones (hub areas)
+        if zone_type not in ["industrial", "commercial", "mixed_use", "mixed-use"]:
+            continue
+        
+        # Extract zone polygon coordinates
+        zone_geometry = zone.get("geometry", {})
+        if zone_geometry.get("type") != "Polygon":
+            continue
+        
+        zone_coordinates = zone_geometry.get("coordinates", [])
+        if not zone_coordinates or not zone_coordinates[0]:
+            continue
+        
+        # Get zone importance (default to 0.5 for system zones)
+        zone_importance = 0.5
+        if "properties" in zone and "properties" in zone["properties"]:
+            zone_props = zone["properties"].get("properties", {})
+            zone_importance = zone_props.get("importance", 0.5)
+        
+        # Generate grid cells for this zone
+        try:
+            grid_cells = grid.generate_city_grid(
+                zone_coordinates,
+                zone_type,
+                zone_importance,
+                chunk_seed,
+            )
+            
+            # Generate buildings for building-type cells
+            # Create Shapely polygon for zone boundary validation
+            zone_polygon_shapely = sg.Polygon(zone_coordinates[0])
+            
+            for cell in grid_cells:
+                if cell.get("type") == "building":
+                    # Generate building seed
+                    cell_x = int(cell["position"][0] / grid.GRID_CELL_SIZE)
+                    cell_y = int(cell["position"][1] / grid.GRID_CELL_SIZE)
+                    building_seed = buildings.get_building_seed(
+                        chunk_seed, cell_x, cell_y
+                    )
+                    
+                    # Generate building
+                    building = buildings.generate_building(
+                        tuple(cell["position"]),
+                        zone_type,
+                        zone_importance,
+                        building_seed,
+                        floor,
+                    )
+                    
+                    # Validate building footprint is completely within zone
+                    # Check all 4 corners of the building to ensure it doesn't extend into adjacent zones
+                    building_width = building["dimensions"]["width"]
+                    building_depth = building["dimensions"]["depth"]
+                    half_width = building_width / 2.0
+                    half_depth = building_depth / 2.0
+                    
+                    building_x = building["position"][0]
+                    building_y = building["position"][1]
+                    
+                    # Check all 4 corners of the building footprint
+                    corners = [
+                        sg.Point(building_x - half_width, building_y - half_depth),  # Bottom-left
+                        sg.Point(building_x + half_width, building_y - half_depth),  # Bottom-right
+                        sg.Point(building_x + half_width, building_y + half_depth),  # Top-right
+                        sg.Point(building_x - half_width, building_y + half_depth),  # Top-left
+                    ]
+                    
+                    # All corners must be within the zone polygon (using contains, not intersects)
+                    all_within = all(zone_polygon_shapely.contains(corner) for corner in corners)
+                    
+                    if not all_within:
+                        # Building would extend outside zone boundary - skip it
+                        continue
+                    
+                    # Convert building to structure format expected by client
+                    # Client expects: { id, structure_type, position: {x, y}, floor, ... }
+                    structure_id = f"proc_{floor}_{chunk_index}_{cell_x}_{cell_y}"
+                    structure = {
+                        "id": structure_id,
+                        "type": "building",
+                        "structure_type": building["building_type"],
+                        "position": {
+                            "x": building["position"][0],
+                            "y": building["position"][1],
+                        },
+                        "floor": floor,
+                        "dimensions": building["dimensions"],
+                        "windows": building["windows"],
+                        "properties": building["properties"],
+                        "is_procedural": True,
+                        "procedural_seed": building_seed,
+                    }
+                    structures.append(structure)
+        except Exception as e:
+            # Log error but continue with other zones
+            # In production, use proper logging
+            print(f"Error generating structures for zone {zone_type}: {e}")
+            continue
+    
+    return structures
 

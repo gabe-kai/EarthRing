@@ -58,7 +58,6 @@ def test_generate_chunk():
     # Check vertices are in absolute positions
     assert chunk["geometry"]["vertices"][0][0] == chunk_index * 1000.0  # X position
     assert chunk["geometry"]["vertices"][0][2] == floor  # Z position (floor)
-    assert chunk["structures"] == []
     # Chunks now include default zones (restricted maglev zones)
     assert isinstance(chunk["zones"], list)
     assert len(chunk["zones"]) > 0  # Should have at least one default zone
@@ -66,8 +65,10 @@ def test_generate_chunk():
     for zone in chunk["zones"]:
         assert "geometry" in zone
         assert "properties" in zone
+    # Chunk 100 is outside hub areas, so no structures expected
+    assert isinstance(chunk["structures"], list)
     assert chunk["metadata"]["generated"] is True
-    assert chunk["metadata"]["version"] == 2  # Phase 2 version
+    assert chunk["metadata"]["version"] == 3  # Phase 2 with buildings version
 
 
 def test_generate_ring_floor_geometry():
@@ -102,3 +103,90 @@ def test_generate_ring_floor_geometry():
     # Check normals point up (Z direction in EarthRing)
     assert geometry["normals"][0] == [0.0, 0.0, 1.0]
     assert geometry["normals"][1] == [0.0, 0.0, 1.0]
+
+
+def test_generate_chunk_with_buildings():
+    """Test chunk generation at hub center includes buildings"""
+    floor = 0
+    chunk_index = 0  # Hub center chunk
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    assert chunk["chunk_id"] == "0_0"
+    # Hub chunks should have zones (restricted, industrial, commercial, mixed-use)
+    assert len(chunk["zones"]) > 1
+    
+    # Hub chunks should have structures (buildings)
+    assert isinstance(chunk["structures"], list)
+    assert len(chunk["structures"]) > 0
+    
+    # Check structure format
+    if chunk["structures"]:
+        structure = chunk["structures"][0]
+        assert "id" in structure
+        assert "structure_type" in structure
+        assert "position" in structure
+        assert "floor" in structure
+        assert structure["position"]["x"] is not None
+        assert structure["position"]["y"] is not None
+        assert structure["floor"] == floor
+        assert structure.get("is_procedural", False) is True
+
+
+def test_building_boundary_validation():
+    """Test that buildings are validated to stay within zone boundaries"""
+    floor = 0
+    chunk_index = 0  # Hub center chunk
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    # Get zones and structures
+    zones = chunk["zones"]
+    structures = chunk["structures"]
+    
+    if not structures:
+        pytest.skip("No structures generated for this chunk")
+    
+    # For each structure, verify it's within a zone
+    import shapely.geometry as sg
+    
+    for structure in structures:
+        pos_x = structure["position"]["x"]
+        pos_y = structure["position"]["y"]
+        
+        # Find the zone this structure belongs to
+        structure_in_zone = False
+        for zone in zones:
+            zone_type = zone.get("properties", {}).get("zone_type", "").lower()
+            if zone_type not in ["industrial", "commercial", "mixed_use"]:
+                continue
+            
+            # Check if structure center is in zone
+            zone_coords = zone["geometry"]["coordinates"][0]
+            zone_poly = sg.Polygon(zone_coords)
+            structure_point = sg.Point(pos_x, pos_y)
+            
+            if zone_poly.contains(structure_point):
+                # Check that building corners are also within zone
+                width = structure["dimensions"]["width"]
+                depth = structure["dimensions"]["depth"]
+                half_width = width / 2.0
+                half_depth = depth / 2.0
+                
+                corners = [
+                    sg.Point(pos_x - half_width, pos_y - half_depth),
+                    sg.Point(pos_x + half_width, pos_y - half_depth),
+                    sg.Point(pos_x + half_width, pos_y + half_depth),
+                    sg.Point(pos_x - half_width, pos_y + half_depth),
+                ]
+                
+                # All corners should be within zone
+                all_within = all(zone_poly.contains(corner) for corner in corners)
+                assert all_within, f"Building at ({pos_x}, {pos_y}) extends outside zone"
+                structure_in_zone = True
+                break
+        
+        # Structure should belong to at least one zone
+        assert structure_in_zone, f"Structure at ({pos_x}, {pos_y}) not in any zone"

@@ -15,15 +15,17 @@ import (
 
 // ChunkStorage handles chunk storage and retrieval from the database
 type ChunkStorage struct {
-	db          *sql.DB
-	zoneStorage *ZoneStorage // Optional zone storage for creating zones from chunk generation
+	db               *sql.DB
+	zoneStorage      *ZoneStorage      // Optional zone storage for creating zones from chunk generation
+	structureStorage *StructureStorage // Optional structure storage for creating structures from chunk generation
 }
 
 // NewChunkStorage creates a new chunk storage instance
 func NewChunkStorage(db *sql.DB) *ChunkStorage {
 	return &ChunkStorage{
-		db:          db,
-		zoneStorage: NewZoneStorage(db), // Create zone storage for zone creation
+		db:               db,
+		zoneStorage:      NewZoneStorage(db),      // Create zone storage for zone creation
+		structureStorage: NewStructureStorage(db), // Create structure storage for structure creation
 	}
 }
 
@@ -388,6 +390,133 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			}
 		}
 
+		// Create structures from generation response if any (before storing chunk_data)
+		var structureIDs []int64
+		if len(genResponse.Structures) > 0 {
+
+			for _, structureData := range genResponse.Structures {
+				// Convert structure data to StructureCreateInput
+				structureMap, ok := structureData.(map[string]interface{})
+				if !ok {
+					log.Printf("[StoreChunk] Warning: structure data is not a map, skipping: %T", structureData)
+					continue
+				}
+
+				// Extract structure properties
+				structureType, _ := structureMap["structure_type"].(string)
+				if structureType == "" {
+					log.Printf("[StoreChunk] Warning: structure missing structure_type, skipping")
+					continue
+				}
+
+				// Extract position
+				posMap, ok := structureMap["position"].(map[string]interface{})
+				if !ok {
+					log.Printf("[StoreChunk] Warning: structure position is not a map, skipping")
+					continue
+				}
+				posX, _ := posMap["x"].(float64)
+				posY, _ := posMap["y"].(float64)
+
+				// Extract floor
+				floorVal, _ := structureMap["floor"].(float64)
+				structFloor := int(floorVal)
+
+				// Extract optional fields
+				isProcedural, _ := structureMap["is_procedural"].(bool)
+				var proceduralSeed *int64
+				if seedVal, ok := structureMap["procedural_seed"].(float64); ok {
+					seed := int64(seedVal)
+					proceduralSeed = &seed
+				}
+
+				// Extract properties and dimensions
+				var propertiesJSON json.RawMessage
+				if propsObj, ok := structureMap["properties"].(map[string]interface{}); ok {
+					if propsBytes, err := json.Marshal(propsObj); err == nil {
+						propertiesJSON = propsBytes
+					}
+				}
+				// Include dimensions and windows in properties if present
+				var modelDataJSON json.RawMessage
+				modelDataMap := make(map[string]interface{})
+				if dimensions, ok := structureMap["dimensions"].(map[string]interface{}); ok {
+					modelDataMap["dimensions"] = dimensions
+				}
+				if windows, ok := structureMap["windows"].([]interface{}); ok {
+					modelDataMap["windows"] = windows
+				}
+				if len(modelDataMap) > 0 {
+					if modelBytes, err := json.Marshal(modelDataMap); err == nil {
+						modelDataJSON = modelBytes
+					}
+				}
+
+				// For procedural structures, we don't need to link them to zones
+				// They're deterministic and guaranteed to be within their zones
+				var zoneID *int64 // nil for procedural structures
+
+				// Insert structure directly into database within transaction
+				// Bypass validation for procedural structures (they're deterministic and guaranteed valid)
+				structureQuery := `
+					INSERT INTO structures (
+						structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
+						position, rotation, scale, properties, model_data
+					) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12)
+					RETURNING id
+				`
+
+				var structID int64
+				rotation, _ := structureMap["rotation"].(float64)
+				if rotation == 0 {
+					rotation = 0.0
+				}
+				scale, _ := structureMap["scale"].(float64)
+				if scale == 0 {
+					scale = 1.0
+				}
+
+				var propertiesJSONInterface interface{} = propertiesJSON
+				if len(propertiesJSON) == 0 {
+					propertiesJSONInterface = nil
+				}
+				var modelDataJSONInterface interface{} = modelDataJSON
+				if len(modelDataJSON) == 0 {
+					modelDataJSONInterface = nil
+				}
+
+				var seedVal sql.NullInt64
+				if proceduralSeed != nil {
+					seedVal = sql.NullInt64{Int64: *proceduralSeed, Valid: true}
+				}
+				var zoneIDVal sql.NullInt64
+				if zoneID != nil {
+					zoneIDVal = sql.NullInt64{Int64: *zoneID, Valid: true}
+				}
+
+				err = tx.QueryRow(
+					structureQuery,
+					structureType,
+					structFloor,
+					nil, // owner_id (NULL for procedural structures)
+					zoneIDVal,
+					isProcedural,
+					seedVal,
+					posX,
+					posY,
+					rotation,
+					scale,
+					propertiesJSONInterface,
+					modelDataJSONInterface,
+				).Scan(&structID)
+				if err != nil {
+					log.Printf("[StoreChunk] Warning: failed to create structure for chunk %d_%d: %v", floor, chunkIndex, err)
+					continue
+				}
+				structureIDs = append(structureIDs, structID)
+			}
+		}
+
 		// Store geometry in chunk_data table
 		// For ring floor geometry, we'll store it as a POLYGON
 		// The geometry represents the chunk boundary rectangle
@@ -397,6 +526,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			ON CONFLICT (chunk_id)
 			DO UPDATE SET
 				geometry = ST_GeomFromText($2, 0),
+				structure_ids = $3,
 				zone_ids = $4,
 				terrain_data = $5,
 				last_updated = CURRENT_TIMESTAMP
@@ -409,7 +539,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 			return fmt.Errorf("failed to marshal geometry: %w", err)
 		}
 
-		_, err = tx.Exec(query, chunkID, geometryWKT, pq.Array([]int64{}), pq.Array(zoneIDs), string(geometryJSON))
+		_, err = tx.Exec(query, chunkID, geometryWKT, pq.Array(structureIDs), pq.Array(zoneIDs), string(geometryJSON))
 		if err != nil {
 			// Check for PostGIS-specific errors
 			errStr := err.Error()

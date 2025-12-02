@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -865,6 +866,400 @@ func TestChunkStorage_DeleteChunk(t *testing.T) {
 		}
 		if count != 0 {
 			t.Error("Chunk data should be deleted")
+		}
+	})
+}
+
+func TestChunkStorage_StoreChunk_WithStructures(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	testutil.CloseDB(t, db)
+
+	// Create tables
+	setupChunkTables(t, db)
+	// Also need structures table for structure persistence
+	createStructuresTable(t, db)
+
+	storage := NewChunkStorage(db)
+
+	t.Run("stores chunk with structures", func(t *testing.T) {
+		genResponse := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20000",
+				Floor:      0,
+				ChunkIndex: 20000,
+				Width:      400.0,
+				Version:    3,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{
+				map[string]interface{}{
+					"id":            "proc_0_20000_0_-3",
+					"type":          "building",
+					"structure_type": "industrial",
+					"position": map[string]interface{}{
+						"x": 25.0,
+						"y": -175.0,
+					},
+					"floor":         0,
+					"dimensions":    map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 30.0},
+					"windows":       []interface{}{},
+					"properties":    map[string]interface{}{"seed": 12345, "zone_type": "industrial"},
+					"is_procedural": true,
+					"procedural_seed": float64(12345),
+				},
+				map[string]interface{}{
+					"id":            "proc_0_20000_1_-3",
+					"type":          "building",
+					"structure_type": "commercial",
+					"position": map[string]interface{}{
+						"x": 75.0,
+						"y": -175.0,
+					},
+					"floor":         0,
+					"dimensions":    map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 50.0},
+					"windows":       []interface{}{},
+					"properties":    map[string]interface{}{"seed": 67890, "zone_type": "commercial"},
+					"is_procedural": true,
+					"procedural_seed": float64(67890),
+				},
+			},
+			Zones: []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 20000, genResponse, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk with structures: %v", err)
+		}
+
+		// Verify chunk was stored
+		metadata, err := storage.GetChunkMetadata(0, 20000)
+		if err != nil {
+			t.Fatalf("Failed to retrieve metadata: %v", err)
+		}
+		if metadata == nil {
+			t.Fatal("Chunk metadata not found after storage")
+		}
+
+		// Verify structures were stored and linked
+		data, err := storage.GetChunkData(metadata.ID)
+		if err != nil {
+			t.Fatalf("Failed to retrieve chunk data: %v", err)
+		}
+		if data == nil {
+			t.Fatal("Chunk data not found after storage")
+		}
+
+		// Should have 2 structure IDs
+		if len(data.StructureIDs) != 2 {
+			t.Errorf("Expected 2 structure IDs, got %d", len(data.StructureIDs))
+		}
+
+		// Verify structures exist in database
+		structureStorage := NewStructureStorage(db)
+		for _, structID := range data.StructureIDs {
+			structure, err := structureStorage.GetStructure(structID)
+			if err != nil {
+				t.Fatalf("Failed to retrieve structure %d: %v", structID, err)
+			}
+			if structure == nil {
+				t.Fatalf("Structure %d not found in database", structID)
+			}
+
+			// Verify structure properties
+			if structure.StructureType != "industrial" && structure.StructureType != "commercial" {
+				t.Errorf("Unexpected structure type: %s", structure.StructureType)
+			}
+			if !structure.IsProcedural {
+				t.Error("Structure should be marked as procedural")
+			}
+			if structure.ProceduralSeed == nil {
+				t.Error("Structure should have procedural seed")
+			}
+			if structure.Floor != 0 {
+				t.Errorf("Expected floor 0, got %d", structure.Floor)
+			}
+
+			// Verify structure has model_data with dimensions
+			if len(structure.ModelData) == 0 {
+				t.Error("Structure should have model_data with dimensions")
+			} else {
+				var modelData map[string]interface{}
+				if err := json.Unmarshal(structure.ModelData, &modelData); err != nil {
+					t.Fatalf("Failed to unmarshal model_data: %v", err)
+				}
+				if _, ok := modelData["dimensions"]; !ok {
+					t.Error("model_data should contain dimensions")
+				}
+			}
+		}
+	})
+
+	t.Run("stores chunk with empty structures", func(t *testing.T) {
+		genResponse := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20001",
+				Floor:      0,
+				ChunkIndex: 20001,
+				Width:      400.0,
+				Version:    3,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{},
+			Zones:      []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 20001, genResponse, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk with empty structures: %v", err)
+		}
+
+		// Verify chunk_data has empty structure_ids
+		metadata, err := storage.GetChunkMetadata(0, 20001)
+		if err != nil {
+			t.Fatalf("Failed to retrieve metadata: %v", err)
+		}
+
+		data, err := storage.GetChunkData(metadata.ID)
+		if err != nil {
+			t.Fatalf("Failed to retrieve chunk data: %v", err)
+		}
+
+		if len(data.StructureIDs) != 0 {
+			t.Errorf("Expected empty structure_ids, got %v", data.StructureIDs)
+		}
+	})
+
+	t.Run("updates chunk structure_ids when regenerating", func(t *testing.T) {
+		// First store with structures
+		genResponse1 := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20002",
+				Floor:      0,
+				ChunkIndex: 20002,
+				Width:      400.0,
+				Version:    3,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{
+				map[string]interface{}{
+					"id":            "proc_0_20002_0_0",
+					"type":          "building",
+					"structure_type": "industrial",
+					"position": map[string]interface{}{
+						"x": 25.0,
+						"y": -150.0,
+					},
+					"floor":         0,
+					"dimensions":    map[string]interface{}{"width": 20.0, "depth": 20.0, "height": 30.0},
+					"windows":       []interface{}{},
+					"properties":    map[string]interface{}{"seed": 11111},
+					"is_procedural": true,
+					"procedural_seed": float64(11111),
+				},
+			},
+			Zones: []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 20002, genResponse1, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk: %v", err)
+		}
+
+		metadata1, err := storage.GetChunkMetadata(0, 20002)
+		if err != nil {
+			t.Fatalf("Failed to get metadata: %v", err)
+		}
+
+		data1, err := storage.GetChunkData(metadata1.ID)
+		if err != nil {
+			t.Fatalf("Failed to get chunk data: %v", err)
+		}
+
+		initialStructCount := len(data1.StructureIDs)
+		if initialStructCount != 1 {
+			t.Fatalf("Expected 1 structure, got %d", initialStructCount)
+		}
+
+		// Store again with different structures
+		genResponse2 := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20002",
+				Floor:      0,
+				ChunkIndex: 20002,
+				Width:      400.0,
+				Version:    3,
+			},
+			Geometry: genResponse1.Geometry,
+			Structures: []interface{}{
+				map[string]interface{}{
+					"id":            "proc_0_20002_1_0",
+					"type":          "building",
+					"structure_type": "commercial",
+					"position": map[string]interface{}{
+						"x": 75.0,
+						"y": -150.0,
+					},
+					"floor":         0,
+					"dimensions":    map[string]interface{}{"width": 25.0, "depth": 25.0, "height": 50.0},
+					"windows":       []interface{}{},
+					"properties":    map[string]interface{}{"seed": 22222},
+					"is_procedural": true,
+					"procedural_seed": float64(22222),
+				},
+			},
+			Zones: []interface{}{},
+		}
+
+		err = storage.StoreChunk(0, 20002, genResponse2, nil)
+		if err != nil {
+			t.Fatalf("Failed to update chunk: %v", err)
+		}
+
+		// Verify structure_ids were updated
+		data2, err := storage.GetChunkData(metadata1.ID)
+		if err != nil {
+			t.Fatalf("Failed to get updated chunk data: %v", err)
+		}
+
+		if len(data2.StructureIDs) != 1 {
+			t.Errorf("Expected 1 structure after update, got %d", len(data2.StructureIDs))
+		}
+
+		// Verify new structure exists
+		newStruct, err := NewStructureStorage(db).GetStructure(data2.StructureIDs[0])
+		if err != nil {
+			t.Fatalf("Failed to get new structure: %v", err)
+		}
+		if newStruct.StructureType != "commercial" {
+			t.Errorf("Expected commercial structure, got %s", newStruct.StructureType)
+		}
+	})
+
+	t.Run("stores structures with windows and dimensions in model_data", func(t *testing.T) {
+		windowsData := []interface{}{
+			map[string]interface{}{
+				"position": []interface{}{-10.0, 11.0, -15.0},
+				"size":     []interface{}{2.5, 2.5},
+				"facade":   "front",
+			},
+			map[string]interface{}{
+				"position": []interface{}{10.0, -11.0, 15.0},
+				"size":     []interface{}{2.5, 2.5},
+				"facade":   "back",
+			},
+		}
+
+		genResponse := &procedural.GenerateChunkResponse{
+			Success: true,
+			Chunk: procedural.ChunkMetadata{
+				ChunkID:    "0_20003",
+				Floor:      0,
+				ChunkIndex: 20003,
+				Width:      400.0,
+				Version:    3,
+			},
+			Geometry: &procedural.ChunkGeometry{
+				Type:     "ring_floor",
+				Vertices: [][]float64{{0, 0, 0}, {1000, 0, 0}, {1000, 400, 0}, {0, 400, 0}},
+				Faces:    [][]int{{0, 1, 2}, {0, 2, 3}},
+				Normals:  [][]float64{{0, 0, 1}, {0, 0, 1}},
+				Width:    400.0,
+				Length:   1000.0,
+			},
+			Structures: []interface{}{
+				map[string]interface{}{
+					"id":            "proc_0_20003_0_0",
+					"type":          "building",
+					"structure_type": "industrial",
+					"position": map[string]interface{}{
+						"x": 50.0,
+						"y": -200.0,
+					},
+					"floor":         0,
+					"dimensions":    map[string]interface{}{"width": 30.0, "depth": 30.0, "height": 40.0},
+					"windows":       windowsData,
+					"properties":    map[string]interface{}{"seed": 55555},
+					"is_procedural": true,
+					"procedural_seed": float64(55555),
+				},
+			},
+			Zones: []interface{}{},
+		}
+
+		err := storage.StoreChunk(0, 20003, genResponse, nil)
+		if err != nil {
+			t.Fatalf("Failed to store chunk: %v", err)
+		}
+
+		// Verify structure was stored with windows in model_data
+		metadata, err := storage.GetChunkMetadata(0, 20003)
+		if err != nil {
+			t.Fatalf("Failed to get metadata: %v", err)
+		}
+
+		data, err := storage.GetChunkData(metadata.ID)
+		if err != nil {
+			t.Fatalf("Failed to get chunk data: %v", err)
+		}
+
+		if len(data.StructureIDs) != 1 {
+			t.Fatalf("Expected 1 structure, got %d", len(data.StructureIDs))
+		}
+
+		structRecord, err := NewStructureStorage(db).GetStructure(data.StructureIDs[0])
+		if err != nil {
+			t.Fatalf("Failed to get structure: %v", err)
+		}
+
+		// Verify model_data contains dimensions and windows
+		if len(structRecord.ModelData) == 0 {
+			t.Fatal("Structure should have model_data")
+		}
+
+		var modelData map[string]interface{}
+		if err := json.Unmarshal(structRecord.ModelData, &modelData); err != nil {
+			t.Fatalf("Failed to unmarshal model_data: %v", err)
+		}
+
+		if dimensions, ok := modelData["dimensions"].(map[string]interface{}); ok {
+			if dimWidth, ok := dimensions["width"].(float64); !ok || dimWidth != 30.0 {
+				t.Errorf("Expected width 30.0, got %v", dimensions["width"])
+			}
+		} else {
+			t.Error("model_data should contain dimensions")
+		}
+
+		if windows, ok := modelData["windows"].([]interface{}); ok {
+			if len(windows) != 2 {
+				t.Errorf("Expected 2 windows, got %d", len(windows))
+			}
+		} else {
+			t.Error("model_data should contain windows")
 		}
 	})
 }

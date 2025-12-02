@@ -150,6 +150,7 @@ type WebSocketHandlers struct {
 	proceduralClient *procedural.ProceduralClient
 	chunkStorage     *database.ChunkStorage
 	zoneStorage      *database.ZoneStorage
+	structureStorage *database.StructureStorage
 	streamManager    *streaming.Manager
 	profiler         *performance.Profiler
 	upgrader         websocket.Upgrader
@@ -180,6 +181,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 		proceduralClient: proceduralClient,
 		chunkStorage:     chunkStorage,
 		zoneStorage:      database.NewZoneStorage(db),
+		structureStorage: database.NewStructureStorage(db),
 		streamManager:    streaming.NewManager(),
 		profiler:         profiler,
 		expiredTokenLogs: make(map[string]time.Time),
@@ -868,6 +870,55 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					log.Printf("[Chunks] Warning: Failed to load overlapping zones for chunk %s: %v", chunkID, err)
 				}
 
+				// Load structures from chunk_data.structure_ids
+				var structures []interface{}
+				if chunkData != nil && len(chunkData.StructureIDs) > 0 {
+					for _, structID := range chunkData.StructureIDs {
+						structure, err := h.structureStorage.GetStructure(structID)
+						if err != nil {
+							log.Printf("[Chunks] Warning: Failed to load structure %d for chunk %s: %v", structID, chunkID, err)
+							continue
+						}
+
+						// Convert structure to format expected by client
+						structureFeature := map[string]interface{}{
+							"id":            fmt.Sprintf("%d", structure.ID),
+							"type":          "building",
+							"structure_type": structure.StructureType,
+							"floor":         structure.Floor,
+							"position": map[string]interface{}{
+								"x": structure.Position.X,
+								"y": structure.Position.Y,
+							},
+							"rotation":      structure.Rotation,
+							"scale":         structure.Scale,
+							"is_procedural": structure.IsProcedural,
+							"properties":    structure.Properties,
+						}
+
+						// Extract dimensions and windows from model_data if present
+						if len(structure.ModelData) > 0 {
+							var modelDataMap map[string]interface{}
+							if err := json.Unmarshal(structure.ModelData, &modelDataMap); err == nil {
+								if dimensions, ok := modelDataMap["dimensions"].(map[string]interface{}); ok {
+									structureFeature["dimensions"] = dimensions
+								}
+								if windows, ok := modelDataMap["windows"].([]interface{}); ok {
+									structureFeature["windows"] = windows
+								}
+							}
+						}
+
+						// Add procedural seed if present
+						if structure.ProceduralSeed != nil {
+							structureFeature["procedural_seed"] = *structure.ProceduralSeed
+						}
+
+						structures = append(structures, structureFeature)
+					}
+					log.Printf("[Chunks] Loaded %d structures for chunk %s from database", len(structures), chunkID)
+				}
+
 				metadata := ChunkMetadata{
 					ID:           chunkID,
 					Floor:        storedMetadata.Floor,
@@ -880,7 +931,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 				chunk = ChunkData{
 					ID:         chunkID,
 					Geometry:   geometry,
-					Structures: []interface{}{},
+					Structures: structures,
 					Zones:      zones,
 					Metadata:   &metadata,
 				}

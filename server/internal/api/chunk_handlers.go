@@ -22,7 +22,8 @@ import (
 //
 //	1: Initial rectangular geometry (4 vertices, 2 faces)
 //	2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
-const CurrentGeometryVersion = 2
+//	3: Phase 2 - Added building generation (grid-based city generation with buildings)
+const CurrentGeometryVersion = 3
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {
