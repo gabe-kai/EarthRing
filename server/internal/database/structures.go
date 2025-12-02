@@ -88,9 +88,19 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 
 	// Validate zone relationship if zone_id is provided
 	if input.ZoneID != nil {
-		if err := s.validateZoneRelationship(*input.ZoneID, input.Position, input.Floor); err != nil {
+		if err := s.validateZoneRelationship(*input.ZoneID, input.Position, input.Floor, input.StructureType); err != nil {
 			return nil, err
 		}
+	}
+
+	// Check for collisions with existing structures
+	if err := s.checkCollisions(input.StructureType, input.Position, input.Floor, input.Properties, input.Scale, nil); err != nil {
+		return nil, err
+	}
+
+	// Validate height limits
+	if err := validateHeight(input.StructureType, input.Floor, input.Properties, input.Scale); err != nil {
+		return nil, err
 	}
 
 	var ownerID sql.NullInt64
@@ -352,26 +362,51 @@ func (s *StructureStorage) UpdateStructure(id int64, input *StructureUpdateInput
 		return s.GetStructure(id)
 	}
 
+	// Get current structure to check collisions and zone relationships
+	current, err := s.GetStructure(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current structure: %w", err)
+	}
+
+	// Determine new position, floor, type, properties, and scale for validation
+	pos := current.Position
+	floor := current.Floor
+	structureType := current.StructureType
+	propsForValidation := current.Properties
+	scale := current.Scale
+
+	if input.Position != nil {
+		pos = *input.Position
+	}
+	if input.Floor != nil {
+		floor = *input.Floor
+	}
+	if input.StructureType != nil {
+		structureType = *input.StructureType
+	}
+	if input.Properties != nil {
+		propsForValidation = *input.Properties
+	}
+	if input.Scale != nil {
+		scale = *input.Scale
+	}
+
 	// Validate zone relationship if zone_id is being updated
 	if input.ZoneIDSet && input.ZoneID != nil {
-		// Get current position and floor if not being updated
-		current, err := s.GetStructure(id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get current structure: %w", err)
-		}
-
-		pos := current.Position
-		floor := current.Floor
-		if input.Position != nil {
-			pos = *input.Position
-		}
-		if input.Floor != nil {
-			floor = *input.Floor
-		}
-
-		if err := s.validateZoneRelationship(*input.ZoneID, pos, floor); err != nil {
+		if err := s.validateZoneRelationship(*input.ZoneID, pos, floor, structureType); err != nil {
 			return nil, err
 		}
+	}
+
+	// Check for collisions with existing structures (excluding this structure)
+	excludeID := &id
+	if err := s.checkCollisions(structureType, pos, floor, propsForValidation, scale, excludeID); err != nil {
+		return nil, err
+	}
+
+	// Validate height limits
+	if err := validateHeight(structureType, floor, propsForValidation, scale); err != nil {
+		return nil, err
 	}
 
 	// Always update updated_at
@@ -398,7 +433,7 @@ func (s *StructureStorage) UpdateStructure(id int64, input *StructureUpdateInput
 	var properties sql.NullString
 	var modelData sql.NullString
 
-	err := s.db.QueryRow(query, args...).Scan(
+	err = s.db.QueryRow(query, args...).Scan(
 		&structure.ID,
 		&structure.StructureType,
 		&structure.Floor,
@@ -628,7 +663,33 @@ const (
 	MaxWidthOffset = 2500.0 // meters (±2.5 km)
 	MinFloor       = -2
 	MaxFloor       = 15
+	FloorHeight    = 20.0 // meters per floor level
 )
+
+// Default maximum heights (in meters) for different structure types.
+// These represent the maximum height a structure can be.
+// Structures can override this via the "max_height" property in the properties JSONB field.
+// Height limits can also be enforced by zones (checked separately).
+var defaultMaxHeights = map[string]float64{
+	"building":   100.0, // 100m (5 floors) - typical building height
+	"decoration": 20.0,  // 20m (1 floor) - decorative elements
+	"furniture":  5.0,   // 5m - furniture items
+	"vehicle":    5.0,   // 5m - vehicles
+	"road":       1.0,   // 1m - roads (flat)
+	"default":    20.0,  // 20m default (1 floor) for unknown types
+}
+
+// Default collision radii (in meters) for different structure types.
+// These represent the minimum distance between structure centers.
+// Structures can override this via the "collision_radius" property in the properties JSONB field.
+var defaultCollisionRadii = map[string]float64{
+	"building":   50.0, // 50m radius (100m diameter) - typical building footprint
+	"decoration": 5.0,  // 5m radius (10m diameter) - small decorative objects
+	"furniture":  2.0,  // 2m radius (4m diameter) - furniture items
+	"vehicle":    10.0, // 10m radius (20m diameter) - vehicles
+	"road":       25.0, // 25m radius (50m width) - roads
+	"default":    10.0, // 10m default radius for unknown types
+}
 
 // validateStructureInput validates structure creation input.
 func validateStructureInput(input StructureCreateInput) error {
@@ -703,30 +764,264 @@ func validateStructureUpdate(input StructureUpdateInput) error {
 
 // validateZoneRelationship checks if a structure position is within the specified zone.
 // This validates that if a zone_id is provided, the structure is actually within that zone's geometry.
-func (s *StructureStorage) validateZoneRelationship(zoneID int64, position Position, floor int) error {
+// It also validates zone type compatibility and restricted zone access.
+func (s *StructureStorage) validateZoneRelationship(zoneID int64, position Position, floor int, structureType string) error {
 	query := `
-		SELECT EXISTS (
-			SELECT 1 FROM zones
-			WHERE id = $1
-			  AND floor = $2
-			  AND ST_Contains(
-				  geometry,
-				  ST_SetSRID(ST_MakePoint($3, $4), 0)
-			  )
-		)
+		SELECT zone_type, is_system_zone
+		FROM zones
+		WHERE id = $1
+		  AND floor = $2
+		  AND ST_Contains(
+			  geometry,
+			  ST_SetSRID(ST_MakePoint($3, $4), 0)
+		  )
 	`
 
-	var exists bool
-	err := s.db.QueryRow(query, zoneID, floor, position.X, position.Y).Scan(&exists)
+	var zoneType string
+	var isSystemZone bool
+	err := s.db.QueryRow(query, zoneID, floor, position.X, position.Y).Scan(&zoneType, &isSystemZone)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("zone %d not found", zoneID)
+			return fmt.Errorf("zone %d not found or structure position (%.2f, %.2f) is not within zone %d on floor %d", zoneID, position.X, position.Y, zoneID, floor)
 		}
 		return fmt.Errorf("failed to validate zone relationship: %w", err)
 	}
 
+	// Check if structure is being placed in a restricted zone
+	if zoneType == "restricted" {
+		return fmt.Errorf("structures cannot be placed in restricted zones (zone %d is restricted)", zoneID)
+	}
+
+	// Validate zone type compatibility with structure type
+	if err := validateZoneTypeCompatibility(zoneType, structureType); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateZoneTypeCompatibility checks if a structure type is compatible with a zone type.
+// Returns an error if the structure type is not allowed in the zone type.
+func validateZoneTypeCompatibility(zoneType string, structureType string) error {
+	// Normalize zone type (handle mixed-use vs mixed_use)
+	normalizedZoneType := strings.ToLower(strings.ReplaceAll(zoneType, "_", "-"))
+	normalizedStructureType := strings.ToLower(structureType)
+
+	// Define allowed structure types per zone type
+	allowedStructures := map[string][]string{
+		"residential":  {"building", "decoration", "furniture"},
+		"commercial":   {"building", "decoration", "furniture"},
+		"industrial":   {"building", "decoration", "furniture", "vehicle"},
+		"mixed-use":    {"building", "decoration", "furniture"},
+		"mixed_use":    {"building", "decoration", "furniture"},
+		"agricultural": {"building", "decoration", "furniture", "vehicle"},
+		"park":         {"decoration", "furniture"}, // Parks allow decorations and furniture, but not buildings
+		"cargo":        {"building", "decoration", "furniture", "vehicle"},
+		"transit":      {"decoration", "furniture"}, // Transit zones allow decorations and furniture, but not buildings
+	}
+
+	// Get allowed structures for this zone type
+	allowed, exists := allowedStructures[normalizedZoneType]
 	if !exists {
-		return fmt.Errorf("structure position (%.2f, %.2f) is not within zone %d on floor %d", position.X, position.Y, zoneID, floor)
+		// Unknown zone type - allow all structure types (for future extensibility)
+		return nil
+	}
+
+	// Check if structure type is allowed
+	for _, allowedType := range allowed {
+		if normalizedStructureType == allowedType {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("structure type '%s' is not allowed in zone type '%s' (allowed types: %v)", structureType, zoneType, allowed)
+}
+
+// getCollisionRadius returns the collision radius for a structure.
+// First checks the properties JSONB for a "collision_radius" field,
+// then falls back to the default for the structure type, or the global default.
+func getCollisionRadius(structureType string, properties json.RawMessage, scale float64) float64 {
+	// Try to extract collision_radius from properties
+	if len(properties) > 0 {
+		var props map[string]interface{}
+		if err := json.Unmarshal(properties, &props); err == nil {
+			if radius, ok := props["collision_radius"].(float64); ok && radius > 0 {
+				// Apply scale to the collision radius
+				return radius * scale
+			}
+		}
+	}
+
+	// Fall back to default for structure type
+	radius, ok := defaultCollisionRadii[structureType]
+	if !ok {
+		radius = defaultCollisionRadii["default"]
+	}
+
+	// Apply scale to the default radius
+	return radius * scale
+}
+
+// getStructureHeight extracts the height of a structure from its properties.
+// Returns 0 if height is not specified (structures without explicit height are assumed to fit within their floor).
+func getStructureHeight(properties json.RawMessage, scale float64) float64 {
+	if len(properties) == 0 {
+		return 0
+	}
+
+	var props map[string]interface{}
+	if err := json.Unmarshal(properties, &props); err != nil {
+		return 0
+	}
+
+	// Try to get height from properties
+	height, ok := props["height"].(float64)
+	if !ok {
+		return 0
+	}
+
+	// Apply scale to the height
+	return height * scale
+}
+
+// getMaxHeight returns the maximum allowed height for a structure.
+// First checks the properties JSONB for a "max_height" field,
+// then falls back to the default for the structure type, or the global default.
+func getMaxHeight(structureType string, properties json.RawMessage) float64 {
+	// Try to extract max_height from properties
+	if len(properties) > 0 {
+		var props map[string]interface{}
+		if err := json.Unmarshal(properties, &props); err == nil {
+			if maxHeight, ok := props["max_height"].(float64); ok && maxHeight > 0 {
+				return maxHeight
+			}
+		}
+	}
+
+	// Fall back to default for structure type
+	maxHeight, ok := defaultMaxHeights[structureType]
+	if !ok {
+		maxHeight = defaultMaxHeights["default"]
+	}
+
+	return maxHeight
+}
+
+// validateHeight checks if a structure's height is within allowed limits.
+// It checks:
+// 1. Structure doesn't span beyond available floors (if height > FloorHeight) - checked first to give clearer error
+// 2. Structure height doesn't exceed the maximum for its type
+func validateHeight(structureType string, floor int, properties json.RawMessage, scale float64) error {
+	height := getStructureHeight(properties, scale)
+	if height <= 0 {
+		// No height specified, structure is assumed to fit within its floor
+		return nil
+	}
+
+	// Check if structure fits within available floor space
+	// Each floor is FloorHeight (20m) tall, and structures should fit within their floor
+	// For structures taller than one floor, we need to check if they span valid floors
+	if height > FloorHeight {
+		// Structure spans multiple floors - calculate how many floors it needs
+		floorsNeeded := int(height/FloorHeight) + 1
+		if height/FloorHeight == float64(int(height/FloorHeight)) {
+			floorsNeeded = int(height / FloorHeight)
+		}
+
+		// Check if structure would extend beyond valid floor range
+		topFloor := floor + floorsNeeded - 1
+		if topFloor > MaxFloor {
+			return fmt.Errorf("structure height %.2fm would extend beyond maximum floor %d (structure on floor %d needs %d floors, would reach floor %d)", height, MaxFloor, floor, floorsNeeded, topFloor)
+		}
+		if floor < MinFloor {
+			return fmt.Errorf("structure on floor %d is below minimum floor %d", floor, MinFloor)
+		}
+	}
+
+	// Check against maximum height for structure type (after floor check)
+	maxHeight := getMaxHeight(structureType, properties)
+	if height > maxHeight {
+		return fmt.Errorf("structure height %.2fm exceeds maximum allowed height %.2fm for type '%s'", height, maxHeight, structureType)
+	}
+
+	return nil
+}
+
+// checkCollisions checks if placing a structure at the given position would collide with existing structures.
+// It queries for structures on the same floor within the collision radius.
+// excludeID is used when updating a structure (to exclude itself from collision checks).
+func (s *StructureStorage) checkCollisions(structureType string, position Position, floor int, properties json.RawMessage, scale float64, excludeID *int64) error {
+	collisionRadius := getCollisionRadius(structureType, properties, scale)
+
+	// Query for structures on the same floor within collision radius
+	// We use ST_DWithin to check distance between points
+	var rows *sql.Rows
+	var err error
+
+	if excludeID != nil {
+		query := `
+			SELECT id, structure_type, ST_X(position)::float as x, ST_Y(position)::float as y
+			FROM structures
+			WHERE floor = $1
+			  AND ST_DWithin(
+				  position,
+				  ST_SetSRID(ST_MakePoint($2, $3), 0),
+				  $4
+			  )
+			  AND id != $5
+		`
+		rows, err = s.db.Query(query, floor, position.X, position.Y, collisionRadius, *excludeID)
+	} else {
+		query := `
+			SELECT id, structure_type, ST_X(position)::float as x, ST_Y(position)::float as y
+			FROM structures
+			WHERE floor = $1
+			  AND ST_DWithin(
+				  position,
+				  ST_SetSRID(ST_MakePoint($2, $3), 0),
+				  $4
+			  )
+		`
+		rows, err = s.db.Query(query, floor, position.X, position.Y, collisionRadius)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check collisions: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Failed to close rows: %v", closeErr)
+		}
+	}()
+
+	var collisions []struct {
+		id            int64
+		structureType string
+		x, y          float64
+	}
+
+	for rows.Next() {
+		var c struct {
+			id            int64
+			structureType string
+			x, y          float64
+		}
+		if err := rows.Scan(&c.id, &c.structureType, &c.x, &c.y); err != nil {
+			return fmt.Errorf("failed to scan collision: %w", err)
+		}
+		collisions = append(collisions, c)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to iterate collisions: %w", err)
+	}
+
+	if len(collisions) > 0 {
+		// Build error message with collision details
+		var details []string
+		for _, c := range collisions {
+			details = append(details, fmt.Sprintf("structure %d (%s) at (%.2f, %.2f)", c.id, c.structureType, c.x, c.y))
+		}
+		return fmt.Errorf("structure would collide with existing structures: %s (minimum distance: %.2fm)", strings.Join(details, ", "), collisionRadius)
 	}
 
 	return nil

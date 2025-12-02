@@ -7,6 +7,7 @@
 - [Database Schema](03-database-schema.md) - Zone data storage
 - [Client Architecture](06-client-architecture.md) - Zone rendering implementation
 - [Map System](02-map-system.md) - Coordinate system used for zones
+- [Structure System](11-structure-system.md) - Structure placement and zone access rules
 
 ## Table of Contents
 

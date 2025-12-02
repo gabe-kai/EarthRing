@@ -272,6 +272,8 @@ gameStateManager.on('activeFloorChanged', ({ oldFloor, newFloor }) => {
 ### Structure Rendering System ✅ **IMPLEMENTED**
 
 **Structure Manager** (`client-web/src/structures/structure-manager.js`):
+
+**See**: [Structure System Design](11-structure-system.md) for detailed documentation on structure rendering, validation, and zone access rules.
 - Manages client-side representation of structures (player-placed and procedural).
 - Integrates with `GameStateManager`, `CameraController`, and `SceneManager`.
 - Tracks structure meshes and their association with chunks for cleanup.

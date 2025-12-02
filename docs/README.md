@@ -82,11 +82,12 @@ Detailed specifications for system components.
 **Key Topics**: Zone types, polygon definition, overlap detection, area calculation, floor spanning, transportation integration  
 **Related**: [Game Mechanics](10-game-mechanics.md), [Database Schema](03-database-schema.md)
 
-### Structure System
-**Status**: ✅ **PARTIALLY IMPLEMENTED** (CRUD + validation + zone checks complete; collision/height/access rules pending)  
-**Description**: Structure placement, validation, and rendering system.  
-**Key Topics**: Structure placement API, validation (zones, collisions, height limits), storage (PostGIS), rendering (3D models, LOD), procedural integration  
-**Related**: [Database Schema](03-database-schema.md), [Client Architecture](06-client-architecture.md), [Implementation Phases](../implementation-phases.md)
+### 11. Structure System
+**File**: [`11-structure-system.md`](11-structure-system.md)  
+**Status**: ✅ **IMPLEMENTED**  
+**Description**: Structure placement, validation, and rendering system with collision detection, height limits, zone access rules, and floating origin rendering.  
+**Key Topics**: Structure types, validation rules (collision, height, zone access), client-side rendering (floating origin pattern), API endpoints, database schema  
+**Related**: [Database Schema](03-database-schema.md), [Client Architecture](06-client-architecture.md), [Zone System](09-zone-system.md)
 
 ---
 

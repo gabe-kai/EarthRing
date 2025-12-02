@@ -337,6 +337,21 @@ Response: {
 }
 ```
 
+**Validation**: All validation rules are applied:
+- Position bounds (X, Y, floor)
+- Zone relationships (if `zone_id` is provided)
+- Collision detection (no overlapping structures)
+- Height limits (type-specific maximums and floor range)
+- Zone access rules (restricted zones, zone type compatibility)
+
+**Error Responses**:
+- `400 Bad Request`: Validation error (position bounds, rotation, scale, structure_type)
+- `409 Conflict`: Collision detected with existing structure
+- `400 Bad Request`: Height limit exceeded or would extend beyond maximum floor
+- `400 Bad Request`: Zone access rule violation (restricted zone or incompatible zone type)
+
+**See**: [Structure System Design](11-structure-system.md) for detailed validation rules.
+
 #### Get Structure
 ```
 GET /api/structures/{structure_id}
@@ -365,6 +380,10 @@ Response: {
   ...
 }
 ```
+
+**Validation**: All validation rules are applied to updated fields (same as Create Structure).
+
+**See**: [Structure System Design](11-structure-system.md) for detailed validation rules.
 
 #### Delete Structure
 ```

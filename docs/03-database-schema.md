@@ -612,12 +612,19 @@ CREATE INDEX idx_structures_type ON structures(structure_type);
 - `position.x ∈ [0, RingCircumference)`
 - `position.y ∈ [-MaxWidthOffset, MaxWidthOffset]` (±2.5km)
 - `floor ∈ [MinFloor, MaxFloor]` (currently [-2..15])
+- **Collision Detection**: Structures cannot overlap with other structures on the same floor (uses PostGIS `ST_DWithin`)
+- **Height Limits**: Structures must respect type-specific maximum heights and floor range limits
+- **Zone Access Rules**: Structures must comply with zone type compatibility and cannot be placed in restricted zones
 
 **Zone Relationship Validation**:
 - If `zone_id` is set, the server validates:
   - Zone exists and `zones.floor = structures.floor`
   - `ST_Contains(zones.geometry, structures.position)` is true
-- This ensures structures are actually inside the zones they reference.
+  - Zone is not restricted (restricted zones block all structures)
+  - Structure type is compatible with zone type (e.g., buildings not allowed in parks)
+- This ensures structures are actually inside the zones they reference and comply with zone rules.
+
+**See**: [Structure System Design](11-structure-system.md) for detailed validation rules and implementation.
 
 #### Find Nearby Roads
 
