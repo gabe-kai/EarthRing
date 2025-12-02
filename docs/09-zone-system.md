@@ -338,6 +338,70 @@ During rendering, zone coordinates are wrapped relative to the camera position:
 - The wrapping function ensures all parts of the zone render at the copy closest to the camera
 - Full-ring zones (spanning > 50% of ring) are cached and repositioned as camera moves
 
+### Floating Origin Pattern
+
+**⚠️ CRITICAL PITFALL: Floating-Point Precision Loss at Large Distances**
+
+When rendering zones at large distances from the origin (e.g., X=22,000,000m at theta 30°), using absolute world coordinates directly causes severe floating-point precision loss. This manifests as:
+
+- **Flickering**: Zones appear to flicker or "jump" between slightly different positions
+- **Double Layer Artifact**: Zones appear as two slightly offset layers, similar to z-fighting but caused by precision loss
+- **Inconsistent Rendering**: Zones render correctly at X≈0 but flicker badly at other pillar hub locations
+
+**Root Cause**: JavaScript uses 64-bit floating-point numbers (IEEE 754), which have approximately 15-17 decimal digits of precision. At X=22,000,000m, the precision is reduced to roughly ±0.1m, causing vertex positions to "snap" to slightly different values each frame.
+
+**Solution: Floating Origin Pattern**
+
+Zone rendering uses a floating origin pattern to maintain precision:
+
+1. **Zone Group Positioning**: The zone's THREE.Group is positioned at the camera's X position (`zoneOriginX = cameraX`)
+2. **Local Coordinate Conversion**: All zone vertices are built relative to this origin by subtracting `zoneOriginX` from wrapped coordinates
+3. **Small Vertex Coordinates**: This keeps vertex coordinates in a small range (typically -500m to +500m), maintaining full precision
+4. **World Position Restoration**: Three.js translates the entire group to the correct world position via `zoneGroup.position.x`
+
+**Implementation**:
+```javascript
+// Set zone group origin at camera position
+const zoneOriginX = cameraX;
+zoneGroup.position.x = zoneOriginX;
+
+// Wrap function converts absolute → camera-relative → local coordinates
+const wrapZoneX = (x) => {
+  // Step 1: Wrap to camera-relative (handles ring wrapping)
+  const wrappedAbsolute = normalizeRelativeToCamera(x, cameraX);
+  
+  // Step 2: Convert to local coordinates (floating origin)
+  return wrappedAbsolute - zoneOriginX;
+};
+
+// All vertices use wrapZoneX, keeping them near zero
+outerRing.forEach(([x, y]) => {
+  const wrappedX = wrapZoneX(x);  // Now in local coordinates
+  const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
+  // ... build shape with local coordinates
+});
+```
+
+**Benefits**:
+- ✅ Maintains precision: vertices stay near zero, avoiding precision loss
+- ✅ Prevents flickering: eliminates "two slightly offset layers" artifact
+- ✅ Consistent rendering: zones render correctly at all distances
+- ✅ Matches chunk pattern: uses the same floating origin approach as chunk rendering
+
+**When to Use**:
+- **Always** when rendering geometry at large distances (>1,000,000m from origin)
+- **Always** when building Three.js meshes with world coordinates
+- **Always** when precision is critical (zones, chunks, structures)
+
+**When NOT to Use**:
+- Camera position tracking (can use absolute coordinates)
+- Distance calculations (use wrapped distances, not floating origin)
+- Coordinate conversions (use absolute coordinates for conversions)
+
+**Related Patterns**:
+- Chunk rendering uses the same floating origin pattern (see `chunk-manager.js`)
+- Structure rendering should also use floating origin for consistency
+
 ### Implementation Details
 
 #### Client-Side (zone-manager.js)
@@ -351,11 +415,16 @@ During rendering, zone coordinates are wrapped relative to the camera position:
    const cameraX = cameraEarthRingPos.x || 0;
    ```
 
-2. **Zone Coordinate Wrapping**:
+2. **Zone Coordinate Wrapping with Floating Origin**:
    ```javascript
+   // Set zone group origin at camera position
+   const zoneOriginX = cameraX;
+   zoneGroup.position.x = zoneOriginX;
+   
+   // Wrap function: absolute → camera-relative → local coordinates
    const wrapZoneX = (x) => {
-     const wrapped = normalizeRelativeToCamera(x, cameraX);
-     return wrapped;
+     const wrappedAbsolute = normalizeRelativeToCamera(x, cameraX);
+     return wrappedAbsolute - zoneOriginX;  // Convert to local coordinates
    };
    ```
 

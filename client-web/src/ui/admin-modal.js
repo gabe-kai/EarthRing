@@ -912,6 +912,26 @@ function setupAdminPlayerListeners(container, playerID) {
             z: floor,
           }, 2);
           console.log(`Camera moved to player position: RingArc(s=${(arc.s/1000).toFixed(3)}km, r=${arc.r.toFixed(2)}m, z=${arc.z.toFixed(2)}m) Legacy(X=${x.toFixed(1)}, Y=${y.toFixed(1)}, Floor=${floor})`);
+          
+          // After teleport animation completes, trigger chunk reload and zone re-render
+          // Wait for animation duration (2 seconds) plus a small buffer
+          setTimeout(() => {
+            if (window.earthring) {
+              // Reload chunks at the new position
+              if (window.earthring.chunkManager && window.earthring.cameraController) {
+                const finalPos = window.earthring.cameraController.getEarthRingPosition();
+                const floor = window.earthring.gameStateManager?.getActiveFloor() || 0;
+                window.earthring.chunkManager.requestChunksAtPosition(finalPos.x, floor, 4, 'medium')
+                  .catch(error => {
+                    console.error('[Chunks] Failed to reload chunks after teleport:', error);
+                  });
+              }
+              // Re-render zones once at the final position
+              if (window.earthring.zoneManager) {
+                window.earthring.zoneManager.reRenderAllZones();
+              }
+            }
+          }, 2100);
         }
         
         // Reload profile

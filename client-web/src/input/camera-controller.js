@@ -51,6 +51,9 @@ export class CameraController {
     this.panSpeed = 200; // meters per second for R/F vertical panning
     this.zoomSpeed = 1000; // meters per second for PageUp/PageDown zoom
     
+    // Teleport animation state
+    this.isTeleporting = false;
+    
     // Elevation-based speed scaling
     this.minElevation = 2; // meters (minimum height above floor)
     this.referenceElevation = 50; // meters (elevation where speed multiplier is 1.0)
@@ -676,6 +679,9 @@ export class CameraController {
     const startPos = this.getEarthRingPosition();
     const startTime = performance.now();
     
+    // Mark teleport as in progress
+    this.isTeleporting = true;
+    
     const animate = () => {
       const elapsed = (performance.now() - startTime) / 1000;
       const progress = Math.min(elapsed / duration, 1);
@@ -702,6 +708,9 @@ export class CameraController {
       
       if (progress < 1) {
         requestAnimationFrame(animate);
+      } else {
+        // Teleport animation complete
+        this.isTeleporting = false;
       }
     };
     

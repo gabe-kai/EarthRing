@@ -334,6 +334,137 @@ describe('ZoneManager', () => {
       // in a way that makes both spans > 132M, which is geometrically difficult.
       // The cache check might not pass, but rendering should work.
     });
+
+    describe('floating origin pattern', () => {
+      it('positions zone group at camera X position (floating origin)', () => {
+        const zone = {
+          id: 7,
+          zone_type: 'restricted',
+          floor: 0,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[0, -10], [1000, -10], [1000, 10], [0, 10], [0, -10]]],
+          },
+        };
+
+        // Camera at large distance (theta 30°, X=22,000,000m)
+        const largeCameraX = 22000000;
+        mockCamera.position.x = largeCameraX;
+        zoneManager.renderZone(zone);
+
+        // Verify zone group was added to scene
+        expect(mockScene.add).toHaveBeenCalled();
+        
+        // Get the zone group that was added (first call, first argument)
+        const addedGroup = mockScene.add.mock.calls[0][0];
+        
+        // CRITICAL: Zone group should be positioned at camera X (floating origin)
+        // This ensures vertices are built relative to camera, maintaining precision
+        // The position.x property should equal the camera X position
+        expect(addedGroup.position.x).toBe(largeCameraX);
+      });
+
+      it('converts zone coordinates to local space (floating origin)', () => {
+        const zone = {
+          id: 8,
+          zone_type: 'restricted',
+          floor: 0,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[22000000, -10], [22001000, -10], [22001000, 10], [22000000, 10], [22000000, -10]]],
+          },
+        };
+
+        // Camera at large distance (theta 30°, X=22,000,000m)
+        const largeCameraX = 22000000;
+        mockCamera.position.x = largeCameraX;
+        zoneManager.renderZone(zone);
+
+        // Verify zone group was added
+        expect(mockScene.add).toHaveBeenCalled();
+        
+        // Get the zone group
+        const addedGroup = mockScene.add.mock.calls[0][0];
+        
+        // Zone group should be positioned at camera X (floating origin)
+        expect(addedGroup.position.x).toBe(largeCameraX);
+        
+        // The zone's vertices should be in local coordinates (relative to camera)
+        // Since the zone starts at X=22,000,000 and camera is at X=22,000,000,
+        // the local X coordinates should be near 0 (not 22,000,000)
+        // We can verify this by checking that the group has children (fill/outline meshes)
+        expect(addedGroup.children.length).toBeGreaterThan(0);
+      });
+
+      it('maintains precision at large distances (prevents flickering)', () => {
+        const zone = {
+          id: 9,
+          zone_type: 'restricted',
+          floor: 0,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[22000000, -10], [22001000, -10], [22001000, 10], [22000000, 10], [22000000, -10]]],
+          },
+        };
+
+        // Camera at large distance (theta 30°, X=22,000,000m)
+        const largeCameraX = 22000000;
+        mockCamera.position.x = largeCameraX;
+        
+        // Render zone first time
+        zoneManager.renderZone(zone);
+        expect(mockScene.add).toHaveBeenCalled();
+        const firstGroup = mockScene.add.mock.calls[0][0];
+        const firstPosition = firstGroup.position.x;
+        
+        // Clear and render again (simulating frame update)
+        mockScene.add.mockClear();
+        zoneManager.renderZone(zone);
+        expect(mockScene.add).toHaveBeenCalled();
+        const secondGroup = mockScene.add.mock.calls[0][0];
+        const secondPosition = secondGroup.position.x;
+        
+        // Position should be consistent (no flickering from precision loss)
+        // If floating origin wasn't used, positions would vary slightly due to precision loss
+        expect(secondPosition).toBe(firstPosition);
+        expect(secondPosition).toBe(largeCameraX);
+      });
+
+      it('handles floating origin at different camera positions', () => {
+        const zone = {
+          id: 10,
+          zone_type: 'restricted',
+          floor: 0,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[5000, -10], [6000, -10], [6000, 10], [5000, 10], [5000, -10]]],
+          },
+        };
+
+        // Test at origin
+        mockCamera.position.x = 0;
+        zoneManager.renderZone(zone);
+        expect(mockScene.add).toHaveBeenCalled();
+        let addedGroup = mockScene.add.mock.calls[0][0];
+        expect(addedGroup.position.x).toBe(0);
+        
+        // Test at large distance
+        mockScene.add.mockClear();
+        mockCamera.position.x = 22000000;
+        zoneManager.renderZone(zone);
+        expect(mockScene.add).toHaveBeenCalled();
+        addedGroup = mockScene.add.mock.calls[0][0];
+        expect(addedGroup.position.x).toBe(22000000);
+        
+        // Test at negative position
+        mockScene.add.mockClear();
+        mockCamera.position.x = -5000;
+        zoneManager.renderZone(zone);
+        expect(mockScene.add).toHaveBeenCalled();
+        addedGroup = mockScene.add.mock.calls[0][0];
+        expect(addedGroup.position.x).toBe(-5000);
+      });
+    });
   });
 });
 

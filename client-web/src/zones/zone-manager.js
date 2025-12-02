@@ -167,6 +167,12 @@ export class ZoneManager {
    * @param {string} chunkID - Chunk ID
    */
   cleanupZonesForChunk(chunkID) {
+    // Skip zone cleanup during teleport to prevent flickering
+    // Zones will be cleaned up after teleport completes
+    if (this.cameraController?.isTeleporting) {
+      return;
+    }
+    
     const zoneIDs = this.chunkZones.get(chunkID);
     if (!zoneIDs || zoneIDs.size === 0) {
       // Check if there are any zones with this chunk_index in metadata
@@ -663,7 +669,32 @@ export class ZoneManager {
     }
     const typeVisible = this.zoneTypeVisibility.get(zoneType) ?? true;
 
+    // CRITICAL: Floating Origin Pattern for Precision
+    // ===============================================
+    // Zone meshes use a floating origin to maintain precision at large distances from X=0.
+    // Without this, zones at positions like X=22,000,000m suffer from floating-point precision
+    // loss, causing flickering and "double layer" rendering artifacts.
+    //
+    // How it works:
+    // 1. The zoneGroup is positioned at the camera's X position (zoneOriginX = cameraX)
+    // 2. All zone vertices are built relative to this origin (subtract zoneOriginX)
+    // 3. This keeps vertex coordinates in a small range (typically -500m to +500m)
+    // 4. Three.js then translates the entire group to the correct world position
+    //
+    // Benefits:
+    // - Maintains precision: vertices stay near zero, avoiding precision loss
+    // - Prevents flickering: eliminates "two slightly offset layers" artifact
+    // - Consistent with chunks: matches the floating origin pattern used in chunk rendering
+    //
+    // IMPORTANT: When modifying zone rendering, always:
+    // - Build vertices relative to zoneOriginX (subtract it from absolute coordinates)
+    // - Set zoneGroup.position.x = zoneOriginX to restore world position
+    // - Never build vertices using absolute coordinates directly
+    //
+    // See: docs/09-zone-system.md "Floating Origin Pattern" section for details
     const zoneGroup = new THREE.Group();
+    const zoneOriginX = cameraX;
+    zoneGroup.position.x = zoneOriginX;
     zoneGroup.renderOrder = 5; // Render above grid
     zoneGroup.userData.zoneID = zone.id; // Use zoneID for consistency with editor
     zoneGroup.userData.zoneId = zone.id; // Keep both for compatibility
@@ -686,20 +717,40 @@ export class ZoneManager {
       // Wrap zone coordinates relative to camera (like chunks)
       // NOTE: Zone coordinates from DB are absolute [0, RING_CIRCUMFERENCE)
       // We wrap them relative to camera for rendering
+      //
+      // Floating Origin Conversion (CRITICAL for precision):
+      // 1. Normalize absolute coordinate to camera-relative (handles ring wrapping)
+      // 2. Subtract zoneOriginX to convert to local coordinates (floating origin)
+      // 3. Result: vertex coordinates are small (typically -500m to +500m)
+      // 4. zoneGroup.position.x restores the world position
+      //
+      // Without this floating origin pattern, zones at large distances (e.g., X=22,000,000m)
+      // suffer from floating-point precision loss, causing flickering and "double layer" artifacts.
+      // See docs/09-zone-system.md "Floating Origin Pattern" section for details.
       let wrapDebugCount = 0;
       const wrapZoneX = (x) => {
-        const wrapped = normalizeRelativeToCamera(x, cameraX);
+        // Step 1: Wrap absolute coordinate to camera-relative position
+        // This ensures zones appear at the copy closest to the camera
+        const wrappedAbsolute = normalizeRelativeToCamera(x, cameraX);
+        
+        // Step 2: Convert to local coordinates relative to zone origin (floating origin)
+        // This keeps vertex coordinates small and maintains precision at large distances
+        // Without this, zones at X=22,000,000m would have vertices at ~22,000,000m,
+        // causing floating-point precision loss and flickering artifacts
+        const localX = wrappedAbsolute - zoneOriginX;
         
         // DEBUG: Log wrapping for first few points
         if (window.DEBUG_ZONE_COORDS && wrapDebugCount++ < 3) {
           console.log('[ZoneManager] wrapZoneX:', {
             absoluteX: x,
             cameraX,
-            wrapped,
+            wrappedAbsolute,
+            zoneOriginX,
+            localX,
           });
         }
         
-        return wrapped;
+        return localX;
       };
 
       // Create shape from outer ring
@@ -973,6 +1024,12 @@ export class ZoneManager {
    */
   shouldReRenderZones() {
     if (!this.cameraController) {
+      return false;
+    }
+    
+    // Skip re-rendering during teleport animation to prevent flickering
+    // Zones will be re-rendered once after teleport completes
+    if (this.cameraController.isTeleporting) {
       return false;
     }
     
