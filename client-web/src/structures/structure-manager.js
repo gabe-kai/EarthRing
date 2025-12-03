@@ -510,7 +510,40 @@ export class StructureManager {
       wallMetalness = wallMaterial.metalness !== undefined ? wallMaterial.metalness : 0.2;
     }
     
+    // Extract door information from structure
+    const doors = structure.doors || {};  // Dictionary mapping facade to door info
+    const garageDoors = structure.garage_doors || [];  // List of garage door dictionaries
+    
+    // Helper function to get door info for a facade (includes both regular doors and garage doors)
+    const getDoorInfoForFacade = (facade) => {
+      const doorInfo = doors[facade];
+      const facadeGarageDoors = garageDoors.filter(gd => gd.facade === facade);
+      
+      // For now, prioritize regular door if both exist (can be enhanced later)
+      if (doorInfo) {
+        return {
+          type: doorInfo.type || 'main',
+          x: doorInfo.x || 0,
+          y: doorInfo.y || 0,
+          width: doorInfo.width || 1.2,
+          height: doorInfo.height || 2.5,
+        };
+      } else if (facadeGarageDoors.length > 0) {
+        // Use first garage door for this facade (can handle multiple later if needed)
+        const gd = facadeGarageDoors[0];
+        return {
+          type: 'garage',
+          x: gd.x || 0,
+          y: gd.y || 0,
+          width: gd.width || 3.0,
+          height: gd.height || 3.5,
+        };
+      }
+      return null;
+    };
+    
     // Front wall (positive Y) - with shader-based windows, doors, and trim
+    const frontDoor = getDoorInfoForFacade('front');
     this.createWallWithWindows(
       structureGroup, 
       width, 
@@ -525,10 +558,12 @@ export class StructureManager {
       buildingHeight,
       buildingSubtype,
       'front',
-      colors
+      colors,
+      frontDoor
     );
     
     // Back wall (negative Y) - with shader-based windows and trim
+    const backDoor = getDoorInfoForFacade('back');
     this.createWallWithWindows(
       structureGroup,
       width,
@@ -543,10 +578,12 @@ export class StructureManager {
       buildingHeight,
       buildingSubtype,
       'back',
-      colors
+      colors,
+      backDoor
     );
     
     // Left wall (negative X) - with shader-based rendering (includes trim)
+    const leftDoor = getDoorInfoForFacade('left');
     this.createWallWithWindows(
       structureGroup,
       depth,
@@ -561,10 +598,12 @@ export class StructureManager {
       buildingHeight,
       buildingSubtype,
       'left',
-      colors
+      colors,
+      leftDoor
     );
     
     // Right wall (positive X) - with shader-based rendering (includes trim)
+    const rightDoor = getDoorInfoForFacade('right');
     this.createWallWithWindows(
       structureGroup,
       depth,
@@ -579,7 +618,8 @@ export class StructureManager {
       buildingHeight,
       buildingSubtype,
       'right',
-      colors
+      colors,
+      rightDoor
     );
     
     // Roof - use color from palette if available
@@ -641,7 +681,7 @@ export class StructureManager {
    * @param {number} foundationHeight - Foundation height offset
    * @param {number} buildingHeight - Building height above foundation
    */
-  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null) {
+  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null) {
     // Convert windows to shader-compatible format
     // Limit to 50 windows per wall for shader uniforms
     const MAX_WINDOWS = 50;
@@ -684,14 +724,25 @@ export class StructureManager {
       windowData[idx + 3] = normalizedHeight;
     });
     
-    // Door data: centered on front facade, at foundation level
-    const doorWidth = 1.2; // 1.2m wide door
-    const doorHeight = 2.5; // 2.5m tall door
-    const doorNormalizedX = facade === 'front' ? 0.0 : -999.0; // Only on front facade
-    const doorNormalizedY = ((foundationHeight + doorHeight / 2 - (foundationHeight + buildingHeight / 2)) / buildingHeight);
-    const doorNormalizedWidth = doorWidth / width;
-    const doorNormalizedHeight = doorHeight / buildingHeight;
-    const hasDoor = facade === 'front';
+    // Door data: use door info from structure if available
+    let hasDoor = false;
+    let doorNormalizedX = -999.0;
+    let doorNormalizedY = 0.0;
+    let doorNormalizedWidth = 0.0;
+    let doorNormalizedHeight = 0.0;
+    
+    if (doorInfo) {
+      hasDoor = true;
+      // Normalize door position and size to wall coordinates
+      // doorInfo.x is offset from facade center (in meters)
+      // doorInfo.y is vertical position relative to building center (building extends -height/2 to +height/2, base is at -height/2)
+      doorNormalizedX = doorInfo.x / width;  // Normalize to -0.5 to 0.5 range
+      // Convert doorInfo.y (building-center relative) to normalized coordinates (0 = center, -0.5 = bottom, +0.5 = top)
+      // doorInfo.y is already relative to building center, so normalize by buildingHeight
+      doorNormalizedY = doorInfo.y / buildingHeight;  // Normalize to -0.5 to 0.5 range (0 = center)
+      doorNormalizedWidth = doorInfo.width / width;
+      doorNormalizedHeight = doorInfo.height / buildingHeight;
+    }
     
     // Create shader material with window, door, trim, and foundation rendering
     const wallShaderMaterial = this.createWallShaderMaterial(
