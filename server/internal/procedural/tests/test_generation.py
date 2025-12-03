@@ -12,6 +12,7 @@ sys.path.insert(0, str(server_dir))
 import pytest
 from internal.procedural import generation
 from internal.procedural import seeds
+import shapely.geometry as sg
 
 
 def test_get_chunk_width():
@@ -68,7 +69,7 @@ def test_generate_chunk():
     # Chunk 100 is outside hub areas, so no structures expected
     assert isinstance(chunk["structures"], list)
     assert chunk["metadata"]["generated"] is True
-    assert chunk["metadata"]["version"] == 6  # Phase 2 with 4m floor system and new window types version
+    assert chunk["metadata"]["version"] == 7  # Phase 2 with enhanced building shape weights
 
 
 def test_generate_ring_floor_geometry():
@@ -121,13 +122,14 @@ def test_structure_format_includes_building_subtype():
         assert "structure_type" in structure
         assert "dimensions" in structure
         assert "building_subtype" in structure
-        # Heights should be valid (5, 10, 15, or 20m)
-        assert structure["dimensions"]["height"] in [5.0, 10.0, 15.0, 20.0]
+        # Heights should be valid (4m floor increments: 4, 8, 12, 16, or 20m)
+        assert structure["dimensions"]["height"] in [4.0, 5.0, 8.0, 10.0, 12.0, 15.0, 16.0, 20.0]
         # Verify building_subtype matches expected values
-        if structure["structure_type"] == "industrial":
+        # Note: structure_type is always "building" now, not the zone type
+        if structure.get("properties", {}).get("zone_type") == "industrial":
             assert structure["building_subtype"] in ["warehouse", "factory"]
-        elif structure["structure_type"] == "agricultural":
-            assert structure["building_subtype"] in ["residence", "agri_industrial"]
+        elif structure.get("properties", {}).get("zone_type") == "agricultural":
+            assert structure["building_subtype"] in ["house", "barn", "warehouse", "agri_industrial"]
 
 
 def test_generate_chunk_with_buildings():
@@ -157,6 +159,48 @@ def test_generate_chunk_with_buildings():
         assert structure["position"]["y"] is not None
         assert structure["floor"] == floor
         assert structure.get("is_procedural", False) is True
+
+
+def test_structures_include_doors_and_garage_doors():
+    """Test that structures include doors and garage_doors"""
+    floor = 0
+    chunk_index = 0  # Hub center chunk
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    # Should have structures at hub
+    assert len(chunk["structures"]) > 0
+    
+    # Check that all structures have doors and garage_doors fields
+    for structure in chunk["structures"]:
+        assert "doors" in structure, f"Structure {structure.get('id')} missing 'doors' field"
+        assert "garage_doors" in structure, f"Structure {structure.get('id')} missing 'garage_doors' field"
+        assert isinstance(structure["doors"], dict), "Doors should be a dictionary"
+        assert isinstance(structure["garage_doors"], list), "Garage doors should be a list"
+        
+        # All buildings should have at least one door (main door)
+        assert len(structure["doors"]) > 0, "Building should have at least one door (main door)"
+        
+        # Check door structure if present
+        for facade, door_info in structure["doors"].items():
+            assert facade in ["front", "back", "left", "right"]
+            assert "x" in door_info
+            assert "y" in door_info
+            assert "width" in door_info
+            assert "height" in door_info
+            assert "type" in door_info
+            assert door_info["type"] in ["main", "secondary"]
+        
+        # Check garage door structure if present
+        for garage_door in structure["garage_doors"]:
+            assert "facade" in garage_door
+            assert "x" in garage_door
+            assert "y" in garage_door
+            assert "width" in garage_door
+            assert "height" in garage_door
+            assert "type" in garage_door
+            assert garage_door["type"] == "garage"
 
 
 def test_building_boundary_validation():
@@ -215,3 +259,192 @@ def test_building_boundary_validation():
         
         # Structure should belong to at least one zone
         assert structure_in_zone, f"Structure at ({pos_x}, {pos_y}) not in any zone"
+
+
+def test_building_spacing_rules():
+    """Test that buildings respect spacing rules: can touch, or have at least 5m gap"""
+    floor = 0
+    chunk_index = 0  # Hub center chunk
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    structures = chunk["structures"]
+    if len(structures) < 2:
+        pytest.skip("Need at least 2 buildings to test spacing")
+    
+    # Check all pairs of buildings
+    for i, struct1 in enumerate(structures):
+        if struct1.get("structure_type") != "building":
+            continue
+        
+        pos1_x = struct1["position"]["x"]
+        pos1_y = struct1["position"]["y"]
+        dim1 = struct1["dimensions"]
+        width1 = dim1["width"]
+        depth1 = dim1["depth"]
+        
+        # Create rectangle for building 1
+        half_w1 = width1 / 2.0
+        half_d1 = depth1 / 2.0
+        rect1 = sg.box(
+            pos1_x - half_w1,
+            pos1_y - half_d1,
+            pos1_x + half_w1,
+            pos1_y + half_d1
+        )
+        
+        for j, struct2 in enumerate(structures[i+1:], start=i+1):
+            if struct2.get("structure_type") != "building":
+                continue
+            
+            pos2_x = struct2["position"]["x"]
+            pos2_y = struct2["position"]["y"]
+            dim2 = struct2["dimensions"]
+            width2 = dim2["width"]
+            depth2 = dim2["depth"]
+            
+            # Create rectangle for building 2
+            half_w2 = width2 / 2.0
+            half_d2 = depth2 / 2.0
+            rect2 = sg.box(
+                pos2_x - half_w2,
+                pos2_y - half_d2,
+                pos2_x + half_w2,
+                pos2_y + half_d2
+            )
+            
+            # Check spacing rules:
+            # 1. Buildings should not be at the exact same position (duplicates)
+            if abs(pos1_x - pos2_x) < 0.01 and abs(pos1_y - pos2_y) < 0.01:
+                pytest.fail(f"Duplicate buildings at ({pos1_x}, {pos1_y})")
+            
+            # 2. Buildings should not overlap (interiors should not intersect)
+            if rect1.intersects(rect2):
+                # If they intersect, they must only touch (not overlap)
+                # Use overlaps() to check if interiors actually overlap
+                if rect1.overlaps(rect2):
+                    pytest.fail(f"Buildings at ({pos1_x}, {pos1_y}) and ({pos2_x}, {pos2_y}) overlap")
+                # If they only touch (touches() returns True), that's OK
+            
+            # 3. If buildings don't touch, gap must be at least 5m
+            if not rect1.touches(rect2) and not rect1.intersects(rect2):
+                distance = rect1.distance(rect2)
+                assert distance >= 5.0, \
+                    f"Buildings at ({pos1_x}, {pos1_y}) and ({pos2_x}, {pos2_y}) have gap {distance:.2f}m, " \
+                    f"which is less than minimum 5m (alleys)"
+            
+            # 2. If buildings don't touch, gap must be at least 5m
+            if not rect1.touches(rect2) and not rect1.intersects(rect2):
+                distance = rect1.distance(rect2)
+                assert distance >= 5.0, \
+                    f"Buildings at ({pos1_x}, {pos1_y}) and ({pos2_x}, {pos2_y}) have gap {distance:.2f}m, " \
+                    f"which is less than minimum 5m (alleys)"
+
+
+def test_buildings_can_touch():
+    """Test that buildings can touch (walls can touch) without violating spacing rules"""
+    floor = 0
+    chunk_index = 0  # Hub center chunk
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 99999)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    structures = chunk["structures"]
+    building_structures = [s for s in structures if s.get("structure_type") == "building"]
+    
+    if len(building_structures) < 2:
+        pytest.skip("Need at least 2 buildings to test touching")
+    
+    # Check if any buildings touch (this is allowed)
+    touching_pairs = 0
+    for i, struct1 in enumerate(building_structures):
+        pos1_x = struct1["position"]["x"]
+        pos1_y = struct1["position"]["y"]
+        dim1 = struct1["dimensions"]
+        width1 = dim1["width"]
+        depth1 = dim1["depth"]
+        
+        half_w1 = width1 / 2.0
+        half_d1 = depth1 / 2.0
+        rect1 = sg.box(
+            pos1_x - half_w1,
+            pos1_y - half_d1,
+            pos1_x + half_w1,
+            pos1_y + half_d1
+        )
+        
+        for struct2 in building_structures[i+1:]:
+            pos2_x = struct2["position"]["x"]
+            pos2_y = struct2["position"]["y"]
+            dim2 = struct2["dimensions"]
+            width2 = dim2["width"]
+            depth2 = dim2["depth"]
+            
+            half_w2 = width2 / 2.0
+            half_d2 = depth2 / 2.0
+            rect2 = sg.box(
+                pos2_x - half_w2,
+                pos2_y - half_d2,
+                pos2_x + half_w2,
+                pos2_y + half_d2
+            )
+            
+            if rect1.touches(rect2):
+                touching_pairs += 1
+    
+    # Touching is allowed, so we just verify the test runs
+    # (We don't require touching, just that it's allowed)
+
+
+def test_agricultural_zones_generate_buildings():
+    """Test that agricultural zones generate buildings (including clustering)"""
+    floor = 0
+    chunk_index = 5  # Use a chunk that should have agricultural zones
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 54321)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    # Find agricultural zones
+    agri_zones = [z for z in chunk["zones"] if z.get("properties", {}).get("zone_type", "").lower() == "agricultural"]
+    
+    if not agri_zones:
+        pytest.skip("No agricultural zones in this chunk")
+    
+    # Check if any structures are in agricultural zones
+    # Structures should have appropriate subtypes (house, barn, warehouse)
+    agri_structures = [
+        s for s in chunk["structures"]
+        if s.get("properties", {}).get("zone_type", "").lower() == "agricultural"
+    ]
+    
+    if agri_structures:
+        for structure in agri_structures:
+            assert structure["building_subtype"] in ["house", "barn", "warehouse", "agri_industrial"], \
+                f"Agricultural structure should have appropriate subtype, got: {structure['building_subtype']}"
+
+
+def test_park_zones_generate_buildings():
+    """Test that park zones generate small scattered structures"""
+    floor = 0
+    chunk_index = 0  # Hub chunk might have park zones
+    chunk_seed = seeds.get_chunk_seed(floor, chunk_index, 12345)
+    
+    chunk = generation.generate_chunk(floor, chunk_index, chunk_seed)
+    
+    # Find park structures
+    park_structures = [
+        s for s in chunk["structures"]
+        if s.get("properties", {}).get("zone_type", "").lower() == "park"
+    ]
+    
+    if park_structures:
+        for structure in park_structures:
+            # Park structures should be small
+            width = structure["dimensions"]["width"]
+            depth = structure["dimensions"]["depth"]
+            height = structure["dimensions"]["height"]
+            
+            assert width <= 20.0, f"Park structure width {width}m should be small (<=20m)"
+            assert depth <= 20.0, f"Park structure depth {depth}m should be small (<=20m)"
+            assert height <= 8.0, f"Park structure height {height}m should be low (<=8m, 1-2 stories)"

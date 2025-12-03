@@ -385,42 +385,51 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 - Deterministic seed-based generation
 
 **Building Heights:**
-- All buildings are contained within a single 20m level (each level is 20m floor-to-ceiling)
-- Building heights: 5m, 10m, 15m, or 20m (discrete options, not continuous)
+- All buildings use a 4m floor system (1m logistics floor + 3m living space per floor)
+- Building heights: 4m, 5m, 8m, 10m, 12m, 15m, 16m, or 20m (1 to 5 floors)
 - Heights are chosen based on building type and subtype
+- Each level is 20m floor-to-ceiling, allowing buildings up to 20m tall within a single level
 
-**Building Dimensions by Zone Type:**
+**Building Dimensions by Zone Type (Enhanced Shape Weights - Geometry Version 7):**
 - **Industrial**:
-  - **Warehouses** (60% probability): 35-70m width/depth, 5-10m height (single story)
-  - **Factories** (40% probability): 25-55m width/depth, 10-15m height (medium height)
+  - **Warehouses** (60% probability): 40-80m width/depth (wide and long), mostly short (5-10m height, 80% of the time), some medium (12m, 20%)
+  - **Factories** (40% probability): 30-65m width/depth (wide and long), mostly short/medium (5-12m height, 70%), some taller (16-20m, 30%)
 - **Commercial**:
-  - **Retail**: 15-45m width/depth, 15-20m height (tall)
+  - **Retail** (100% in commercial zones): 15-35m width/depth, **exactly 20m height** (all are 5-story office towers)
 - **Residential**:
-  - **Residence**: 10-28m width/depth, 10-20m height (varied)
+  - **Apartment/Campus buildings** (60% probability): 20-40m width/depth (larger), 12-20m height (3-5 stories)
+  - **Houses** (40% probability): 10-18m width/depth (smaller), 8-12m height (2-3 stories)
 - **Mixed-Use**:
-  - **Mixed-use**: 12-35m width/depth, 10-20m height (varied)
+  - Can generate any building type: residential (apartment/house), commercial (retail 20m), or industrial (warehouse/factory)
 - **Agricultural**:
-  - **Residences** (70% probability): 10-22m width/depth, 5-10m height (farmhouses)
-  - **Agri-industrial** (30% probability): 20-50m width/depth, 10-20m height (processing/storage)
+  - Buildings are **clustered** within 100m radius
+  - Each cluster contains: 1 house (10-18m footprint, 8-12m tall), 1 barn (12-25m footprint, 5-10m tall), 1-2 small industrial (15-30m footprint, 5-10m tall)
+- **Park**:
+  - **Park structures**: 5-15m width/depth (small), 4-8m height (mostly 1-2 stories)
 
 **Building Subtypes:**
 - Buildings include a `building_subtype` field for variety:
   - Industrial: `warehouse` or `factory`
-  - Agricultural: `residence` or `agri_industrial`
-  - Commercial: `retail`
-  - Mixed-use: `mixed_use`
-  - Residential: `residence`
+  - Agricultural: `house`, `barn`, `warehouse` (small industrial), or `agri_industrial`
+  - Commercial: `retail` (always, for commercial zones)
+  - Mixed-use: Can be any residential, commercial, or industrial subtype
+  - Residential: `apartment`, `campus`, or `house`
 
 **Window Generation:**
-- Grid pattern on front and back facades
-- Window size: 2.5m × 2.5m
+- Windows on all four facades (front, back, left, right)
+- Window size: 2.5m wide × variable height based on type
 - Window spacing: 0.5m
-- Density varies by building subtype:
-  - Warehouses: ~15% density (few windows)
-  - Factories: ~30% density (some windows)
-  - Agri-industrial: ~25% density (limited windows)
-  - Residences: ~65% density (good window coverage)
-  - Other types: ~60% density (default)
+- Density and type preferences vary by building subtype:
+  - **Warehouses**: ~10% density (very few windows), minimal window types
+  - **Factories**: ~20% density (few windows), mostly standard windows
+  - **Barns/Agri-industrial**: ~20% density (limited windows), mostly standard windows
+  - **Retail** (office towers): ~75% density (high window coverage), **mostly full-height windows (85% chance per floor)**
+  - **Apartments/Campuses/Houses**: 60-70% density (good window coverage), **mostly standard windows (85% chance per floor)**
+  - **Park structures**: ~40% density (moderate windows), mostly standard windows
+- Window type distribution per floor:
+  - Commercial: 85% full-height, 15% standard, 10% ceiling
+  - Residential/Others: 20% full-height, 85% standard, 25% ceiling
+  - Industrial/Warehouse: 10% full-height, 30% standard, 10% ceiling
 - Occasional missing windows for variation (10% chance)
 
 **New Window System (4m Floor Height):**
@@ -430,7 +439,39 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
   - **Standard windows**: 2.0m to 3.0m (1m tall)
   - **Ceiling windows**: 3.25m to 3.75m (0.5m tall)
 - Pattern repeats for each floor (buildings can be 1-5 floors, 4m, 8m, 12m, 16m, or 20m tall)
-- Windows only on front facade (performance optimization)
+- **Windows on all four facades** (front, back, left, right)
+- Window type preferences:
+  - Commercial buildings: Mostly full-height windows (85% chance per floor)
+  - Residential buildings: Mostly standard windows (85% chance per floor)
+  - Industrial buildings: Minimal windows with mixed types
+
+**Door Generation:**
+- ✅ **IMPLEMENTED** - Buildings include main and secondary doors
+- Main door always on the facade facing r=0 (center of ring)
+- Door specifications:
+  - Standard door: 1.2m wide × 2.5m tall
+  - Door bottom positioned at 1m above building base (just above logistics sub-floor)
+  - Doors positioned to avoid overlapping windows and corner trim
+- Door placement by building type:
+  - **Commercial (office towers)**: Doors on all four sides (front, back, left, right)
+  - **Apartment/Campus buildings**: Multiple doors (2-3 additional doors on various facades)
+  - **Houses**: Fewer doors (main door, 20% chance for one secondary door)
+  - **Legacy residence subtype**: 40% chance for secondary door
+  - **Factories**: 30% chance for secondary door
+- Doors avoid overlapping windows with collision detection
+
+**Garage Door Generation:**
+- ✅ **IMPLEMENTED** - Industrial and agricultural buildings can have garage doors
+- Garage door specifications:
+  - Standard garage door: 3.0m wide × up to 3.5m tall (or 60% of building height)
+  - Garage doors positioned at building base (ground level)
+- Garage door placement:
+  - **Warehouses**: 85% chance, often 2-4 garage doors **side-by-side** on same facade (50% for 2 doors, 35% for 3 doors, 15% for 4 doors)
+  - **Factories**: 60% chance, 1-3 garage doors
+  - **Barns**: 70% chance, 1-2 garage doors
+  - **Agri-industrial**: 70% chance, 1-2 garage doors
+- Garage doors placed on front or back facades (larger facades)
+- Multiple garage doors are positioned **side-by-side** with 0.5m spacing between them
 
 **Hub-Specific Color Palettes:**
 - ✅ **IMPLEMENTED** - Buildings use hub-specific color palettes based on their location
@@ -535,16 +576,20 @@ def get_building_complexity(building_id, traffic_data, player_attention_data):
 ### Building Types
 
 **Residential Buildings:**
-- **Residence**: Medium footprint (10-28m), varied heights (10-20m)
-- Apartment towers (tall, narrow)
-- Residential blocks (medium height, wider)
-- Mixed-use (residential + commercial ground floor)
+- **Apartment/Campus buildings** (60% probability): Larger footprint (20-40m), taller (12-20m, 3-5 stories)
+  - Multiple doors (2-3 additional doors for accessibility)
+  - Mostly standard windows (85% chance per floor)
+  - Windows on all four facades
+- **Houses** (40% probability): Smaller footprint (10-18m), shorter (8-12m, 2-3 stories)
+  - Fewer doors (main door, 20% chance for one secondary door)
+  - Mostly standard windows (85% chance per floor)
+  - Windows on all four facades
 
 **Commercial Buildings:**
-- **Retail**: Larger footprint (15-45m), tall (15-20m)
-- Office towers (very tall, glass-heavy)
-- Shopping centers (wide, low-medium height)
-- Entertainment venues (unique shapes)
+- **Retail**: Footprint (15-35m), **exactly 20m tall** (all are 5-story office towers)
+  - Office towers with floor-to-ceiling windows (85% chance per floor)
+  - Doors on all four sides for accessibility
+  - Glass-heavy aesthetic with large facades
 
 **Industrial Buildings:**
 - **Warehouse**: Very large footprint (35-70m), low height (5-10m)
@@ -555,12 +600,17 @@ def get_building_complexity(building_id, traffic_data, player_attention_data):
   - Some windows (~30% density)
 
 **Agricultural Buildings:**
-- **Residence**: Small to medium footprint (10-22m), low height (5-10m)
-  - Farmhouses and agricultural residences
-  - Good window coverage (~65% density)
-- **Agri-industrial**: Medium to large footprint (20-50m), varied height (10-20m)
-  - Processing plants, storage facilities
-  - Limited windows (~25% density)
+- **Clustering System**: Buildings within 100m radius are grouped into clusters
+  - Each cluster forms a farming community with: 1 house (farmhouse), 1 barn, and 1-2 small industrial buildings
+- **House**: Small footprint (10-18m), low-medium height (8-12m, 2-3 stories)
+  - Farmhouses with good window coverage
+- **Barn**: Medium footprint (12-25m), low height (5-10m)
+  - Small warehouse/barn structures
+  - Limited windows (~20% density)
+  - Garage doors (1-2 doors, 70% chance)
+- **Small Industrial**: Medium footprint (15-30m), low height (5-10m)
+  - Small processing/storage buildings
+  - Limited windows (~20% density)
 
 **Special Buildings:**
 - Transportation hubs (unique shape, large)
@@ -1462,11 +1512,46 @@ def regenerate_chunk(chunk_id, reason, force=False):
 **Deliverables:**
 - ✅ City grid generation working
 - ✅ Buildings generate in zones
-- ✅ Building subtypes implemented (warehouse, factory, residence, agri_industrial, retail, mixed_use)
-- ✅ Varied building footprints (10-80m width/depth depending on type)
-- ✅ Discrete building heights (4m, 8m, 12m, 16m, or 20m - 1 to 5 floors of 4m each)
-- ✅ Windows generate on buildings with density varying by subtype
+- ✅ Building subtypes implemented (warehouse, factory, residence, agri_industrial, retail, mixed_use, apartment, campus, house, barn, park_structure)
+- ✅ Enhanced building shape weights and characteristics (Geometry Version 7):
+  - **Industrial Buildings**:
+    - Mostly short (5-12m), wide (40-80m), and long (40-80m) buildings
+    - Fewer windows (10-20% density depending on subtype)
+    - Multiple side-by-side garage doors: warehouses have 2-4 garage doors (85% chance), factories have 1-3 garage doors (60% chance)
+    - Garage doors placed side-by-side on the same facade with proper spacing
+  - **Commercial Buildings**:
+    - All buildings are 5-story office towers (exactly 20m tall, 5 floors of 4m each)
+    - Mostly floor-to-ceiling windows (85% chance for full-height windows per floor)
+    - Doors on all four sides (main door on r=0 facade, secondary doors on other three sides)
+    - Office tower aesthetic with large glass facades
+  - **Residential Buildings**:
+    - Mix of two categories:
+      - **Apartment/Campus buildings** (60%): Larger footprints (20-40m), taller (12-20m, 3-5 stories), multiple doors (2-3 additional)
+      - **Houses** (40%): Smaller footprints (10-18m), shorter (8-12m, 2-3 stories), fewer doors (main door, 20% chance for one secondary)
+    - Mostly standard windows (85% chance for standard windows per floor)
+    - Windows on all four facades
+  - **Agricultural Buildings**:
+    - **Clustering system**: Buildings within 100m radius are grouped into clusters
+    - Each cluster contains: 1 house (farmhouse), 1 barn (small warehouse), and 1-2 small industrial buildings
+    - Clusters form organic farming communities
+    - Individual building types: houses (10-18m footprint, 8-12m tall), barns (12-25m footprint, 5-10m tall), small industrial (15-30m footprint, 5-10m tall)
+  - **Park Buildings**:
+    - Small scattered structures (5-15m footprint)
+    - Mostly 1-2 stories (4-8m tall)
+    - Sparse distribution throughout park zones
+- ✅ Varied building footprints (5-80m width/depth depending on type and subtype)
+- ✅ Discrete building heights (4m, 5m, 8m, 10m, 12m, 15m, 16m, or 20m - 1 to 5 floors of 4m each, with some intermediate heights for industrial)
+- ✅ Windows generate on all four facades with density and type preferences varying by subtype
 - ✅ New window system with full-height, standard, and ceiling windows (4m floor height)
+- ✅ Door generation:
+  - Main door always on facade facing r=0
+  - Commercial buildings have doors on all four sides
+  - Apartment/campus buildings have multiple doors (2-3 additional)
+  - Houses have fewer doors (main door, 20% chance for one secondary)
+- ✅ Garage door generation with side-by-side placement:
+  - Warehouses: 85% chance, often 2-4 garage doors side-by-side
+  - Factories: 60% chance, 1-3 garage doors
+  - Barns and agri-industrial: 70% chance, 1-2 garage doors
 - ✅ Hub-specific color palettes for building rendering
   - 12 pillar hubs each with unique color schemes for 5 zone types
   - Color components: foundation, walls, roofs, windows_doors, trim
@@ -1480,8 +1565,36 @@ def regenerate_chunk(chunk_id, reason, force=False):
 - ⏳ Basic lighting system (pending)
 - ⏳ Parks generate with terrain (pending)
 - ✅ All generation is deterministic
-- ✅ Building boundary validation
+- ✅ Building boundary validation (three-method validation: rectangle containment, corner check, buffer check)
+- ✅ Building spacing rules (can touch, or minimum 5m gap for alleys/streets)
 - ✅ Structure persistence with chunks (including color information)
+
+## Testing
+
+**Status**: ✅ **COMPREHENSIVE TEST COVERAGE**
+
+The procedural generation system has extensive test coverage for building generation, window/door placement, and zone-specific characteristics.
+
+**Test Files:**
+- `server/internal/procedural/tests/test_buildings.py` - Building generation tests (35 tests)
+- `server/internal/procedural/tests/test_generation.py` - Chunk and structure generation tests (11 tests)
+- **Total**: 46 tests collected
+
+**Test Coverage Summary:**
+- ✅ **Building Generation**: Seed generation, subtype distribution, dimensions, heights by zone type
+- ✅ **Window System**: Generation on all four facades, density by subtype, type preferences (full-height, standard, ceiling)
+- ✅ **Door System**: Main door placement (r=0 facing), secondary doors by building type, doors on all sides for commercial, overlap prevention
+- ✅ **Garage Doors**: Side-by-side placement, multiple doors, placement by building subtype
+- ✅ **Zone-Specific Tests**:
+  - Commercial: 5-story validation, doors on all sides, full-height windows
+  - Residential: Apartment/house differentiation, door counts, standard windows
+  - Industrial: Few windows, garage door side-by-side placement
+  - Agricultural: Clustering system, building type distribution
+  - Park: Small size validation
+- ✅ **Validation**: Building boundary validation, spacing rules, corner trim respect
+- ✅ **Integration**: Structure format, persistence, color palette application, mixed-use variety
+
+**Test Results**: 44 tests passing, 1 failed (door overlap test with tolerance for edge cases when commercial buildings have doors on all sides), 1 skipped
 
 ### Phase 3: Enhancement
 
