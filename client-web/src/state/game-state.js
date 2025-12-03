@@ -220,6 +220,56 @@ export class GameStateManager {
     if (!structure || typeof structure.id === 'undefined') {
       return;
     }
+    
+    // Extract doors, garage_doors, windows, dimensions, and building_subtype from model_data if present
+    // This ensures structures loaded from database have these fields available at top level
+    if (structure.model_data) {
+      let modelData = structure.model_data;
+      // Parse model_data if it's a string (JSON)
+      if (typeof modelData === 'string') {
+        try {
+          modelData = JSON.parse(modelData);
+        } catch (e) {
+          // Ignore parse errors - model_data might not be valid JSON string
+          console.warn(`[GameState] Failed to parse model_data for structure ${structure.id}:`, e);
+        }
+      }
+      
+      if (modelData && typeof modelData === 'object') {
+        // Extract to top level for easier access (always extract, even if already present at top level)
+        // This ensures we use the most up-to-date data from model_data
+        if (modelData.doors !== undefined) {
+          structure.doors = modelData.doors;
+        }
+        if (modelData.garage_doors !== undefined) {
+          structure.garage_doors = modelData.garage_doors;
+        }
+        if (modelData.windows !== undefined) {
+          structure.windows = modelData.windows;
+        }
+        if (modelData.dimensions !== undefined) {
+          structure.dimensions = modelData.dimensions;
+        }
+        if (modelData.building_subtype !== undefined) {
+          structure.building_subtype = modelData.building_subtype;
+        }
+        
+        // Debug: Log if doors were extracted for procedural buildings
+        if (structure.id && structure.id.includes('proc_') && structure.is_procedural) {
+          const hasDoors = structure.doors && Object.keys(structure.doors).length > 0;
+          const hasGarageDoors = structure.garage_doors && structure.garage_doors.length > 0;
+          if (!hasDoors && !hasGarageDoors && modelData.doors === undefined && modelData.garage_doors === undefined) {
+            console.warn(`[GameState] Structure ${structure.id} has no doors in model_data:`, {
+              has_model_data: !!structure.model_data,
+              model_data_keys: modelData ? Object.keys(modelData) : [],
+              model_data_doors: modelData?.doors,
+              model_data_garage_doors: modelData?.garage_doors
+            });
+          }
+        }
+      }
+    }
+    
     const exists = this.structures.has(structure.id);
     this.structures.set(structure.id, structure);
     this.emit(exists ? 'structureUpdated' : 'structureAdded', { structure });

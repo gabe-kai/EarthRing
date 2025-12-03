@@ -507,9 +507,35 @@ def test_house_buildings_have_fewer_doors():
             f"Houses should have fewer doors on average (mostly 1, some 2), got: {avg_house_doors}"
 
 
+def test_industrial_buildings_have_doors_and_garage_doors_on_north_south():
+    """Test that industrial buildings (warehouse, factory) have doors and garage doors on both front and back facades"""
+    # Test warehouses
+    for i in range(20):
+        building = buildings.generate_building(
+            (100.0 + i, 200.0 + i), "industrial", 0.5, 107000 + i, 0
+        )
+        
+        if building["building_subtype"] in ["warehouse", "factory"]:
+            doors = building.get("doors", {})
+            garage_doors = building.get("garage_doors", [])
+            
+            # Must have doors on both front and back facades
+            assert "front" in doors, f"Warehouse/factory should have door on front facade, got doors: {list(doors.keys())}"
+            assert "back" in doors, f"Warehouse/factory should have door on back facade, got doors: {list(doors.keys())}"
+            
+            # Must have garage doors on both front and back facades
+            front_garage_doors = [gd for gd in garage_doors if gd.get("facade") == "front"]
+            back_garage_doors = [gd for gd in garage_doors if gd.get("facade") == "back"]
+            
+            assert len(front_garage_doors) >= 1, \
+                f"Warehouse/factory should have at least 1 garage door on front facade, got: {len(front_garage_doors)}"
+            assert len(back_garage_doors) >= 1, \
+                f"Warehouse/factory should have at least 1 garage door on back facade, got: {len(back_garage_doors)}"
+
+
 def test_industrial_garage_doors_side_by_side():
-    """Test that industrial buildings can have multiple side-by-side garage doors"""
-    warehouses_with_multiple_doors = 0
+    """Test that industrial buildings have at least one garage door (can be on front, back, or both) and can have multiple side-by-side garage doors"""
+    warehouses_with_multiple_doors_per_facade = 0
     
     for i in range(30):
         building = buildings.generate_building(
@@ -518,26 +544,33 @@ def test_industrial_garage_doors_side_by_side():
         
         if building["building_subtype"] == "warehouse":
             garage_doors = building.get("garage_doors", [])
-            if len(garage_doors) >= 2:
-                warehouses_with_multiple_doors += 1
-                
-                # Check that multiple garage doors are on the same facade (side-by-side)
-                facades = [gd["facade"] for gd in garage_doors]
-                # Should be on the same facade (front or back)
-                assert all(f in ["front", "back"] for f in facades), \
-                    f"Garage doors should be on front/back facades, got: {facades}"
-                
-                # Check that they're positioned side-by-side (similar Y, different X)
-                if len(garage_doors) >= 2:
-                    y_positions = [gd["y"] for gd in garage_doors]
+            
+            # Warehouses should have at least one garage door (can be on front, back, or both)
+            assert len(garage_doors) >= 1, \
+                f"Warehouse should have at least 1 garage door somewhere"
+            
+            front_garage_doors = [gd for gd in garage_doors if gd.get("facade") == "front"]
+            back_garage_doors = [gd for gd in garage_doors if gd.get("facade") == "back"]
+            
+            # Check that multiple garage doors on the same facade are side-by-side
+            for facade_doors in [front_garage_doors, back_garage_doors]:
+                if len(facade_doors) >= 2:
+                    warehouses_with_multiple_doors_per_facade += 1
+                    
+                    # Check that they're positioned side-by-side (similar Y, different X)
+                    y_positions = [gd["y"] for gd in facade_doors]
+                    x_positions = [gd["x"] for gd in facade_doors]
                     # Y positions should be similar (within 0.5m for side-by-side placement)
                     y_differences = [abs(y_positions[i] - y_positions[i+1]) for i in range(len(y_positions)-1)]
                     assert all(yd < 1.0 for yd in y_differences), \
-                        f"Garage doors should be at similar Y positions for side-by-side placement, got Y positions: {y_positions}"
+                        f"Garage doors on same facade should be at similar Y positions for side-by-side placement, got Y positions: {y_positions}"
+                    # X positions should be different (side-by-side means different X)
+                    assert len(set([round(x, 1) for x in x_positions])) > 1, \
+                        f"Garage doors on same facade should have different X positions for side-by-side placement, got X positions: {x_positions}"
     
-    # Should see some warehouses with multiple garage doors (85% chance, 50% get 2-4 doors)
-    assert warehouses_with_multiple_doors > 0, \
-        f"Should see some warehouses with multiple garage doors, got: {warehouses_with_multiple_doors}"
+    # Should see some warehouses with multiple garage doors per facade (50% get 2-4 doors per facade)
+    assert warehouses_with_multiple_doors_per_facade > 0, \
+        f"Should see some warehouses with multiple garage doors per facade, got: {warehouses_with_multiple_doors_per_facade}"
 
 
 def test_commercial_buildings_have_full_height_windows():
@@ -679,8 +712,8 @@ def test_main_door_faces_r0():
         assert "width" in door_info
         assert "height" in door_info
         assert door_info["type"] == "main"
-        assert door_info["width"] == 1.2  # Standard door width
-        assert door_info["height"] == 2.5  # Standard door height
+        assert door_info["width"] == 0.9  # Standard door width (90cm)
+        assert door_info["height"] == 2.1  # Standard door height (210cm)
 
 
 def test_secondary_doors():

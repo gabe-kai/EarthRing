@@ -896,7 +896,7 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							// Properties will be set below as parsed object
 						}
 
-						// Extract dimensions and windows from model_data if present
+						// Extract dimensions, windows, doors, and garage doors from model_data if present
 						if len(structure.ModelData) > 0 {
 							var modelDataMap map[string]interface{}
 							if err := json.Unmarshal(structure.ModelData, &modelDataMap); err == nil {
@@ -905,6 +905,24 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								}
 								if windows, ok := modelDataMap["windows"].([]interface{}); ok {
 									structureFeature["windows"] = windows
+								}
+								// Doors can be a map of facade -> door info
+								if doorsVal, exists := modelDataMap["doors"]; exists {
+									if doors, ok := doorsVal.(map[string]interface{}); ok {
+										structureFeature["doors"] = doors
+									}
+								}
+								// Garage doors stored as array of door dictionaries
+								if garageDoorsVal, exists := modelDataMap["garage_doors"]; exists {
+									if garageDoors, ok := garageDoorsVal.([]interface{}); ok {
+										structureFeature["garage_doors"] = garageDoors
+									}
+								}
+								// Building subtype may also be stored in model_data (fallback)
+								if _, hasSubtype := structureFeature["building_subtype"]; !hasSubtype {
+									if subtype, ok := modelDataMap["building_subtype"].(string); ok {
+										structureFeature["building_subtype"] = subtype
+									}
 								}
 							}
 						}

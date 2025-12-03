@@ -450,7 +450,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 						propertiesJSON = propsBytes
 					}
 				}
-				// Include dimensions and windows in properties if present
+				// Include dimensions, windows, doors, and garage_doors in model_data if present
 				var modelDataJSON json.RawMessage
 				modelDataMap := make(map[string]interface{})
 				if dimensions, ok := structureMap["dimensions"].(map[string]interface{}); ok {
@@ -458,6 +458,30 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				}
 				if windows, ok := structureMap["windows"].([]interface{}); ok {
 					modelDataMap["windows"] = windows
+				}
+				// Include doors (dictionary mapping facade to door info)
+				// Check if doors key exists, even if empty
+				if doorsVal, exists := structureMap["doors"]; exists {
+					if doors, ok := doorsVal.(map[string]interface{}); ok {
+						modelDataMap["doors"] = doors
+					} else if doorsVal == nil {
+						// Doors might be explicitly null/None, save as empty dict
+						modelDataMap["doors"] = make(map[string]interface{})
+					}
+				}
+				// Include garage_doors (list of garage door dictionaries)
+				// Check if garage_doors key exists, even if empty
+				if garageDoorsVal, exists := structureMap["garage_doors"]; exists {
+					if garageDoors, ok := garageDoorsVal.([]interface{}); ok {
+						modelDataMap["garage_doors"] = garageDoors
+					} else if garageDoorsVal == nil {
+						// Garage_doors might be explicitly null/None, save as empty array
+						modelDataMap["garage_doors"] = []interface{}{}
+					}
+				}
+				// Include building_subtype if present
+				if buildingSubtype, ok := structureMap["building_subtype"].(string); ok {
+					modelDataMap["building_subtype"] = buildingSubtype
 				}
 				if len(modelDataMap) > 0 {
 					if modelBytes, err := json.Marshal(modelDataMap); err == nil {

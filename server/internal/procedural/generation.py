@@ -979,6 +979,11 @@ def _generate_structures_for_zones(
         if zone_type not in ["industrial", "commercial", "mixed_use", "mixed-use", "agricultural", "park"]:
             continue
         
+        # Debug: Print zone type for commercial zones to verify they're being processed
+        if zone_type == "commercial":
+            zone_name = zone.get("properties", {}).get("name", "unknown")
+            print(f"DEBUG: Processing commercial zone: {zone_name}, zone_type={zone_type}")
+        
         # Extract zone polygon coordinates
         zone_geometry = zone.get("geometry", {})
         if zone_geometry.get("type") != "Polygon":
@@ -1008,6 +1013,7 @@ def _generate_structures_for_zones(
             zone_polygon_shapely = sg.Polygon(zone_coordinates[0])
             
             # For agricultural zones, implement clustering: house + barn + small industrial
+            # ALL building cells in agricultural zones get agricultural building types
             if zone_type == "agricultural":
                 # Collect all building cells
                 building_cells = [cell for cell in grid_cells if cell.get("type") == "building"]
@@ -1041,7 +1047,7 @@ def _generate_structures_for_zones(
                         clusters.append(cluster)
                     
                     # For each cluster, assign building types: 1 house, 1 barn, 1-2 small industrial
-                    # Remaining cells get random agricultural building types
+                    # Clustered cells get assigned types within each cluster
                     for cluster_idx, cluster in enumerate(clusters):
                         cluster_seed = hash((chunk_seed, len(clusters), cluster_idx)) % (2**31)
                         cluster_rng = random.Random(cluster_seed)
@@ -1062,6 +1068,25 @@ def _generate_structures_for_zones(
                                 building_type_override = "small_industrial"
                             
                             # Store override for later use
+                            cell["_agri_building_type"] = building_type_override
+                    
+                    # For cells NOT in clusters (isolated cells), assign random agricultural building types
+                    # Use a deterministic seed based on cell position for consistency
+                    for cell in building_cells:
+                        if "_agri_building_type" not in cell:
+                            # Isolated cell - assign random agricultural type (house, barn, or warehouse)
+                            cell_seed = hash((chunk_seed, cell["position"][0], cell["position"][1])) % (2**31)
+                            cell_rng = random.Random(cell_seed)
+                            
+                            # Weighted random: 40% house, 30% barn, 30% small industrial (warehouse)
+                            rand_val = cell_rng.random()
+                            if rand_val < 0.4:
+                                building_type_override = "house"
+                            elif rand_val < 0.7:
+                                building_type_override = "barn"
+                            else:
+                                building_type_override = "small_industrial"
+                            
                             cell["_agri_building_type"] = building_type_override
             
             # Process all building cells (including agricultural clusters)
@@ -1095,6 +1120,10 @@ def _generate_structures_for_zones(
                     hub_name,
                     building_subtype_override,
                 )
+                
+                # Debug: Log commercial zone buildings
+                if zone_type == "commercial":
+                    print(f"DEBUG: Generated building in commercial zone: subtype={building['building_subtype']}, type={building['building_type']}")
                 
                 # Validate building footprint is completely within zone
                 # Use multiple validation methods to ensure robustness
@@ -1139,9 +1168,9 @@ def _generate_structures_for_zones(
                 
                 # Method 3: Check that building doesn't intersect zone boundary
                 # This ensures the building is fully interior (not touching the edge)
-                # Use buffer to check if building is well within zone
-                # Create a slightly smaller building rectangle to ensure it's not right on the edge
-                buffer_margin = 0.5  # 50cm buffer to ensure building is well within zone
+                # Use a small buffer to check if building is well within zone
+                # Reduced buffer from 50cm to 10cm to allow buildings in narrower zones (e.g., agricultural zones)
+                buffer_margin = 0.1  # 10cm buffer to ensure building is well within zone
                 building_rect_buffered = sg.box(
                     building_x - half_width + buffer_margin,
                     building_y - half_depth + buffer_margin,
@@ -1150,9 +1179,13 @@ def _generate_structures_for_zones(
                 )
                 
                 # Buffered building should also be fully contained
-                if not zone_polygon_shapely.contains(building_rect_buffered):
-                    # Building is too close to zone edge - skip it
-                    continue
+                # But only skip if the zone is large enough - for narrow zones, we'll allow buildings that pass Method 1 and 2
+                zone_area = zone_polygon_shapely.area
+                min_zone_area_for_buffer_check = 100.0  # Only apply buffer check for zones larger than 100 m²
+                if zone_area > min_zone_area_for_buffer_check:
+                    if not zone_polygon_shapely.contains(building_rect_buffered):
+                        # Building is too close to zone edge - skip it (only for larger zones)
+                        continue
                 
                 # Check building spacing against already placed buildings
                 # Rules: Buildings can touch (walls can touch), but if they don't touch,

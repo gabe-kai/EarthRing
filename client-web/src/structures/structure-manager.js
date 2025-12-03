@@ -474,9 +474,14 @@ export class StructureManager {
     
     // Extract colors from structure properties if available
     let colors = null;
+    let cornerTrimWidth = 0.02; // Default: 2% of facade width (fallback)
     if (structure.properties && typeof structure.properties === 'object') {
       if (structure.properties.colors && typeof structure.properties.colors === 'object') {
         colors = structure.properties.colors;
+      }
+      // Extract corner trim width if available (in meters, 0.1 to 0.5)
+      if (structure.properties.corner_trim_width !== undefined) {
+        cornerTrimWidth = structure.properties.corner_trim_width;
       }
     }
     
@@ -511,35 +516,112 @@ export class StructureManager {
     }
     
     // Extract door information from structure
-    const doors = structure.doors || {};  // Dictionary mapping facade to door info
-    const garageDoors = structure.garage_doors || [];  // List of garage door dictionaries
+    // Doors may be at top level, or inside model_data (if loaded from database)
+    let doors = structure.doors || {};  // Dictionary mapping facade to door info
+    let garageDoors = structure.garage_doors || [];  // List of garage door dictionaries
     
-    // Helper function to get door info for a facade (includes both regular doors and garage doors)
+    // If doors not found at top level, try extracting from model_data
+    if ((!doors || Object.keys(doors).length === 0) && (!garageDoors || garageDoors.length === 0)) {
+      if (structure.model_data) {
+        let modelData = structure.model_data;
+        // Parse model_data if it's a string
+        if (typeof modelData === 'string') {
+          try {
+            modelData = JSON.parse(modelData);
+          } catch (e) {
+            console.warn(`[Structures] Failed to parse model_data for structure ${structure.id}:`, e);
+          }
+        }
+        // Extract doors from model_data if present
+        if (modelData && typeof modelData === 'object') {
+          if (modelData.doors && !doors) {
+            doors = modelData.doors;
+          }
+          if (modelData.garage_doors && (!garageDoors || garageDoors.length === 0)) {
+            garageDoors = modelData.garage_doors;
+          }
+        }
+      }
+      // Also check properties for doors (backwards compatibility)
+      if (structure.properties) {
+        let properties = structure.properties;
+        if (typeof properties === 'string') {
+          try {
+            properties = JSON.parse(properties);
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+        if (properties && typeof properties === 'object') {
+          if (properties.doors && !doors) {
+            doors = properties.doors;
+          }
+          if (properties.garage_doors && (!garageDoors || garageDoors.length === 0)) {
+            garageDoors = properties.garage_doors;
+          }
+        }
+      }
+    }
+    
+    // Debug: Log door data for first building (to verify doors are being loaded)
+    if (structure.id && structure.id.includes('proc_') && Object.keys(doors).length === 0 && garageDoors.length === 0) {
+      console.warn(`[Structures] No doors found for structure ${structure.id}:`, { 
+        doors, 
+        garage_doors: garageDoors, 
+        has_doors_key: 'doors' in structure, 
+        has_garage_doors_key: 'garage_doors' in structure,
+        has_model_data: !!structure.model_data,
+        model_data_type: typeof structure.model_data,
+        has_properties: !!structure.properties
+      });
+    }
+    
+    // Helper function to get door info for a facade (includes both regular doors, utility doors, and garage doors)
+    // Returns an array of doors (can have multiple doors side-by-side)
     const getDoorInfoForFacade = (facade) => {
       const doorInfo = doors[facade];
       const facadeGarageDoors = garageDoors.filter(gd => gd.facade === facade);
       
-      // For now, prioritize regular door if both exist (can be enhanced later)
+      const doorArray = [];
+      
+      // Add regular doors and utility doors if they exist
+      // doorInfo can be a single door object or a list of doors (if multiple utility doors on same facade)
       if (doorInfo) {
-        return {
-          type: doorInfo.type || 'main',
-          x: doorInfo.x || 0,
-          y: doorInfo.y || 0,
-          width: doorInfo.width || 1.2,
-          height: doorInfo.height || 2.5,
-        };
-      } else if (facadeGarageDoors.length > 0) {
-        // Use first garage door for this facade (can handle multiple later if needed)
-        const gd = facadeGarageDoors[0];
-        return {
+        if (Array.isArray(doorInfo)) {
+          // Multiple doors on this facade (e.g., regular door + utility doors)
+          doorInfo.forEach(door => {
+            doorArray.push({
+              type: door.type || 'main',
+              x: door.x || 0,
+              y: door.y || 0,
+              width: door.width || 0.9,
+              height: door.height || 2.1,
+            });
+          });
+        } else {
+          // Single door on this facade
+          doorArray.push({
+            type: doorInfo.type || 'main',
+            x: doorInfo.x || 0,
+            y: doorInfo.y || 0,
+            width: doorInfo.width || 0.9,
+            height: doorInfo.height || 2.1,
+          });
+        }
+      }
+      
+      // Add all garage doors on this facade
+      facadeGarageDoors.forEach(gd => {
+        doorArray.push({
           type: 'garage',
           x: gd.x || 0,
           y: gd.y || 0,
           width: gd.width || 3.0,
           height: gd.height || 3.5,
-        };
-      }
-      return null;
+        });
+      });
+      
+      return doorArray.length > 0 ? doorArray : null;
     };
     
     // Front wall (positive Y) - with shader-based windows, doors, and trim
@@ -559,7 +641,8 @@ export class StructureManager {
       buildingSubtype,
       'front',
       colors,
-      frontDoor
+      frontDoor,
+      cornerTrimWidth
     );
     
     // Back wall (negative Y) - with shader-based windows and trim
@@ -579,7 +662,8 @@ export class StructureManager {
       buildingSubtype,
       'back',
       colors,
-      backDoor
+      backDoor,
+      cornerTrimWidth
     );
     
     // Left wall (negative X) - with shader-based rendering (includes trim)
@@ -599,7 +683,8 @@ export class StructureManager {
       buildingSubtype,
       'left',
       colors,
-      leftDoor
+      leftDoor,
+      cornerTrimWidth
     );
     
     // Right wall (positive X) - with shader-based rendering (includes trim)
@@ -619,7 +704,8 @@ export class StructureManager {
       buildingSubtype,
       'right',
       colors,
-      rightDoor
+      rightDoor,
+      cornerTrimWidth
     );
     
     // Roof - use color from palette if available
@@ -681,7 +767,7 @@ export class StructureManager {
    * @param {number} foundationHeight - Foundation height offset
    * @param {number} buildingHeight - Building height above foundation
    */
-  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null) {
+  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
     // Convert windows to shader-compatible format
     // Limit to 50 windows per wall for shader uniforms
     const MAX_WINDOWS = 50;
@@ -725,26 +811,53 @@ export class StructureManager {
     });
     
     // Door data: use door info from structure if available
+    // doorInfo is now an array of doors (can include regular doors and multiple garage doors)
     let hasDoor = false;
     let doorNormalizedX = -999.0;
     let doorNormalizedY = 0.0;
     let doorNormalizedWidth = 0.0;
     let doorNormalizedHeight = 0.0;
+    let isGarageDoor = false;
     
-    if (doorInfo) {
-      hasDoor = true;
-      // Normalize door position and size to wall coordinates
-      // doorInfo.x is offset from facade center (in meters)
-      // doorInfo.y is vertical position relative to building center (building extends -height/2 to +height/2, base is at -height/2)
-      doorNormalizedX = doorInfo.x / width;  // Normalize to -0.5 to 0.5 range
-      // Convert doorInfo.y (building-center relative) to normalized coordinates (0 = center, -0.5 = bottom, +0.5 = top)
-      // doorInfo.y is already relative to building center, so normalize by buildingHeight
-      doorNormalizedY = doorInfo.y / buildingHeight;  // Normalize to -0.5 to 0.5 range (0 = center)
-      doorNormalizedWidth = doorInfo.width / width;
-      doorNormalizedHeight = doorInfo.height / buildingHeight;
+    if (doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
+      // For now, use the first door (can be enhanced later to support multiple doors in shader)
+      // Prefer garage doors over regular doors if both exist on the same facade
+      const doorToUse = doorInfo.find(d => d.type === 'garage') || doorInfo[0];
+      
+      if (!doorToUse || typeof doorToUse.x !== 'number' || typeof doorToUse.y !== 'number' || 
+          typeof doorToUse.width !== 'number' || typeof doorToUse.height !== 'number') {
+        console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorToUse);
+      } else {
+        hasDoor = true;
+        isGarageDoor = doorToUse.type === 'garage';
+        // Normalize door position and size to wall coordinates
+        // doorToUse.x is offset from facade center (in meters)
+        // doorToUse.y is vertical position relative to building center (building extends -height/2 to +height/2, base is at -height/2)
+        doorNormalizedX = doorToUse.x / width;  // Normalize to -0.5 to 0.5 range
+        // Convert doorToUse.y (building-center relative) to normalized coordinates (0 = center, -0.5 = bottom, +0.5 = top)
+        // doorToUse.y is already relative to building center, so normalize by buildingHeight
+        doorNormalizedY = doorToUse.y / buildingHeight;  // Normalize to -0.5 to 0.5 range (0 = center)
+        doorNormalizedWidth = doorToUse.width / width;
+        doorNormalizedHeight = doorToUse.height / buildingHeight;
+      }
+    } else if (doorInfo && !Array.isArray(doorInfo)) {
+      // Legacy support: single door object (backwards compatibility)
+      if (typeof doorInfo.x !== 'number' || typeof doorInfo.y !== 'number' || 
+          typeof doorInfo.width !== 'number' || typeof doorInfo.height !== 'number') {
+        console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorInfo);
+      } else {
+        hasDoor = true;
+        isGarageDoor = doorInfo.type === 'garage';
+        doorNormalizedX = doorInfo.x / width;
+        doorNormalizedY = doorInfo.y / buildingHeight;
+        doorNormalizedWidth = doorInfo.width / width;
+        doorNormalizedHeight = doorInfo.height / buildingHeight;
+      }
     }
     
     // Create shader material with window, door, trim, and foundation rendering
+    // Normalize corner trim width to ratio of wall width for shader
+    const cornerTrimWidthNormalized = cornerTrimWidth / width;
     const wallShaderMaterial = this.createWallShaderMaterial(
       baseMaterial, 
       windowData, 
@@ -756,8 +869,10 @@ export class StructureManager {
       doorNormalizedY,
       doorNormalizedWidth,
       doorNormalizedHeight,
+      isGarageDoor,
       buildingSubtype,
-      colors
+      colors,
+      cornerTrimWidthNormalized
     );
     
     // Create wall mesh with shader material
@@ -785,7 +900,7 @@ export class StructureManager {
    * @param {string} buildingSubtype - Building subtype for material variation
    * @returns {THREE.ShaderMaterial} Shader material with window, door, trim, and foundation rendering
    */
-  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, buildingSubtype = null, colors = null) {
+  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, isGarageDoor = false, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02) {
     // Helper function to convert hex color to RGB vec3
     const hexToRgb = (hex) => {
       if (!hex || typeof hex === 'number') return null;
@@ -826,6 +941,7 @@ export class StructureManager {
       uniform sampler2D windowDataTexture;
       uniform float textureWidth;
       uniform bool hasDoor;
+      uniform bool isGarageDoor;
       uniform float doorX;
       uniform float doorY;
       uniform float doorWidth;
@@ -838,10 +954,10 @@ export class StructureManager {
       uniform vec3 doorColorUniform;
       uniform vec3 foundationColorUniform;
       uniform vec3 trimColorUniform;
+      uniform float cornerTrimWidthUniform;
       
       // Frame/trim thickness relative to wall size
       const float frameThickness = 0.015; // 1.5% of window/door size
-      const float cornerTrimWidth = 0.02; // 2% of wall width for corner trim
       const float foundationHeight = 0.05; // Foundation strip height (5% of wall height)
       const float foundationOffset = 0.02; // Foundation visual offset from bottom
       
@@ -888,8 +1004,11 @@ export class StructureManager {
             if (minDist < frameThickness) {
               return vec4(frameColorUniform, 1.0); // Frame (opaque)
             } else {
-              // Glass area - semi-transparent
-              return vec4(glassColorUniform, 0.3); // Glass (transparent)
+              // Glass area - less transparent with slight reflection
+              // Increased opacity from 0.3 to 0.65 for better visibility
+              // Add slight reflective tint for glass appearance
+              vec3 glassTint = glassColorUniform * 1.2; // Slightly brighter for reflection
+              return vec4(glassTint, 0.65); // Glass (less transparent, more visible)
             }
           }
         }
@@ -922,7 +1041,13 @@ export class StructureManager {
           if (minDist < frameThickness) {
             return vec4(frameColorUniform, 1.0); // Door frame
           } else {
-            return vec4(doorColorUniform, 1.0); // Door surface
+            // Garage doors are darker/more metallic than regular doors
+            if (isGarageDoor) {
+              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
+              return vec4(garageColor, 1.0); // Garage door surface
+            } else {
+              return vec4(doorColorUniform, 1.0); // Regular door surface
+            }
           }
         }
         
@@ -933,12 +1058,12 @@ export class StructureManager {
       vec3 checkCornerTrim(vec2 uv) {
         vec2 normalizedPos = (uv - 0.5);
         
-        // Left edge trim
-        if (normalizedPos.x < -0.5 + cornerTrimWidth) {
+        // Left edge trim (using uniform variable corner trim width)
+        if (normalizedPos.x < -0.5 + cornerTrimWidthUniform) {
           return trimColorUniform;
         }
         // Right edge trim
-        if (normalizedPos.x > 0.5 - cornerTrimWidth) {
+        if (normalizedPos.x > 0.5 - cornerTrimWidthUniform) {
           return trimColorUniform;
         }
         
@@ -1045,6 +1170,7 @@ export class StructureManager {
         windowDataTexture: { value: windowDataTexture },
         textureWidth: { value: textureWidth },
         hasDoor: { value: hasDoor },
+        isGarageDoor: { value: isGarageDoor },
         doorX: { value: doorX },
         doorY: { value: doorY },
         doorWidth: { value: doorWidth },
@@ -1054,6 +1180,7 @@ export class StructureManager {
         doorColorUniform: { value: new THREE.Vector3(doorColorValue.r, doorColorValue.g, doorColorValue.b) },
         foundationColorUniform: { value: new THREE.Vector3(foundationColorValue.r, foundationColorValue.g, foundationColorValue.b) },
         trimColorUniform: { value: new THREE.Vector3(trimColorValue.r, trimColorValue.g, trimColorValue.b) },
+        cornerTrimWidthUniform: { value: cornerTrimWidthNormalized },
       },
       transparent: windowCount > 0, // Transparent if windows present (for glass)
       side: THREE.FrontSide,
@@ -1131,8 +1258,8 @@ export class StructureManager {
    * @param {string} buildingSubtype - Building subtype
    */
   createDoor(group, width, depth, foundationHeight, buildingHeight, buildingSubtype) {
-    const doorWidth = 1.2; // 1.2m wide door
-    const doorHeight = 2.5; // 2.5m tall door
+    const doorWidth = 0.9; // 90cm wide door
+    const doorHeight = 2.1; // 210cm tall door
     
     // Door material (dark brown wood or metal) - cached
     const isIndustrial = buildingSubtype === 'factory' || buildingSubtype === 'warehouse';

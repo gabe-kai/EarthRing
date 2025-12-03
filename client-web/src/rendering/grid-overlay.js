@@ -199,11 +199,13 @@ export class GridOverlay {
     };
     
     // Materials for grid lines (using shader for fade)
-    this.majorHorizontalMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95);
+    // Major lines: red (horizontal) and blue (vertical) at 5m intervals
+    this.majorHorizontalMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95); // Red
     
-    this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95);
+    this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95); // Blue
     
-    this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.5);
+    // Minor lines: medium gray at 1m intervals (inside the 5m major grid)
+    this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.7); // Medium gray
     this.axisMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95); // Red to match horizontal lines
     
     this.visible = true;
