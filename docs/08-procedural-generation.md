@@ -404,6 +404,8 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 - **Agricultural**:
   - Buildings are **clustered** within 100m radius
   - Each cluster contains: 1 house (10-18m footprint, 8-12m tall), 1 barn (12-25m footprint, 5-10m tall), 1-2 small industrial (15-30m footprint, 5-10m tall)
+  - **All agricultural zones along ring segments** generate agricultural structures (not just clustered buildings)
+  - Isolated buildings not in clusters also get agricultural building types: 40% house, 30% barn, 30% small industrial (warehouse)
 - **Park**:
   - **Park structures**: 5-15m width/depth (small), 4-8m height (mostly 1-2 stories)
 
@@ -449,13 +451,14 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 - ✅ **IMPLEMENTED** - Buildings include main and secondary doors
 - Main door always on the facade facing r=0 (center of ring)
 - Door specifications:
-  - Standard door: 1.2m wide × 2.5m tall
+  - Standard door: 90cm wide × 210cm tall (0.9m × 2.1m)
   - Door bottom positioned at 1m above building base (just above logistics sub-floor)
   - Doors positioned to avoid overlapping windows and corner trim
 - Door placement by building type:
   - **Commercial (office towers)**: Doors on all four sides (front, back, left, right)
   - **Apartment/Campus buildings**: Multiple doors (2-3 additional doors on various facades)
   - **Houses**: Fewer doors (main door, 20% chance for one secondary door)
+  - **Industrial buildings (warehouses, factories)**: REQUIRE at least 1 standard door on BOTH north and south sides (front and back facades)
   - **Legacy residence subtype**: 40% chance for secondary door
   - **Factories**: 30% chance for secondary door
 - Doors avoid overlapping windows with collision detection
@@ -466,12 +469,13 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
   - Standard garage door: 3.0m wide × up to 3.5m tall (or 60% of building height)
   - Garage doors positioned at building base (ground level)
 - Garage door placement:
-  - **Warehouses**: 85% chance, often 2-4 garage doors **side-by-side** on same facade (50% for 2 doors, 35% for 3 doors, 15% for 4 doors)
-  - **Factories**: 60% chance, 1-3 garage doors
-  - **Barns**: 70% chance, 1-2 garage doors
-  - **Agri-industrial**: 70% chance, 1-2 garage doors
+  - **Warehouses**: REQUIRE at least 1 garage door on BOTH front and back facades. Each facade gets 1-4 garage doors side-by-side (1 is minimum, 50% chance for 2, 35% for 3, 15% for 4)
+  - **Factories**: REQUIRE at least 1 garage door on BOTH front and back facades. Each facade gets 1-3 garage doors
+  - **Barns**: 70% chance, 1-2 garage doors on one facade
+  - **Agri-industrial**: 70% chance, 1-2 garage doors on one facade
 - Garage doors placed on front or back facades (larger facades)
 - Multiple garage doors are positioned **side-by-side** with 0.5m spacing between them
+- **Utility doors**: Each garage door has a utility door (90cm × 210cm) placed immediately beside it (30cm spacing), either to the right or left depending on available space
 
 **Hub-Specific Color Palettes:**
 - ✅ **IMPLEMENTED** - Buildings use hub-specific color palettes based on their location
@@ -498,6 +502,9 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 - Significantly reduces draw calls and eliminates z-fighting issues
 - Opaque materials for all building components
 - Performance optimized with material caching and geometry reuse
+- **Corner trim**: Variable width between 10cm and 50cm per building (randomly generated per building)
+- **Window opacity**: Windows use 65% opacity with slight reflectivity (1.2x brightness multiplier) for realistic glass appearance
+- **Door types**: Supports regular doors, utility doors (beside garage doors), and garage doors - all rendered via shader
 
 **Files:**
 - `server/internal/procedural/grid.py` - Grid-based city layout generation
@@ -515,7 +522,10 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 - Structures are stored in the `structures` table when chunks are saved
 - Structure IDs are stored in `chunk_data.structure_ids`
 - Structures are loaded when chunks are loaded from the database
-- Structures include dimensions, windows, and properties in `model_data` JSONB field
+- Structures include dimensions, windows, doors, garage_doors, building_subtype, and properties in `model_data` JSONB field
+- **Door persistence**: Doors and garage_doors are saved to `model_data` when structures are stored and extracted when loaded from database
+- Structures are reconstructed from database with all door/garage door data included in chunk responses via WebSocket
+- Client-side extraction ensures doors are available at top level regardless of source (fresh chunks or database-loaded)
 
 ### Building Complexity Levels
 
@@ -1535,6 +1545,7 @@ def regenerate_chunk(chunk_id, reason, force=False):
     - Each cluster contains: 1 house (farmhouse), 1 barn (small warehouse), and 1-2 small industrial buildings
     - Clusters form organic farming communities
     - Individual building types: houses (10-18m footprint, 8-12m tall), barns (12-25m footprint, 5-10m tall), small industrial (15-30m footprint, 5-10m tall)
+    - **All agricultural zones** generate agricultural structures: clustered buildings get assigned types within clusters, isolated buildings get randomly assigned (40% house, 30% barn, 30% small industrial)
   - **Park Buildings**:
     - Small scattered structures (5-15m footprint)
     - Mostly 1-2 stories (4-8m tall)
@@ -1545,13 +1556,16 @@ def regenerate_chunk(chunk_id, reason, force=False):
 - ✅ New window system with full-height, standard, and ceiling windows (4m floor height)
 - ✅ Door generation:
   - Main door always on facade facing r=0
+  - Standard doors: 90cm wide × 210cm tall
   - Commercial buildings have doors on all four sides
   - Apartment/campus buildings have multiple doors (2-3 additional)
   - Houses have fewer doors (main door, 20% chance for one secondary)
+  - Industrial buildings REQUIRE at least 1 standard door on BOTH north and south sides
 - ✅ Garage door generation with side-by-side placement:
-  - Warehouses: 85% chance, often 2-4 garage doors side-by-side
-  - Factories: 60% chance, 1-3 garage doors
+  - Warehouses: REQUIRE at least 1 garage door on BOTH front and back facades, often 2-4 garage doors side-by-side
+  - Factories: REQUIRE at least 1 garage door on BOTH front and back facades, 1-3 garage doors
   - Barns and agri-industrial: 70% chance, 1-2 garage doors
+  - Utility doors: Each garage door has a utility door (90cm × 210cm) placed immediately beside it
 - ✅ Hub-specific color palettes for building rendering
   - 12 pillar hubs each with unique color schemes for 5 zone types
   - Color components: foundation, walls, roofs, windows_doors, trim
@@ -1595,6 +1609,42 @@ The procedural generation system has extensive test coverage for building genera
 - ✅ **Integration**: Structure format, persistence, color palette application, mixed-use variety
 
 **Test Results**: 44 tests passing, 1 failed (door overlap test with tolerance for edge cases when commercial buildings have doors on all sides), 1 skipped
+
+## Recent Changes and Bug Fixes
+
+### Agricultural Zone Structure Generation
+- ✅ **Fixed**: Agricultural zones along ring segments now properly generate agricultural structures (houses, barns, small industrial warehouses)
+- ✅ **Improved**: All building cells in agricultural zones receive agricultural building types, not just clustered ones
+- ✅ **Enhanced**: Isolated buildings (not in clusters) are randomly assigned: 40% house, 30% barn, 30% small industrial (warehouse)
+- ✅ **Fixed**: Added missing `_get_building_dimensions_with_subtype()` function that was preventing agricultural structures from generating
+
+### Door and Garage Door Persistence
+- ✅ **Fixed**: Doors and garage doors now persist correctly after browser refresh
+- ✅ **Enhanced**: Doors and garage_doors are saved to `model_data` when structures are stored in the database
+- ✅ **Fixed**: WebSocket chunk data handler now extracts doors and garage_doors from `model_data` when serving chunk data from database
+- ✅ **Enhanced**: Client-side extraction of doors from `model_data` happens at multiple levels:
+  - During chunk structure extraction (`chunk-manager.js`)
+  - During structure upsert to game state (`game-state.js`)
+  - During building creation (`structure-manager.js`)
+- ✅ **Result**: Doors persist correctly whether structures come from fresh chunk generation or from database-loaded chunks
+
+### Door and Garage Door Specifications
+- ✅ **Updated**: Standard door dimensions changed to 90cm wide × 210cm tall (0.9m × 2.1m)
+- ✅ **Enhanced**: Industrial buildings (warehouses, factories) now REQUIRE at least 1 standard door on BOTH north and south sides (front and back facades)
+- ✅ **Enhanced**: Utility doors (90cm × 210cm) are automatically placed beside each garage door (30cm spacing), either to the right or left depending on available space
+- ✅ **Improved**: Garage door requirements: Warehouses and factories REQUIRE at least 1 garage door on BOTH front and back facades
+
+### Building Details
+- ✅ **Enhanced**: Corner trim width is now variable between 10cm and 50cm per building (randomly generated per building)
+- ✅ **Improved**: Window opacity increased to 65% with slight reflectivity (1.2x brightness multiplier) for more realistic glass appearance
+
+### Grid Overlay
+- ✅ **Updated**: Minor grid lines changed from white (0xffffff) back to medium gray (0x9c9c9c) to reduce visual contrast
+- ✅ **Maintained**: Major grid lines remain red (horizontal) and blue (vertical) at 5m intervals, with white (now gray) 1m minor grid inside
+
+### Building Boundary Validation
+- ✅ **Improved**: Buffer margin for building boundary validation reduced from 50cm to 10cm to allow buildings in narrower zones
+- ✅ **Enhanced**: Buffer check only applies to zones larger than 100 m² (narrower zones like agricultural zones can place buildings closer to edges)
 
 ### Phase 3: Enhancement
 

@@ -546,6 +546,7 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 **Grid Overlay** (`client-web/src/rendering/grid-overlay.js`):
 - Circular 250m radius grid overlay centered on camera target
 - 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
+- Minor grid lines use medium gray color (0x9c9c9c) for reduced visual contrast
 - Sharpened rendering via dynamic `THREE.LineSegments` geometry (no textures, no blurring at zoom)
 - Shader-driven fade at the outer radius (currently directional: horizontal lines fade N-S, vertical fade E-W; TODO: implement true radial fade)
 - Base opacity controls so zones stay fully visible
