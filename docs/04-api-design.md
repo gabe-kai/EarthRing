@@ -1533,6 +1533,8 @@ See `docs/05-authentication-security.md` for detailed rate limiting specificatio
 - Version 3: Phase 2 - Added building generation (grid-based city generation with buildings)
 - Version 4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
 - Version 5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
+- Version 6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
+- Version 7: Phase 2 - Enhanced building shape weights: industrial (short/wide/long, fewer windows, multiple garage doors), commercial (5-story office towers, floor-to-ceiling windows, doors on all sides), residential (apartments/campuses/houses with varied door counts), agricultural clusters (house+barn+industrial), park buildings (small scattered structures)
 
 **Bulk Operations:**
 - `GET /api/chunks/invalidate-outdated`: Delete all outdated chunks (supports filtering)
