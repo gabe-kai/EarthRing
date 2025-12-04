@@ -133,7 +133,7 @@ def generate_building(
     # Generate garage doors for appropriate building types
     # Also generates utility doors beside each garage door
     garage_doors, utility_doors = _generate_garage_doors(
-        width, depth, height, building_seed, building_subtype, rng, corner_trim_width, windows
+        width, depth, height, building_seed, building_subtype, rng, corner_trim_width, windows, doors
     )
     
     # Merge utility doors into the main doors dictionary
@@ -735,10 +735,12 @@ def _generate_doors(
     door_width = 0.9  # 90cm wide
     door_height = 2.1  # 210cm tall
     
-    # Door bottom should start at 1m (just above logistics sub-floor)
-    # Building base is at -height/2, door bottom at -height/2 + 1.0
-    # Door center at door bottom + door_height/2
-    door_bottom_y = -height / 2.0 + 1.0  # 1m from building base
+    # Foundation height calculation (matches client-side: min(0.5, height * 0.1))
+    foundation_height = min(0.5, height * 0.1)
+    # Door bottom should start at foundation top
+    # Building base is at -height/2, foundation top is at -height/2 + foundation_height
+    # Door center at foundation top + door_height/2
+    door_bottom_y = -height / 2.0 + foundation_height  # At foundation top
     door_y_position = door_bottom_y + door_height / 2.0  # Door center relative to building center
     
     # Use variable corner trim width (absolute value in meters)
@@ -950,7 +952,8 @@ def _generate_garage_doors(
     building_subtype: str,
     rng: random.Random,
     corner_trim_width: float = 0.1,
-    windows: List[Dict[str, Any]] = None
+    windows: List[Dict[str, Any]] = None,
+    doors: Dict[str, Any] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Generate garage doors for appropriate building types.
@@ -975,11 +978,15 @@ def _generate_garage_doors(
     garage_doors = []
     utility_doors = []  # List of utility door dictionaries (one per garage door)
     windows = windows or []
+    doors = doors or {}
+    
+    # Foundation height calculation (matches client-side: min(0.5, height * 0.1))
+    foundation_height = min(0.5, height * 0.1)
     
     # Standard utility door dimensions (same as regular doors)
     utility_door_width = 0.9  # 90cm wide
     utility_door_height = 2.1  # 210cm tall
-    utility_door_y_position = -height / 2.0 + 1.0 + utility_door_height / 2.0  # Same Y as regular doors
+    utility_door_y_position = -height / 2.0 + foundation_height + utility_door_height / 2.0  # At foundation top
     
     def utility_door_overlaps_window(door_x: float, door_y: float, facade: str, facade_width: float) -> bool:
         """Check if utility door overlaps any window on the given facade."""
@@ -1019,8 +1026,8 @@ def _generate_garage_doors(
     garage_count_per_facade = 0  # Used for industrial buildings that require doors on both facades
     
     if building_subtype == "warehouse":
-        # Warehouses: REQUIRE at least 1 garage door on BOTH front and back facades
-        # Each facade gets 1-4 garage doors (1 is minimum, 2-4 are optional extras)
+        # Warehouses: REQUIRE at least 1 truck bay door on BOTH front and back facades
+        # Each facade gets 1-4 truck bay doors (1 is minimum, 2-4 are optional extras)
         # 50% chance for 2 doors per facade, 35% for 3 doors, 15% for 4 doors
         rand = rng.random()
         if rand < 0.5:
@@ -1029,12 +1036,16 @@ def _generate_garage_doors(
             garage_count_per_facade = 3
         else:
             garage_count_per_facade = 4
-        # Always have at least 1 garage door per facade
+        # Always have at least 1 truck bay door per facade
         garage_count_per_facade = max(1, garage_count_per_facade)
     elif building_subtype == "factory":
         # Factories: REQUIRE at least 1 garage door on BOTH front and back facades
         # Each facade gets 1-3 garage doors (1 is minimum, 2-3 are optional extras)
         garage_count_per_facade = rng.randint(1, 3)  # Always at least 1
+    elif building_subtype == "house":
+        # Residential houses: may have 1-2 standard garage doors
+        has_garage_doors = rng.random() < 0.60  # 60% chance
+        garage_count = rng.randint(1, 2) if has_garage_doors else 0
     elif building_subtype == "barn":
         # Barns/warehouses: 1-2 garage doors
         has_garage_doors = rng.random() < 0.70  # 70% chance
@@ -1044,40 +1055,139 @@ def _generate_garage_doors(
         has_garage_doors = rng.random() < 0.70  # 70% chance
         garage_count = rng.randint(1, 2) if has_garage_doors else 0
     
-    # For industrial buildings (warehouse, factory):
-    # - Standard doors are already on both front and back (from _generate_doors)
-    # - Require at least one garage door per building (can be on front, back, or both)
-    # - Possibly more garage doors for variety
-    if building_subtype in ["warehouse", "factory"]:
-        # Garage door dimensions
-        garage_width = 3.0  # 3m wide (standard garage door)
-        garage_height = min(3.5, height * 0.6)  # 3.5m tall, or 60% of building height (whichever is smaller)
-        # Garage door center Y position: building base is at -height/2, door bottom at base, door center at base + door_height/2
-        garage_y_position = -height / 2.0 + garage_height / 2.0  # Door center relative to building base
+    # Foundation height calculation (matches client-side: min(0.5, height * 0.1))
+    foundation_height = min(0.5, height * 0.1)
+    
+    # For warehouses: use truck bay doors (240cm x 300cm) with standard door beside each
+    # For factories: use standard garage doors (300cm x 200cm)
+    # For residential houses: use standard garage doors (300cm x 200cm)
+    if building_subtype == "warehouse":
+        # Truck bay door dimensions
+        garage_width = 2.4  # 240cm wide
+        garage_height = 3.0  # 300cm tall
+        # Truck bay door center Y position: door bottom at foundation top, door center at foundation top + door_height/2
+        # Building base is at -height/2, foundation top is at -height/2 + foundation_height
+        garage_y_position = -height / 2.0 + foundation_height + garage_height / 2.0  # Door center relative to building center
+        door_type = "truck_bay"  # Special type for warehouses
+    elif building_subtype == "factory":
+        # Standard garage door dimensions
+        garage_width = 3.0  # 300cm wide
+        garage_height = 2.0  # 200cm tall
+        # Garage door center Y position: door bottom at foundation top, door center at foundation top + door_height/2
+        garage_y_position = -height / 2.0 + foundation_height + garage_height / 2.0  # Door center relative to building center
+        door_type = "garage"
+    elif building_subtype == "house" and garage_count > 0:
+        # Standard garage door dimensions for residential
+        garage_width = 3.0  # 300cm wide
+        garage_height = 2.0  # 200cm tall
+        # Garage door center Y position: door bottom at foundation top, door center at foundation top + door_height/2
+        garage_y_position = -height / 2.0 + foundation_height + garage_height / 2.0  # Door center relative to building center
+        door_type = "garage"
+    else:
+        # Default case (shouldn't happen, but handle gracefully)
+        garage_width = 3.0
+        garage_height = 2.0
+        garage_y_position = -height / 2.0 + foundation_height + garage_height / 2.0
+        door_type = "garage"
+    
+    # Only proceed with garage/truck bay door generation if we have a valid building type
+    if building_subtype in ["warehouse", "factory"] or (building_subtype == "house" and garage_count > 0):
         
-        # Determine which facade(s) to place garage doors on
-        # At least one garage door, but can be on front, back, or both
-        # Prefer front/back facades (north/south sides)
-        facade_width = width  # Front and back have width as their dimension
+        # Function to check if garage door overlaps windows or doors with margin
+        def garage_door_overlaps(garage_x: float, facade: str, facade_width: float) -> bool:
+            """Check if garage door overlaps windows or doors with 30cm margin on both sides."""
+            garage_margin = 0.3  # 30cm margin on each side
+            garage_left = garage_x - garage_width / 2.0 - garage_margin
+            garage_right = garage_x + garage_width / 2.0 + garage_margin
+            garage_bottom = garage_y_position - garage_height / 2.0
+            garage_top = garage_y_position + garage_height / 2.0
+            
+            # Check windows
+            for window in windows:
+                if window.get("facade") != facade:
+                    continue
+                
+                win_pos = window["position"]
+                win_size = window["size"]
+                
+                if facade == "front" or facade == "back":
+                    win_x = win_pos[0]
+                elif facade == "left" or facade == "right":
+                    win_x = win_pos[1]
+                
+                win_left = win_x - win_size[0] / 2.0
+                win_right = win_x + win_size[0] / 2.0
+                win_center_y = win_pos[2]
+                win_bottom = win_center_y - win_size[1] / 2.0
+                win_top = win_center_y + win_size[1] / 2.0
+                
+                # Check if garage door (with margins) overlaps window
+                if not (garage_right < win_left or garage_left > win_right or
+                        garage_top < win_bottom or garage_bottom > win_top):
+                    return True
+            
+            # Check doors (regular doors already placed on this facade)
+            if facade in doors:
+                facade_door = doors[facade]
+                # Handle both single door dict and list of doors
+                door_list = facade_door if isinstance(facade_door, list) else [facade_door]
+                
+                for door in door_list:
+                    door_x = door.get("x", 0)
+                    door_width = door.get("width", 0.9)
+                    door_left = door_x - door_width / 2.0
+                    door_right = door_x + door_width / 2.0
+                    
+                    # Check horizontal overlap (with margin)
+                    if not (garage_right < door_left - garage_margin or garage_left > door_right + garage_margin):
+                        return True
+            
+            # Check already-placed garage doors on this facade (with margin between them)
+            for existing_garage in garage_doors:
+                if existing_garage.get("facade") != facade:
+                    continue
+                
+                existing_x = existing_garage.get("x", 0)
+                existing_left = existing_x - garage_width / 2.0
+                existing_right = existing_x + garage_width / 2.0
+                
+                # Check horizontal overlap (with margin)
+                if not (garage_right < existing_left - garage_margin or garage_left > existing_right + garage_margin):
+                    return True
+            
+            return False
         
-        # Decide: place on both sides, or just one?
-        # 60% chance for both sides, 40% chance for one side (front or back randomly)
-        place_on_both = rng.random() < 0.60
-        if place_on_both:
-            facades_to_use = ["front", "back"]
-            # When on both, use garage_count_per_facade for each
-            garage_count_for_side = garage_count_per_facade
-        else:
-            # Choose one facade (front or back)
-            facades_to_use = [rng.choice(["front", "back"])]
-            # When on one side, we can have more garage doors (1-4 for warehouses, 1-3 for factories)
-            if building_subtype == "warehouse":
-                garage_count_for_side = rng.randint(1, 4)
-            else:  # factory
-                garage_count_for_side = rng.randint(1, 3)
+        # Determine which facade(s) to place doors on
+        if building_subtype in ["warehouse", "factory"]:
+            # For warehouses and factories: prefer front/back facades (north/south sides)
+            facade_width = width  # Front and back have width as their dimension
+            
+            # Decide: place on both sides, or just one?
+            # 60% chance for both sides, 40% chance for one side (front or back randomly)
+            place_on_both = rng.random() < 0.60
+            if place_on_both:
+                facades_to_use = ["front", "back"]
+                # When on both, use garage_count_per_facade for each
+                garage_count_for_side = garage_count_per_facade
+            else:
+                # Choose one facade (front or back)
+                facades_to_use = [rng.choice(["front", "back"])]
+                # When on one side, we can have more doors (1-4 for warehouses, 1-3 for factories)
+                if building_subtype == "warehouse":
+                    garage_count_for_side = rng.randint(1, 4)
+                else:  # factory
+                    garage_count_for_side = rng.randint(1, 3)
+        elif building_subtype == "house":
+            # For houses: typically on front facade, sometimes back
+            facade_width = width  # Front and back have width as their dimension
+            if rng.random() < 0.80:
+                facades_to_use = ["front"]
+            else:
+                facades_to_use = [rng.choice(["front", "back"])]
+            garage_count_for_side = garage_count
         
         # Place garage doors on selected facade(s)
-        garage_spacing = 0.5  # 0.5m spacing between garage doors
+        garage_spacing = 0.6  # 60cm spacing between garage doors (30cm margin on each side)
         available_width = facade_width - (corner_trim_width * 2)  # Usable width
         
         for facade in facades_to_use:
@@ -1093,44 +1203,97 @@ def _generate_garage_doors(
                     # Position along facade, side-by-side
                     garage_offset = start_offset + i * (garage_width + garage_spacing)
                     
+                    # Check if this position overlaps windows or doors (with margin)
+                    if garage_door_overlaps(garage_offset, facade, facade_width):
+                        # Try to find a nearby position that doesn't overlap
+                        # Try positions slightly left and right
+                        found_position = False
+                        for offset_adjust in [0.1, 0.2, 0.3, -0.1, -0.2, -0.3]:
+                            test_offset = garage_offset + offset_adjust
+                            # Make sure it's still within bounds
+                            if abs(test_offset) + garage_width / 2.0 <= facade_width / 2.0 - corner_trim_width:
+                                if not garage_door_overlaps(test_offset, facade, facade_width):
+                                    garage_offset = test_offset
+                                    found_position = True
+                                    break
+                        
+                        # If still overlapping, skip this garage door
+                        if not found_position:
+                            continue
+                    
                     garage_door = {
                         "facade": facade,
                         "x": garage_offset,
                         "y": garage_y_position,
                         "width": garage_width,
                         "height": garage_height,
-                        "type": "garage",
+                        "type": door_type,  # "truck_bay" for warehouses, "garage" for others
                     }
                     garage_doors.append(garage_door)
                     
-                    # Add utility door right beside the garage door
-                    # Place it to the right of the garage door (or left if at edge)
-                    utility_spacing = 0.3  # 30cm spacing between garage door and utility door
-                    utility_door_x = garage_offset + garage_width / 2.0 + utility_spacing + utility_door_width / 2.0
-                    
-                    # Check if utility door fits on the right side, otherwise place on left
-                    facade_width_for_check = width  # Front and back use width
-                    max_x = facade_width_for_check / 2.0 - corner_trim_width - utility_door_width / 2.0
-                    
-                    if utility_door_x + utility_door_width / 2.0 > max_x:
-                        # Place on left side instead
-                        utility_door_x = garage_offset - garage_width / 2.0 - utility_spacing - utility_door_width / 2.0
-                        min_x = -facade_width_for_check / 2.0 + corner_trim_width + utility_door_width / 2.0
-                        # If it still doesn't fit on left, place it as close as possible
-                        if utility_door_x - utility_door_width / 2.0 < min_x:
-                            utility_door_x = min_x
-                    
-                    # Add utility door beside each garage door (one per garage door)
-                    # Only add if it doesn't overlap windows
-                    if not utility_door_overlaps_window(utility_door_x, utility_door_y_position, facade, facade_width_for_check):
+                    # For warehouses: add standard door 30cm to one side of truck bay (always together as unit)
+                    # For factories: add utility door beside garage door
+                    # For houses: no additional door beside garage door
+                    if building_subtype == "warehouse":
+                        # Truck bay + standard door unit: standard door 30cm to one side
+                        standard_door_width = 0.9  # 90cm standard door
+                        standard_door_height = 2.1  # 210cm standard door
+                        standard_door_y_position = -height / 2.0 + foundation_height + standard_door_height / 2.0  # At foundation top
+                        standard_door_spacing = 0.3  # 30cm spacing
+                        
+                        # Place standard door to the right of truck bay (or left if at edge)
+                        standard_door_x = garage_offset + garage_width / 2.0 + standard_door_spacing + standard_door_width / 2.0
+                        
+                        # Check if standard door fits on the right side, otherwise place on left
+                        facade_width_for_check = width  # Front and back use width
+                        max_x = facade_width_for_check / 2.0 - corner_trim_width - standard_door_width / 2.0
+                        
+                        if standard_door_x + standard_door_width / 2.0 > max_x:
+                            # Place on left side instead
+                            standard_door_x = garage_offset - garage_width / 2.0 - standard_door_spacing - standard_door_width / 2.0
+                            min_x = -facade_width_for_check / 2.0 + corner_trim_width + standard_door_width / 2.0
+                            # If it still doesn't fit on left, place it as close as possible
+                            if standard_door_x - standard_door_width / 2.0 < min_x:
+                                standard_door_x = min_x
+                        
+                        # Always add standard door beside truck bay (they're a unit)
                         utility_doors.append({
                             "facade": facade,
-                            "x": utility_door_x,
-                            "y": utility_door_y_position,
-                            "width": utility_door_width,
-                            "height": utility_door_height,
-                            "type": "utility",
+                            "x": standard_door_x,
+                            "y": standard_door_y_position,
+                            "width": standard_door_width,
+                            "height": standard_door_height,
+                            "type": "standard",  # Standard door for truck bay units
                         })
+                    elif building_subtype == "factory":
+                        # Factories: add utility door beside garage door (existing logic)
+                        utility_spacing = 0.3  # 30cm spacing between garage door and utility door
+                        utility_door_x = garage_offset + garage_width / 2.0 + utility_spacing + utility_door_width / 2.0
+                        
+                        # Check if utility door fits on the right side, otherwise place on left
+                        facade_width_for_check = width  # Front and back use width
+                        max_x = facade_width_for_check / 2.0 - corner_trim_width - utility_door_width / 2.0
+                        
+                        if utility_door_x + utility_door_width / 2.0 > max_x:
+                            # Place on left side instead
+                            utility_door_x = garage_offset - garage_width / 2.0 - utility_spacing - utility_door_width / 2.0
+                            min_x = -facade_width_for_check / 2.0 + corner_trim_width + utility_door_width / 2.0
+                            # If it still doesn't fit on left, place it as close as possible
+                            if utility_door_x - utility_door_width / 2.0 < min_x:
+                                utility_door_x = min_x
+                        
+                        # Add utility door beside each garage door (one per garage door)
+                        # Only add if it doesn't overlap windows
+                        if not utility_door_overlaps_window(utility_door_x, utility_door_y_position, facade, facade_width_for_check):
+                            utility_doors.append({
+                                "facade": facade,
+                                "x": utility_door_x,
+                                "y": utility_door_y_position,
+                                "width": utility_door_width,
+                                "height": utility_door_height,
+                                "type": "utility",
+                            })
+                    # For houses: no utility door beside garage door
             else:
                 # Not enough space for side-by-side, place them with minimal spacing
                 spacing = (available_width - (garage_width * garage_count)) / max(1, garage_count + 1) if garage_count > 1 else available_width / 2
@@ -1139,51 +1302,167 @@ def _generate_garage_doors(
                 for i in range(garage_count):
                     garage_offset = start_offset + i * (garage_width + spacing)
                     
+                    # Check if this position overlaps windows or doors (with margin)
+                    # Note: In minimal spacing case, we still try to respect margins
+                    if garage_door_overlaps(garage_offset, facade, facade_width):
+                        # Try to find a nearby position that doesn't overlap
+                        found_position = False
+                        for offset_adjust in [0.1, 0.2, 0.3, -0.1, -0.2, -0.3]:
+                            test_offset = garage_offset + offset_adjust
+                            # Make sure it's still within bounds
+                            if abs(test_offset) + garage_width / 2.0 <= facade_width / 2.0 - corner_trim_width:
+                                if not garage_door_overlaps(test_offset, facade, facade_width):
+                                    garage_offset = test_offset
+                                    found_position = True
+                                    break
+                        
+                        # If still overlapping, skip this garage door
+                        if not found_position:
+                            continue
+                    
                     garage_door = {
                         "facade": facade,
                         "x": garage_offset,
                         "y": garage_y_position,
                         "width": garage_width,
                         "height": garage_height,
-                        "type": "garage",
+                        "type": door_type,  # "truck_bay" for warehouses, "garage" for others
                     }
                     garage_doors.append(garage_door)
                     
-                    # Add utility door right beside the garage door
-                    # Place it to the right of the garage door (or left if at edge)
-                    utility_spacing = 0.3  # 30cm spacing between garage door and utility door
-                    utility_door_x = garage_offset + garage_width / 2.0 + utility_spacing + utility_door_width / 2.0
-                    
-                    # Check if utility door fits on the right side, otherwise place on left
-                    facade_width_for_check = width  # Front and back use width
-                    max_x = facade_width_for_check / 2.0 - corner_trim_width - utility_door_width / 2.0
-                    
-                    if utility_door_x + utility_door_width / 2.0 > max_x:
-                        # Place on left side instead
-                        utility_door_x = garage_offset - garage_width / 2.0 - utility_spacing - utility_door_width / 2.0
-                        min_x = -facade_width_for_check / 2.0 + corner_trim_width + utility_door_width / 2.0
-                        # If it still doesn't fit on left, place it as close as possible
-                        if utility_door_x - utility_door_width / 2.0 < min_x:
-                            utility_door_x = min_x
-                    
-                    # Add utility door beside each garage door (one per garage door)
-                    # Only add if it doesn't overlap windows
-                    if not utility_door_overlaps_window(utility_door_x, utility_door_y_position, facade, facade_width_for_check):
+                    # For warehouses: add standard door 30cm to one side of truck bay (always together as unit)
+                    # For factories: add utility door beside garage door
+                    # For houses: no additional door beside garage door
+                    if building_subtype == "warehouse":
+                        # Truck bay + standard door unit: standard door 30cm to one side
+                        standard_door_width = 0.9  # 90cm standard door
+                        standard_door_height = 2.1  # 210cm standard door
+                        standard_door_y_position = -height / 2.0 + foundation_height + standard_door_height / 2.0  # At foundation top
+                        standard_door_spacing = 0.3  # 30cm spacing
+                        
+                        # Place standard door to the right of truck bay (or left if at edge)
+                        standard_door_x = garage_offset + garage_width / 2.0 + standard_door_spacing + standard_door_width / 2.0
+                        
+                        # Check if standard door fits on the right side, otherwise place on left
+                        facade_width_for_check = width  # Front and back use width
+                        max_x = facade_width_for_check / 2.0 - corner_trim_width - standard_door_width / 2.0
+                        
+                        if standard_door_x + standard_door_width / 2.0 > max_x:
+                            # Place on left side instead
+                            standard_door_x = garage_offset - garage_width / 2.0 - standard_door_spacing - standard_door_width / 2.0
+                            min_x = -facade_width_for_check / 2.0 + corner_trim_width + standard_door_width / 2.0
+                            # If it still doesn't fit on left, place it as close as possible
+                            if standard_door_x - standard_door_width / 2.0 < min_x:
+                                standard_door_x = min_x
+                        
+                        # Always add standard door beside truck bay (they're a unit)
                         utility_doors.append({
                             "facade": facade,
-                            "x": utility_door_x,
-                            "y": utility_door_y_position,
-                            "width": utility_door_width,
-                            "height": utility_door_height,
-                            "type": "utility",
+                            "x": standard_door_x,
+                            "y": standard_door_y_position,
+                            "width": standard_door_width,
+                            "height": standard_door_height,
+                            "type": "standard",  # Standard door for truck bay units
                         })
+                    elif building_subtype == "factory":
+                        # Factories: add utility door beside garage door
+                        utility_spacing = 0.3  # 30cm spacing between garage door and utility door
+                        utility_door_x = garage_offset + garage_width / 2.0 + utility_spacing + utility_door_width / 2.0
+                        
+                        # Check if utility door fits on the right side, otherwise place on left
+                        facade_width_for_check = width  # Front and back use width
+                        max_x = facade_width_for_check / 2.0 - corner_trim_width - utility_door_width / 2.0
+                        
+                        if utility_door_x + utility_door_width / 2.0 > max_x:
+                            # Place on left side instead
+                            utility_door_x = garage_offset - garage_width / 2.0 - utility_spacing - utility_door_width / 2.0
+                            min_x = -facade_width_for_check / 2.0 + corner_trim_width + utility_door_width / 2.0
+                            # If it still doesn't fit on left, place it as close as possible
+                            if utility_door_x - utility_door_width / 2.0 < min_x:
+                                utility_door_x = min_x
+                        
+                        # Add utility door beside each garage door (one per garage door)
+                        # Only add if it doesn't overlap windows
+                        if not utility_door_overlaps_window(utility_door_x, utility_door_y_position, facade, facade_width_for_check):
+                            utility_doors.append({
+                                "facade": facade,
+                                "x": utility_door_x,
+                                "y": utility_door_y_position,
+                                "width": utility_door_width,
+                                "height": utility_door_height,
+                                "type": "utility",
+                            })
+                    # For houses: no utility door beside garage door
     elif garage_count > 0:
-        # For other building types (barn, agri_industrial), use existing logic
-        # Garage door dimensions
-        garage_width = 3.0  # 3m wide (standard garage door)
-        garage_height = min(3.5, height * 0.6)  # 3.5m tall, or 60% of building height (whichever is smaller)
+        # For other building types (barn, agri_industrial), use standardized dimensions
+        # Garage door dimensions (standardized)
+        garage_width = 3.0  # 300cm wide
+        garage_height = 2.0  # 200cm tall
         # Garage door center Y position: building base is at -height/2, door bottom at base, door center at base + door_height/2
         garage_y_position = -height / 2.0 + garage_height / 2.0  # Door center relative to building base
+        
+        # Function to check if garage door overlaps windows or doors with margin
+        def garage_door_overlaps_simple(garage_x: float, facade: str, facade_width: float) -> bool:
+            """Check if garage door overlaps windows or doors with 30cm margin on both sides."""
+            garage_margin = 0.3  # 30cm margin on each side
+            garage_left = garage_x - garage_width / 2.0 - garage_margin
+            garage_right = garage_x + garage_width / 2.0 + garage_margin
+            garage_bottom = garage_y_position - garage_height / 2.0
+            garage_top = garage_y_position + garage_height / 2.0
+            
+            # Check windows
+            for window in windows:
+                if window.get("facade") != facade:
+                    continue
+                
+                win_pos = window["position"]
+                win_size = window["size"]
+                
+                if facade == "front" or facade == "back":
+                    win_x = win_pos[0]
+                elif facade == "left" or facade == "right":
+                    win_x = win_pos[1]
+                
+                win_left = win_x - win_size[0] / 2.0
+                win_right = win_x + win_size[0] / 2.0
+                win_center_y = win_pos[2]
+                win_bottom = win_center_y - win_size[1] / 2.0
+                win_top = win_center_y + win_size[1] / 2.0
+                
+                # Check if garage door (with margins) overlaps window
+                if not (garage_right < win_left or garage_left > win_right or
+                        garage_top < win_bottom or garage_bottom > win_top):
+                    return True
+            
+            # Check doors (regular doors already placed on this facade)
+            if facade in doors:
+                facade_door = doors[facade]
+                door_list = facade_door if isinstance(facade_door, list) else [facade_door]
+                
+                for door in door_list:
+                    door_x = door.get("x", 0)
+                    door_width = door.get("width", 0.9)
+                    door_left = door_x - door_width / 2.0
+                    door_right = door_x + door_width / 2.0
+                    
+                    # Check horizontal overlap (with margin)
+                    if not (garage_right < door_left - garage_margin or garage_left > door_right + garage_margin):
+                        return True
+            
+            # Check already-placed garage doors on this facade
+            for existing_garage in garage_doors:
+                if existing_garage.get("facade") != facade:
+                    continue
+                
+                existing_x = existing_garage.get("x", 0)
+                existing_left = existing_x - garage_width / 2.0
+                existing_right = existing_x + garage_width / 2.0
+                
+                # Check horizontal overlap (with margin)
+                if not (garage_right < existing_left - garage_margin or garage_left > existing_right + garage_margin):
+                    return True
+            
+            return False
         
         # Determine which facade(s) to place garage doors on
         # For barns and agri-industrial, typically on the front or back (larger facades)
@@ -1197,7 +1476,7 @@ def _generate_garage_doors(
         available_width = facade_width - (corner_trim_width * 2)  # Usable width
         
         # Total width needed for all garage doors with spacing
-        garage_spacing = 0.5  # 0.5m spacing between garage doors
+        garage_spacing = 0.6  # 60cm spacing between garage doors (30cm margin on each side)
         total_garage_width = (garage_width * garage_count) + (garage_spacing * (garage_count - 1))
         
         # Check if we have enough space
@@ -1208,6 +1487,23 @@ def _generate_garage_doors(
             for i in range(garage_count):
                 # Position along facade, side-by-side
                 garage_offset = start_offset + i * (garage_width + garage_spacing)
+                
+                # Check if this position overlaps windows or doors (with margin)
+                if garage_door_overlaps_simple(garage_offset, facade, facade_width):
+                    # Try to find a nearby position that doesn't overlap
+                    found_position = False
+                    for offset_adjust in [0.1, 0.2, 0.3, -0.1, -0.2, -0.3]:
+                        test_offset = garage_offset + offset_adjust
+                        # Make sure it's still within bounds
+                        if abs(test_offset) + garage_width / 2.0 <= facade_width / 2.0 - corner_trim_width:
+                            if not garage_door_overlaps_simple(test_offset, facade, facade_width):
+                                garage_offset = test_offset
+                                found_position = True
+                                break
+                    
+                    # If still overlapping, skip this garage door
+                    if not found_position:
+                        continue
                 
                 garage_door = {
                     "facade": facade,
@@ -1250,6 +1546,23 @@ def _generate_garage_doors(
             
             for i in range(garage_count):
                 garage_offset = start_offset + i * (garage_width + spacing)
+                
+                # Check if this position overlaps windows or doors (with margin)
+                if garage_door_overlaps_simple(garage_offset, facade, facade_width):
+                    # Try to find a nearby position that doesn't overlap
+                    found_position = False
+                    for offset_adjust in [0.1, 0.2, 0.3, -0.1, -0.2, -0.3]:
+                        test_offset = garage_offset + offset_adjust
+                        # Make sure it's still within bounds
+                        if abs(test_offset) + garage_width / 2.0 <= facade_width / 2.0 - corner_trim_width:
+                            if not garage_door_overlaps_simple(test_offset, facade, facade_width):
+                                garage_offset = test_offset
+                                found_position = True
+                                break
+                    
+                    # If still overlapping, skip this garage door
+                    if not found_position:
+                        continue
                 
                 garage_door = {
                     "facade": facade,

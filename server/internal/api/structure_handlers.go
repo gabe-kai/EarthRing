@@ -342,9 +342,9 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":              "Procedural structures deleted and chunks reset",
-		"structures_deleted":   count,
-		"chunks_deleted":       chunksDeleted,
+		"message":                "Procedural structures deleted and chunks reset",
+		"structures_deleted":     count,
+		"chunks_deleted":         chunksDeleted,
 		"regeneration_triggered": true,
 	})
 }

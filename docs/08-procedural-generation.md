@@ -1637,6 +1637,10 @@ The procedural generation system has extensive test coverage for building genera
 ### Building Details
 - ✅ **Enhanced**: Corner trim width is now variable between 10cm and 50cm per building (randomly generated per building)
 - ✅ **Improved**: Window opacity increased to 65% with slight reflectivity (1.2x brightness multiplier) for more realistic glass appearance
+- ✅ **Fixed**: Foundations now properly extend from ground level (0) - walls render from ground to total height (foundation + building)
+- ✅ **Fixed**: Door vertical positioning - all doors (standard, garage, truck bay, utility) now start at the top of foundations instead of overlapping them
+- ✅ **Enhanced**: Truck bay door type preservation - door type (`garage`, `truck_bay`) is preserved when extracting door information for facade rendering
+- ✅ **Enhanced**: Wall height calculations - `totalWallHeight` now correctly includes foundation height (foundation + building height) for proper positioning
 
 ### Grid Overlay
 - ✅ **Updated**: Minor grid lines changed from white (0xffffff) back to medium gray (0x9c9c9c) to reduce visual contrast

@@ -610,10 +610,10 @@ export class StructureManager {
         }
       }
       
-      // Add all garage doors on this facade
+      // Add all garage/truck bay doors on this facade
       facadeGarageDoors.forEach(gd => {
         doorArray.push({
-          type: 'garage',
+          type: gd.type || 'garage',  // Preserve door type (garage, truck_bay, etc.)
           x: gd.x || 0,
           y: gd.y || 0,
           width: gd.width || 3.0,
@@ -624,14 +624,17 @@ export class StructureManager {
       return doorArray.length > 0 ? doorArray : null;
     };
     
+    // Wall height includes foundation - extends from ground (0) to foundationHeight + buildingHeight
+    const totalWallHeight = foundationHeight + buildingHeight;
+    
     // Front wall (positive Y) - with shader-based windows, doors, and trim
     const frontDoor = getDoorInfoForFacade('front');
     this.createWallWithWindows(
       structureGroup, 
       width, 
-      buildingHeight, 
+      totalWallHeight, // Wall extends from ground to top
       wallThickness,
-      [0, foundationHeight + buildingHeight / 2, depth / 2], // Position
+      [0, totalWallHeight / 2, depth / 2], // Position at center of total height (starts at ground)
       [0, 0, 0], // Rotation
       windows.filter(w => w.facade === 'front'),
       { color: wallColor, roughness: wallRoughness, metalness: wallMetalness },
@@ -650,9 +653,9 @@ export class StructureManager {
     this.createWallWithWindows(
       structureGroup,
       width,
-      buildingHeight,
+      totalWallHeight, // Wall extends from ground to top
       wallThickness,
-      [0, foundationHeight + buildingHeight / 2, -depth / 2],
+      [0, totalWallHeight / 2, -depth / 2],
       [0, Math.PI, 0],
       windows.filter(w => w.facade === 'back'),
       { color: wallColor, roughness: wallRoughness, metalness: wallMetalness },
@@ -671,9 +674,9 @@ export class StructureManager {
     this.createWallWithWindows(
       structureGroup,
       depth,
-      buildingHeight,
+      totalWallHeight, // Wall extends from ground to top
       wallThickness,
-      [-width / 2, foundationHeight + buildingHeight / 2, 0],
+      [-width / 2, totalWallHeight / 2, 0],
       [0, Math.PI / 2, 0],
       windows.filter(w => w.facade === 'left'),
       { color: wallColor, roughness: wallRoughness, metalness: wallMetalness },
@@ -692,9 +695,9 @@ export class StructureManager {
     this.createWallWithWindows(
       structureGroup,
       depth,
-      buildingHeight,
+      totalWallHeight, // Wall extends from ground to top
       wallThickness,
-      [width / 2, foundationHeight + buildingHeight / 2, 0],
+      [width / 2, totalWallHeight / 2, 0],
       [0, -Math.PI / 2, 0],
       windows.filter(w => w.facade === 'right'),
       { color: wallColor, roughness: wallRoughness, metalness: wallMetalness },
@@ -723,7 +726,8 @@ export class StructureManager {
     );
     const roofGeometry = new THREE.BoxGeometry(width + wallThickness * 2, 0.1, depth + wallThickness * 2);
     const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
-    roofMesh.position.y = foundationHeight + buildingHeight;
+    // Roof positioned at top of total wall height (foundation + building)
+    roofMesh.position.y = totalWallHeight;
     roofMesh.castShadow = false; // Disabled for performance
     roofMesh.receiveShadow = false; // Disabled for performance
     structureGroup.add(roofMesh);
@@ -778,7 +782,12 @@ export class StructureManager {
     const windowData = new Float32Array(MAX_WINDOWS * 4); // 4 floats per window
     const windowCount = wallWindows.length;
     
-    // Calculate building center Y for window positioning
+    // Wall extends from 0 (ground) to totalWallHeight (foundationHeight + buildingHeight)
+    const totalWallHeight = foundationHeight + buildingHeight;
+    const wallCenterY = totalWallHeight / 2;
+    const foundationHeightNormalized = foundationHeight / totalWallHeight; // Calculate early for door positioning
+    
+    // Calculate building center Y for window positioning (windows are in the building portion, above foundation)
     const buildingCenterY = foundationHeight + buildingHeight / 2;
     
     wallWindows.forEach((window, index) => {
@@ -793,15 +802,12 @@ export class StructureManager {
       
       // winZ is vertical offset from building center -> convert to wall Y
       const windowYWorld = buildingCenterY + winZ; // Absolute Y position
-      // Wall extends from foundationHeight to foundationHeight + buildingHeight
-      // Normalize to -0.5 to 0.5
-      const wallBaseY = foundationHeight;
-      const wallTopY = foundationHeight + buildingHeight;
-      const normalizedY = ((windowYWorld - (wallBaseY + wallTopY) / 2) / buildingHeight);
+      // Wall now extends from 0 to totalWallHeight, normalize to -0.5 to 0.5 relative to wall center
+      const normalizedY = ((windowYWorld - wallCenterY) / totalWallHeight);
       
       // Normalize window size
       const normalizedWidth = winWidth / width;
-      const normalizedHeight = winHeight / buildingHeight;
+      const normalizedHeight = winHeight / totalWallHeight;
       
       const idx = index * 4;
       windowData[idx] = normalizedX;
@@ -819,26 +825,84 @@ export class StructureManager {
     let doorNormalizedHeight = 0.0;
     let isGarageDoor = false;
     
+    // Support for second door (for truck bay + standard door pairs)
+    let hasDoor2 = false;
+    let door2NormalizedX = -999.0;
+    let door2NormalizedY = 0.0;
+    let door2NormalizedWidth = 0.0;
+    let door2NormalizedHeight = 0.0;
+    let isGarageDoor2 = false;
+    
     if (doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
-      // For now, use the first door (can be enhanced later to support multiple doors in shader)
-      // Prefer garage doors over regular doors if both exist on the same facade
-      const doorToUse = doorInfo.find(d => d.type === 'garage') || doorInfo[0];
+      // Find truck bay door and standard door if both exist (warehouse case)
+      const truckBayDoor = doorInfo.find(d => d.type === 'truck_bay');
+      const standardDoor = doorInfo.find(d => d.type === 'standard' || d.type === 'utility');
       
-      if (!doorToUse || typeof doorToUse.x !== 'number' || typeof doorToUse.y !== 'number' || 
-          typeof doorToUse.width !== 'number' || typeof doorToUse.height !== 'number') {
-        console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorToUse);
-      } else {
+      if (truckBayDoor && standardDoor) {
+        // Warehouse case: render both truck bay (as door1) and standard door (as door2)
+        // Door 1: Truck bay
+        const doorYWorld1 = wallCenterY + truckBayDoor.y;
+        doorNormalizedX = truckBayDoor.x / width;
+        doorNormalizedY = (doorYWorld1 - wallCenterY) / totalWallHeight;
+        doorNormalizedWidth = truckBayDoor.width / width;
+        doorNormalizedHeight = truckBayDoor.height / totalWallHeight;
+        isGarageDoor = true;
         hasDoor = true;
-        isGarageDoor = doorToUse.type === 'garage';
-        // Normalize door position and size to wall coordinates
-        // doorToUse.x is offset from facade center (in meters)
-        // doorToUse.y is vertical position relative to building center (building extends -height/2 to +height/2, base is at -height/2)
-        doorNormalizedX = doorToUse.x / width;  // Normalize to -0.5 to 0.5 range
-        // Convert doorToUse.y (building-center relative) to normalized coordinates (0 = center, -0.5 = bottom, +0.5 = top)
-        // doorToUse.y is already relative to building center, so normalize by buildingHeight
-        doorNormalizedY = doorToUse.y / buildingHeight;  // Normalize to -0.5 to 0.5 range (0 = center)
-        doorNormalizedWidth = doorToUse.width / width;
-        doorNormalizedHeight = doorToUse.height / buildingHeight;
+        
+        // Door 2: Standard door
+        const doorYWorld2 = wallCenterY + standardDoor.y;
+        door2NormalizedX = standardDoor.x / width;
+        door2NormalizedY = (doorYWorld2 - wallCenterY) / totalWallHeight;
+        door2NormalizedWidth = standardDoor.width / width;
+        door2NormalizedHeight = standardDoor.height / totalWallHeight;
+        isGarageDoor2 = false;
+        hasDoor2 = true;
+        
+        // Ensure door2 bottom doesn't overlap foundation
+        const foundationTopNormalized = -0.5 + foundationHeightNormalized;
+        const door2BottomNormalized = door2NormalizedY - door2NormalizedHeight / 2;
+        if (door2BottomNormalized < foundationTopNormalized) {
+          door2NormalizedY = foundationTopNormalized + door2NormalizedHeight / 2;
+        }
+        
+        // Also ensure door1 (truck bay) bottom doesn't overlap foundation
+        const door1BottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
+        if (door1BottomNormalized < foundationTopNormalized) {
+          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
+        }
+      } else {
+        // Single door case: use the appropriate door
+        let doorToUse;
+        if (truckBayDoor) {
+          doorToUse = truckBayDoor;
+        } else if (standardDoor) {
+          doorToUse = standardDoor;
+        } else {
+          // Fallback: prefer garage doors, or just use the first door
+          doorToUse = doorInfo.find(d => d.type === 'garage') || doorInfo[0];
+        }
+        
+        if (!doorToUse || typeof doorToUse.x !== 'number' || typeof doorToUse.y !== 'number' || 
+            typeof doorToUse.width !== 'number' || typeof doorToUse.height !== 'number') {
+          console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorToUse);
+        } else {
+          hasDoor = true;
+          isGarageDoor = doorToUse.type === 'garage' || doorToUse.type === 'truck_bay';
+          // Normalize door position and size to wall coordinates
+          doorNormalizedX = doorToUse.x / width;  // Normalize to -0.5 to 0.5 range
+          const doorYWorld = wallCenterY + doorToUse.y;
+          doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;  // Normalize to wall coordinates
+          doorNormalizedWidth = doorToUse.width / width;
+          doorNormalizedHeight = doorToUse.height / totalWallHeight;
+          
+          // Ensure door bottom doesn't overlap foundation
+          const foundationTopNormalized = -0.5 + foundationHeightNormalized;
+          const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
+          if (doorBottomNormalized < foundationTopNormalized) {
+            // Shift door up so bottom aligns with foundation top
+            doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
+          }
+        }
       }
     } else if (doorInfo && !Array.isArray(doorInfo)) {
       // Legacy support: single door object (backwards compatibility)
@@ -847,23 +911,37 @@ export class StructureManager {
         console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorInfo);
       } else {
         hasDoor = true;
-        isGarageDoor = doorInfo.type === 'garage';
+        isGarageDoor = doorInfo.type === 'garage' || doorInfo.type === 'truck_bay';
         doorNormalizedX = doorInfo.x / width;
-        doorNormalizedY = doorInfo.y / buildingHeight;
+        // Convert door Y from building-center relative to wall-relative
+        // doorInfo.y is relative to true building center (at wallCenterY), so just add it directly
+        const doorYWorld = wallCenterY + doorInfo.y;
+        doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;
         doorNormalizedWidth = doorInfo.width / width;
-        doorNormalizedHeight = doorInfo.height / buildingHeight;
+        doorNormalizedHeight = doorInfo.height / totalWallHeight;
+        
+        // Ensure door bottom doesn't overlap foundation
+        // Foundation top in normalized coordinates: -0.5 + foundationHeightNormalized
+        // Door bottom in normalized coordinates: doorNormalizedY - doorNormalizedHeight / 2
+        const foundationTopNormalized = -0.5 + foundationHeightNormalized;
+        const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
+        if (doorBottomNormalized < foundationTopNormalized) {
+          // Shift door up so bottom aligns with foundation top
+          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
+        }
       }
     }
     
     // Create shader material with window, door, trim, and foundation rendering
     // Normalize corner trim width to ratio of wall width for shader
     const cornerTrimWidthNormalized = cornerTrimWidth / width;
+    // foundationHeightNormalized already calculated above for door positioning
     const wallShaderMaterial = this.createWallShaderMaterial(
       baseMaterial, 
       windowData, 
       windowCount, 
       width, 
-      buildingHeight,
+      totalWallHeight, // Pass total wall height (includes foundation)
       hasDoor,
       doorNormalizedX,
       doorNormalizedY,
@@ -872,7 +950,14 @@ export class StructureManager {
       isGarageDoor,
       buildingSubtype,
       colors,
-      cornerTrimWidthNormalized
+      cornerTrimWidthNormalized,
+      foundationHeightNormalized,
+      hasDoor2,
+      door2NormalizedX,
+      door2NormalizedY,
+      door2NormalizedWidth,
+      door2NormalizedHeight,
+      isGarageDoor2
     );
     
     // Create wall mesh with shader material
@@ -880,6 +965,7 @@ export class StructureManager {
     const mesh = new THREE.Mesh(geometry, wallShaderMaterial);
     mesh.position.set(...position);
     mesh.rotation.set(...rotation);
+    
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);
@@ -900,7 +986,7 @@ export class StructureManager {
    * @param {string} buildingSubtype - Building subtype for material variation
    * @returns {THREE.ShaderMaterial} Shader material with window, door, trim, and foundation rendering
    */
-  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, isGarageDoor = false, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02) {
+  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, isGarageDoor = false, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05, hasDoor2 = false, door2X = 0, door2Y = 0, door2Width = 0, door2Height = 0, isGarageDoor2 = false) {
     // Helper function to convert hex color to RGB vec3
     const hexToRgb = (hex) => {
       if (!hex || typeof hex === 'number') return null;
@@ -946,6 +1032,12 @@ export class StructureManager {
       uniform float doorY;
       uniform float doorWidth;
       uniform float doorHeight;
+      uniform bool hasDoor2;
+      uniform bool isGarageDoor2;
+      uniform float door2X;
+      uniform float door2Y;
+      uniform float door2Width;
+      uniform float door2Height;
       
       varying vec2 vUv;
       
@@ -955,11 +1047,10 @@ export class StructureManager {
       uniform vec3 foundationColorUniform;
       uniform vec3 trimColorUniform;
       uniform float cornerTrimWidthUniform;
+      uniform float foundationHeightNormalizedUniform;
       
       // Frame/trim thickness relative to wall size
       const float frameThickness = 0.015; // 1.5% of window/door size
-      const float foundationHeight = 0.05; // Foundation strip height (5% of wall height)
-      const float foundationOffset = 0.02; // Foundation visual offset from bottom
       
       // Sample window data from texture
       // Each window takes one pixel: R=x, G=y, B=width, A=height (normalized coordinates)
@@ -1054,6 +1145,44 @@ export class StructureManager {
         return vec4(0.0); // Not a door
       }
       
+      // Check if point is in second door area
+      vec4 checkDoor2(vec2 uv) {
+        if (!hasDoor2 || door2Width <= 0.0 || door2Height <= 0.0) {
+          return vec4(0.0);
+        }
+        
+        vec2 normalizedPos = (uv - 0.5);
+        
+        // Door bounds
+        vec2 doorMin = vec2(door2X - door2Width * 0.5, door2Y - door2Height * 0.5);
+        vec2 doorMax = vec2(door2X + door2Width * 0.5, door2Y + door2Height * 0.5);
+        
+        if (normalizedPos.x >= doorMin.x && normalizedPos.x <= doorMax.x &&
+            normalizedPos.y >= doorMin.y && normalizedPos.y <= doorMax.y) {
+          
+          // Calculate distance from door edge
+          vec2 distFromEdge = min(normalizedPos - doorMin, doorMax - normalizedPos);
+          float distX = distFromEdge.x / door2Width;
+          float distY = distFromEdge.y / door2Height;
+          float minDist = min(distX, distY);
+          
+          // Check if in frame area
+          if (minDist < frameThickness) {
+            return vec4(frameColorUniform, 1.0); // Door frame
+          } else {
+            // Garage doors are darker/more metallic than regular doors
+            if (isGarageDoor2) {
+              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
+              return vec4(garageColor, 1.0); // Garage door surface
+            } else {
+              return vec4(doorColorUniform, 1.0); // Regular door surface
+            }
+          }
+        }
+        
+        return vec4(0.0); // Not a door
+      }
+      
       // Check for corner trim (vertical edges)
       vec3 checkCornerTrim(vec2 uv) {
         vec2 normalizedPos = (uv - 0.5);
@@ -1074,9 +1203,9 @@ export class StructureManager {
       vec3 checkFoundation(vec2 uv) {
         vec2 normalizedPos = (uv - 0.5);
         
-        // Foundation at bottom of wall (slightly offset from very bottom)
-        float foundationBottom = -0.5 + foundationOffset;
-        float foundationTop = foundationBottom + foundationHeight;
+        // Foundation at very bottom of wall (no offset, starts at ground level)
+        float foundationBottom = -0.5;
+        float foundationTop = -0.5 + foundationHeightNormalizedUniform;
         
         if (normalizedPos.y >= foundationBottom && normalizedPos.y <= foundationTop) {
           return foundationColorUniform;
@@ -1110,8 +1239,13 @@ export class StructureManager {
               alpha = 1.0;
             }
           } else {
-            // Check for door (only if not a window)
+            // Check for doors (only if not a window)
+            // Check first door, then second door if first doesn't match
             vec4 doorResult = checkDoor(vUv);
+            if (doorResult.a == 0.0 && hasDoor2) {
+              // If first door didn't match, check second door
+              doorResult = checkDoor2(vUv);
+            }
             if (doorResult.a > 0.0) {
               color = doorResult.rgb;
               alpha = doorResult.a;
@@ -1175,12 +1309,19 @@ export class StructureManager {
         doorY: { value: doorY },
         doorWidth: { value: doorWidth },
         doorHeight: { value: doorHeight },
+        hasDoor2: { value: hasDoor2 },
+        isGarageDoor2: { value: isGarageDoor2 },
+        door2X: { value: door2X },
+        door2Y: { value: door2Y },
+        door2Width: { value: door2Width },
+        door2Height: { value: door2Height },
         frameColorUniform: { value: new THREE.Vector3(frameColorValue.r, frameColorValue.g, frameColorValue.b) },
         glassColorUniform: { value: new THREE.Vector3(glassColorValue.r, glassColorValue.g, glassColorValue.b) },
         doorColorUniform: { value: new THREE.Vector3(doorColorValue.r, doorColorValue.g, doorColorValue.b) },
         foundationColorUniform: { value: new THREE.Vector3(foundationColorValue.r, foundationColorValue.g, foundationColorValue.b) },
         trimColorUniform: { value: new THREE.Vector3(trimColorValue.r, trimColorValue.g, trimColorValue.b) },
         cornerTrimWidthUniform: { value: cornerTrimWidthNormalized },
+        foundationHeightNormalizedUniform: { value: foundationHeightNormalized },
       },
       transparent: windowCount > 0, // Transparent if windows present (for glass)
       side: THREE.FrontSide,
