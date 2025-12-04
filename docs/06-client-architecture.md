@@ -554,6 +554,8 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 - Base opacity controls so zones stay fully visible
 - Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
 - Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
+- **Rendering depth**: Uses `depthTest: true` with `polygonOffset` (factor: 1, units: 1) to prevent z-fighting while ensuring structures render on top
+- Grid positioned at `floorHeight + 0.0005` to appear below zones and structures
 - **TODO: Platform edge clipping** - The grid currently shows over the edge of platforms where they flare. Previous attempts to implement platform-aware clipping caused severe performance issues (FPS dropped to <1) and were reverted. A future implementation should clip grid lines to follow the curved edges of platform flares, but must do so without impacting performance.
 - Visibility control via `setVisible()` method
 
@@ -630,8 +632,11 @@ gridOverlay.setVisible(false); // Hide grid
    - Each zone group contains:
      - `THREE.Mesh` with `THREE.ShapeGeometry` for the translucent fill
      - `THREE.LineLoop` with `THREE.BufferGeometry` for the colored outline
-   - Zones use `renderOrder = 5` to appear above the grid (`renderOrder = 1`)
-   - Materials use `depthWrite: false` and `depthTest: false` to prevent z-fighting with floor geometry
+   - Zones use `renderOrder = 1` for fills and `renderOrder = 2` for outlines to appear below structures but above the grid
+   - Materials use `depthWrite: false`, `depthTest: true`, and `polygonOffset` to prevent z-fighting with floor geometry and ensure structures render on top
+   - Fill material: `polygonOffsetFactor: 2`, `polygonOffsetUnits: 2`
+   - Outline material: `polygonOffsetFactor: 1`, `polygonOffsetUnits: 1`
+   - Zones positioned at `floorHeight + 0.001` (fills) and `floorHeight + 0.002` (outlines) to appear slightly above floor plane
    - **Shape Coordinate System**: Fill shapes (ShapeGeometry) always negate `worldPos.z` for shape Y coordinates to ensure correct face orientation after -90° X rotation, regardless of whether the zone is on the Y+ or Y- side of the ring
 
 2. **Ring Wrapping:**
@@ -710,6 +715,8 @@ gridOverlay.setVisible(false); // Hide grid
    - Bold Y=0 axis and 20m multiples are recomputed world-relative so they remain consistent even when the camera moves
    - Zones are NOT part of the grid overlay (they're separate meshes)
    - This allows zones to remain fully visible while the grid fades and thins based on distance
+   - Grid uses `depthTest: true` with `polygonOffset` (factor: 1, units: 1) to prevent z-fighting while ensuring structures render on top
+   - Grid positioned at `floorHeight + 0.0005` to appear slightly above floor plane but below zones
 
 **Troubleshooting:**
 

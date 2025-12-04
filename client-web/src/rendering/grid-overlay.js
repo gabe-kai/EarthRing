@@ -193,7 +193,10 @@ export class GridOverlay {
         `,
         transparent: true,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
         side: THREE.DoubleSide, // Render both sides of quads
       });
     };
