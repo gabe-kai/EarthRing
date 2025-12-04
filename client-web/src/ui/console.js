@@ -5,7 +5,7 @@
 
 let consoleContainer = null;
 let isVisible = false;
-let commandHistory = [];
+const commandHistory = [];
 let historyIndex = -1;
 let currentInput = '';
 

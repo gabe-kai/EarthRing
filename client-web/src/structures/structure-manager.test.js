@@ -414,5 +414,397 @@ describe('StructureManager', () => {
       expect(addedMesh.userData.structure.zone_id).toBe(42);
     });
   });
+
+  describe('mergeBoxGeometries', () => {
+    it('merges multiple box geometries into single BufferGeometry', () => {
+      const geometries = [
+        {
+          geometry: new THREE.BoxGeometry(1, 1, 1),
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+        },
+        {
+          geometry: new THREE.BoxGeometry(1, 1, 1),
+          position: [2, 0, 0],
+          rotation: [0, 0, 0],
+        },
+      ];
+
+      const merged = structureManager.mergeBoxGeometries(geometries);
+
+      expect(merged).toBeInstanceOf(THREE.BufferGeometry);
+      // BoxGeometry has 24 vertices (6 faces × 4 vertices each for proper UV mapping)
+      // So 2 boxes = 48 vertices
+      expect(merged.attributes.position.count).toBe(48);
+      // Each box has 36 indices (6 faces × 2 triangles × 3 indices), so merged should have 72
+      expect(merged.index.count).toBe(72);
+    });
+
+    it('applies transformations correctly when merging', () => {
+      const geometries = [
+        {
+          geometry: new THREE.BoxGeometry(1, 1, 1),
+          position: [5, 10, 15],
+          rotation: [0, Math.PI / 2, 0],
+        },
+      ];
+
+      const merged = structureManager.mergeBoxGeometries(geometries);
+
+      // Verify geometry was transformed (positions should be offset)
+      const positions = merged.attributes.position;
+      // At least one vertex should be near the translated position
+      let foundTranslatedVertex = false;
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i);
+        const y = positions.getY(i);
+        const z = positions.getZ(i);
+        // After rotation and translation, vertices should be near [5, 10, 15]
+        if (Math.abs(x - 5) < 1 && Math.abs(y - 10) < 1 && Math.abs(z - 15) < 1) {
+          foundTranslatedVertex = true;
+          break;
+        }
+      }
+      expect(foundTranslatedVertex).toBe(true);
+    });
+
+    it('preserves normals and UVs when merging', () => {
+      const geometries = [
+        {
+          geometry: new THREE.BoxGeometry(1, 1, 1),
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+        },
+      ];
+
+      const merged = structureManager.mergeBoxGeometries(geometries);
+
+      expect(merged.attributes.normal).toBeDefined();
+      expect(merged.attributes.uv).toBeDefined();
+      expect(merged.attributes.normal.count).toBe(merged.attributes.position.count);
+      expect(merged.attributes.uv.count).toBe(merged.attributes.position.count);
+    });
+
+    it('handles empty geometry array gracefully', () => {
+      expect(() => {
+        structureManager.mergeBoxGeometries([]);
+      }).not.toThrow();
+    });
+  });
+
+  describe('createWallGeometryDefinition', () => {
+    it('returns geometry and material definition for wall', () => {
+      const width = 10;
+      const height = 8;
+      const thickness = 0.2;
+      const position = [0, 4, 5];
+      const rotation = [0, 0, 0];
+      const windows = [];
+      const baseMaterial = { color: 0xaaaaaa, roughness: 0.7, metalness: 0.2 };
+      const dimensions = { width, depth: 10, height };
+      const foundationHeight = 0.5;
+      const buildingHeight = 7.5;
+
+      const result = structureManager.createWallGeometryDefinition(
+        width,
+        height,
+        thickness,
+        position,
+        rotation,
+        windows,
+        baseMaterial,
+        dimensions,
+        foundationHeight,
+        buildingHeight,
+        'warehouse',
+        'front',
+        null,
+        null,
+        0.02
+      );
+
+      expect(result).toHaveProperty('geometry');
+      expect(result).toHaveProperty('material');
+      expect(result).toHaveProperty('position');
+      expect(result).toHaveProperty('rotation');
+      expect(result).toHaveProperty('facade');
+      expect(result.geometry).toBeInstanceOf(THREE.BoxGeometry);
+      expect(result.material).toBeInstanceOf(THREE.ShaderMaterial);
+      expect(result.facade).toBe('front');
+      expect(result.position).toEqual(position);
+      expect(result.rotation).toEqual(rotation);
+    });
+
+    it('includes window data in shader material', () => {
+      const windows = [
+        {
+          facade: 'front',
+          position: [0, 1, 2],
+          size: [2, 1.5],
+        },
+      ];
+
+      const result = structureManager.createWallGeometryDefinition(
+        10, 8, 0.2, [0, 4, 5], [0, 0, 0],
+        windows,
+        { color: 0xaaaaaa, roughness: 0.7, metalness: 0.2 },
+        { width: 10, depth: 10, height: 8 },
+        0.5, 7.5, 'warehouse', 'front'
+      );
+
+      // Material should have window-related uniforms
+      expect(result.material.uniforms.windowDataTexture).toBeDefined();
+      expect(result.material.uniforms.windowCount).toBeDefined();
+      expect(result.material.uniforms.windowCount.value).toBe(1);
+    });
+
+    it('includes door data in shader material when provided', () => {
+      const doorInfo = [
+        {
+          type: 'standard',
+          x: 0,
+          y: 0,
+          width: 0.9,
+          height: 2.1,
+        },
+      ];
+
+      const result = structureManager.createWallGeometryDefinition(
+        10, 8, 0.2, [0, 4, 5], [0, 0, 0],
+        [],
+        { color: 0xaaaaaa, roughness: 0.7, metalness: 0.2 },
+        { width: 10, depth: 10, height: 8 },
+        0.5, 7.5, 'warehouse', 'front',
+        null, doorInfo
+      );
+
+      expect(result.material.uniforms.hasDoor).toBeDefined();
+      expect(result.material.uniforms.hasDoor.value).toBe(true);
+    });
+  });
+
+  describe('createDetailedBuilding with merged geometry', () => {
+    it('creates merged wall geometry with correct groups', () => {
+      const structure = {
+        id: 'test-building-1',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      // Should have 2 meshes: merged walls + roof
+      const meshes = structureGroup.children.filter(child => child instanceof THREE.Mesh);
+      expect(meshes.length).toBe(2);
+
+      // Find the merged wall mesh (it will have multiple materials)
+      const wallMesh = meshes.find(mesh => Array.isArray(mesh.material));
+      expect(wallMesh).toBeDefined();
+      expect(wallMesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
+
+      // Verify geometry groups are set up correctly (4 walls)
+      expect(wallMesh.geometry.groups.length).toBe(4);
+      expect(wallMesh.geometry.groups[0].materialIndex).toBe(0); // Front
+      expect(wallMesh.geometry.groups[1].materialIndex).toBe(1); // Back
+      expect(wallMesh.geometry.groups[2].materialIndex).toBe(2); // Left
+      expect(wallMesh.geometry.groups[3].materialIndex).toBe(3); // Right
+
+      // Verify material array has 4 materials (one per facade)
+      expect(wallMesh.material.length).toBe(4);
+    });
+
+    it('creates roof as separate mesh', () => {
+      const structure = {
+        id: 'test-building-2',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      // Find the roof mesh (single material, not an array)
+      const meshes = structureGroup.children.filter(child => child instanceof THREE.Mesh);
+      const roofMesh = meshes.find(mesh => !Array.isArray(mesh.material));
+      expect(roofMesh).toBeDefined();
+      expect(roofMesh.material).toBeInstanceOf(THREE.MeshStandardMaterial);
+    });
+
+    it('merges all 4 walls into single geometry', () => {
+      const structure = {
+        id: 'test-building-3',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      const wallMesh = structureGroup.children.find(
+        child => child instanceof THREE.Mesh && Array.isArray(child.material)
+      );
+
+      // BoxGeometry has 24 vertices per box (6 faces × 4 vertices each for proper UV mapping)
+      // So 4 walls = 96 vertices
+      expect(wallMesh.geometry.attributes.position.count).toBe(96);
+      
+      // Each wall has 36 indices, so 4 walls = 144 indices
+      expect(wallMesh.geometry.index.count).toBe(144);
+    });
+
+    it('preserves window and door data per facade', () => {
+      const structure = {
+        id: 'test-building-4',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [
+          { facade: 'front', position: [0, 1, 2], size: [2, 1.5] },
+          { facade: 'back', position: [0, 1, 2], size: [2, 1.5] },
+        ],
+        doors: {
+          front: { type: 'standard', x: 0, y: 0, width: 0.9, height: 2.1 },
+        },
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      const wallMesh = structureGroup.children.find(
+        child => child instanceof THREE.Mesh && Array.isArray(child.material)
+      );
+
+      // Front wall material (index 0) should have door
+      expect(wallMesh.material[0].uniforms.hasDoor.value).toBe(true);
+      // Back wall material (index 1) should have window but no door
+      expect(wallMesh.material[1].uniforms.windowCount.value).toBe(1);
+    });
+
+    it('handles buildings with no windows or doors', () => {
+      const structure = {
+        id: 'test-building-5',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      expect(() => {
+        structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+      }).not.toThrow();
+
+      const wallMesh = structureGroup.children.find(
+        child => child instanceof THREE.Mesh && Array.isArray(child.material)
+      );
+      expect(wallMesh).toBeDefined();
+    });
+
+    it('applies color palette from properties when available', () => {
+      const structure = {
+        id: 'test-building-6',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {
+          colors: {
+            walls: { hex: '#ff0000' },
+            roofs: { hex: '#0000ff' },
+          },
+        },
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      // Roof color should be applied
+      const roofMesh = structureGroup.children.find(
+        child => child instanceof THREE.Mesh && !Array.isArray(child.material)
+      );
+      expect(roofMesh.material.color.getHex()).toBe(0x0000ff);
+    });
+
+    it('reduces draw calls from 5 to 2 meshes', () => {
+      const structure = {
+        id: 'test-building-7',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {},
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+
+      // Should have exactly 2 meshes: merged walls + roof
+      const meshes = structureGroup.children.filter(child => child instanceof THREE.Mesh);
+      expect(meshes.length).toBe(2);
+
+      // Before merging: 5 meshes (4 walls + 1 roof)
+      // After merging: 2 meshes (1 merged walls + 1 roof)
+      // This is a 60% reduction in draw calls
+    });
+
+    it('handles corner trim width from properties', () => {
+      const structure = {
+        id: 'test-building-8',
+        structure_type: 'building',
+        building_subtype: 'warehouse',
+        windows: [],
+        doors: {},
+        garage_doors: [],
+        properties: {
+          corner_trim_width: 0.3, // 30cm
+        },
+      };
+
+      const dimensions = { width: 20, depth: 15, height: 10 };
+      const structureGroup = new THREE.Group();
+
+      expect(() => {
+        structureManager.createDetailedBuilding(structureGroup, structure, dimensions);
+      }).not.toThrow();
+
+      const wallMesh = structureGroup.children.find(
+        child => child instanceof THREE.Mesh && Array.isArray(child.material)
+      );
+      // Corner trim should be applied in shader uniforms
+      expect(wallMesh.material[0].uniforms.cornerTrimWidthUniform).toBeDefined();
+    });
+  });
 });
 

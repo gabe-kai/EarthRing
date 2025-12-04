@@ -277,6 +277,8 @@ gameStateManager.on('activeFloorChanged', ({ oldFloor, newFloor }) => {
 - Manages client-side representation of structures (player-placed and procedural).
 - Integrates with `GameStateManager`, `CameraController`, and `SceneManager`.
 - Tracks structure meshes and their association with chunks for cleanup.
+- ✅ **Merged geometry rendering** - Buildings use merged `BufferGeometry` with geometry groups (4 walls merged into 1 mesh, roof separate = 2 meshes total)
+- ✅ **Performance optimized** - 60% reduction in draw calls per building (from 5 to 2 meshes)
 
 **Key Responsibilities**:
 - Render structures as world-positioned meshes in EarthRing coordinates:

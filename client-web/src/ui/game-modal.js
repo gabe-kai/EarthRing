@@ -156,7 +156,7 @@ export function showConfirmationModal({
     document.head.appendChild(style);
     
     const checkboxId = `game-modal-checkbox-${Date.now()}`;
-    let checkboxChecked = false;
+    const checkboxChecked = false;
     
     activeModal.innerHTML = `
       <div class="game-modal-content">
