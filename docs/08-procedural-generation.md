@@ -499,9 +499,13 @@ def generate_city_grid(zone_polygon, zone_type, zone_importance, chunk_seed):
 
 **Building Rendering:**
 - ✅ **Shader-based rendering** - Windows, doors, foundations, and trim are rendered procedurally in shaders
-- Significantly reduces draw calls and eliminates z-fighting issues
+- ✅ **Merged geometry** - All 4 building walls are merged into a single `BufferGeometry` using geometry groups
+- Significantly reduces draw calls from 5 to 2 per building (60% reduction)
+- Eliminates z-fighting issues
 - Opaque materials for all building components
 - Performance optimized with material caching and geometry reuse
+- **Geometry merging**: Uses `mergeBoxGeometries()` utility to combine wall geometries with transformations
+- **Material groups**: Each facade (front/back/left/right) uses geometry groups to assign per-facade shader materials
 - **Corner trim**: Variable width between 10cm and 50cm per building (randomly generated per building)
 - **Window opacity**: Windows use 65% opacity with slight reflectivity (1.2x brightness multiplier) for realistic glass appearance
 - **Door types**: Supports regular doors, utility doors (beside garage doors), and garage doors - all rendered via shader

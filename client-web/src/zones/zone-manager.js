@@ -859,7 +859,10 @@ export class ZoneManager {
           transparent: true,
           opacity: fillOpacity,
           depthWrite: false,
-          depthTest: false,
+          depthTest: true,
+          polygonOffset: true,
+          polygonOffsetFactor: 2,
+          polygonOffsetUnits: 2,
           side: THREE.DoubleSide,
           uniforms: {
             opacity: { value: fillOpacity }
@@ -881,7 +884,10 @@ export class ZoneManager {
           transparent: true,
           opacity: fillOpacity,
           depthWrite: false,
-          depthTest: false,
+          depthTest: true,
+          polygonOffset: true,
+          polygonOffsetFactor: 2,
+          polygonOffsetUnits: 2,
           side: THREE.DoubleSide,
         });
       }
@@ -889,6 +895,7 @@ export class ZoneManager {
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
       fillMesh.rotation.x = -Math.PI / 2;
       fillMesh.position.y = floorHeight + 0.001; // Slightly above floor
+      fillMesh.renderOrder = 1;
       zoneGroup.add(fillMesh);
 
       // Extract opacity and RGB for stroke
@@ -915,10 +922,14 @@ export class ZoneManager {
         transparent: true,
         opacity: strokeOpacity,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
         linewidth: 2,
       });
       const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
+      outline.renderOrder = 2;
       zoneGroup.add(outline);
     });
 

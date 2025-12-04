@@ -43,6 +43,65 @@ export class StructureManager {
   }
   
   /**
+   * Merge multiple BoxGeometry objects into a single BufferGeometry
+   * @param {Array<{geometry: THREE.BoxGeometry, position: [x, y, z], rotation: [x, y, z]}>} geometries - Array of geometry definitions
+   * @returns {THREE.BufferGeometry} Merged geometry
+   */
+  mergeBoxGeometries(geometries) {
+    const mergedGeometry = new THREE.BufferGeometry();
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    const indices = [];
+    let indexOffset = 0;
+    
+    for (const {geometry, position, rotation} of geometries) {
+      // Clone geometry to avoid modifying original
+      const geom = geometry.clone();
+      
+      // Apply rotation to geometry
+      const rotationMatrix = new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(...rotation, 'XYZ')
+      );
+      geom.applyMatrix4(rotationMatrix);
+      
+      // Apply translation to geometry
+      const translationMatrix = new THREE.Matrix4().makeTranslation(...position);
+      geom.applyMatrix4(translationMatrix);
+      
+      // Extract attributes
+      const posAttr = geom.attributes.position;
+      const normalAttr = geom.attributes.normal;
+      const uvAttr = geom.attributes.uv;
+      const indexAttr = geom.index;
+      
+      // Add vertices with offset indices
+      for (let i = 0; i < posAttr.count; i++) {
+        positions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+        normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
+        uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+      }
+      
+      // Add indices with offset
+      if (indexAttr) {
+        for (let i = 0; i < indexAttr.count; i++) {
+          indices.push(indexAttr.getX(i) + indexOffset);
+        }
+      }
+      
+      indexOffset += posAttr.count;
+    }
+    
+    // Set merged attributes
+    mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    mergedGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    mergedGeometry.setIndex(indices);
+    
+    return mergedGeometry;
+  }
+
+  /**
    * Get or create cached material
    * @param {string} key - Material cache key
    * @param {Function} createFn - Function to create material if not cached
@@ -383,10 +442,11 @@ export class StructureManager {
         // Buildings are rectangular prisms
         return new THREE.BoxGeometry(width, height, depth);
       
-      case 'decoration':
+      case 'decoration': {
         // Decorations can be various shapes - use cylinder for variety
         const radius = Math.min(width, depth) / 2;
         return new THREE.CylinderGeometry(radius, radius, height, 8);
+      }
       
       case 'furniture':
         // Furniture items are small boxes
@@ -627,10 +687,12 @@ export class StructureManager {
     // Wall height includes foundation - extends from ground (0) to foundationHeight + buildingHeight
     const totalWallHeight = foundationHeight + buildingHeight;
     
+    // Collect wall geometry definitions for merging
+    const wallDefinitions = [];
+    
     // Front wall (positive Y) - with shader-based windows, doors, and trim
     const frontDoor = getDoorInfoForFacade('front');
-    this.createWallWithWindows(
-      structureGroup, 
+    wallDefinitions.push(this.createWallGeometryDefinition(
       width, 
       totalWallHeight, // Wall extends from ground to top
       wallThickness,
@@ -646,12 +708,11 @@ export class StructureManager {
       colors,
       frontDoor,
       cornerTrimWidth
-    );
+    ));
     
     // Back wall (negative Y) - with shader-based windows and trim
     const backDoor = getDoorInfoForFacade('back');
-    this.createWallWithWindows(
-      structureGroup,
+    wallDefinitions.push(this.createWallGeometryDefinition(
       width,
       totalWallHeight, // Wall extends from ground to top
       wallThickness,
@@ -667,12 +728,11 @@ export class StructureManager {
       colors,
       backDoor,
       cornerTrimWidth
-    );
+    ));
     
     // Left wall (negative X) - with shader-based rendering (includes trim)
     const leftDoor = getDoorInfoForFacade('left');
-    this.createWallWithWindows(
-      structureGroup,
+    wallDefinitions.push(this.createWallGeometryDefinition(
       depth,
       totalWallHeight, // Wall extends from ground to top
       wallThickness,
@@ -688,12 +748,11 @@ export class StructureManager {
       colors,
       leftDoor,
       cornerTrimWidth
-    );
+    ));
     
     // Right wall (positive X) - with shader-based rendering (includes trim)
     const rightDoor = getDoorInfoForFacade('right');
-    this.createWallWithWindows(
-      structureGroup,
+    wallDefinitions.push(this.createWallGeometryDefinition(
       depth,
       totalWallHeight, // Wall extends from ground to top
       wallThickness,
@@ -709,7 +768,49 @@ export class StructureManager {
       colors,
       rightDoor,
       cornerTrimWidth
-    );
+    ));
+    
+    // Merge all wall geometries
+    const geometriesToMerge = wallDefinitions.map(wallDef => ({
+      geometry: wallDef.geometry,
+      position: wallDef.position,
+      rotation: wallDef.rotation,
+    }));
+    
+    const mergedWallGeometry = this.mergeBoxGeometries(geometriesToMerge);
+    
+    // Create geometry groups for material assignment
+    // Each wall gets its own material group
+    // BoxGeometry has 6 faces × 2 triangles × 3 indices = 36 indices per box
+    const indicesPerWall = 36;
+    const totalIndices = mergedWallGeometry.index ? mergedWallGeometry.index.count : 0;
+    
+    // Verify we have the expected number of indices (4 walls × 36 indices = 144)
+    if (totalIndices !== indicesPerWall * 4) {
+      console.warn(`[Structures] Unexpected index count in merged geometry: ${totalIndices} (expected ${indicesPerWall * 4})`);
+    }
+    
+    // Create groups for each wall facade
+    mergedWallGeometry.groups = [
+      { start: 0, count: indicesPerWall, materialIndex: 0 },                    // Front
+      { start: indicesPerWall, count: indicesPerWall, materialIndex: 1 },        // Back
+      { start: indicesPerWall * 2, count: indicesPerWall, materialIndex: 2 },    // Left
+      { start: indicesPerWall * 3, count: indicesPerWall, materialIndex: 3 },    // Right
+    ];
+    
+    // Create material array for each facade (matching the order of wallDefinitions)
+    const wallMaterials = [
+      wallDefinitions[0].material,  // Front
+      wallDefinitions[1].material,  // Back
+      wallDefinitions[2].material,  // Left
+      wallDefinitions[3].material,  // Right
+    ];
+    
+    // Create merged wall mesh
+    const mergedWallMesh = new THREE.Mesh(mergedWallGeometry, wallMaterials);
+    mergedWallMesh.castShadow = false;
+    mergedWallMesh.receiveShadow = false;
+    structureGroup.add(mergedWallMesh);
     
     // Roof - use color from palette if available
     const roofColorHex = colors?.roofs?.hex ? colors.roofs.hex : '#4a4a4a';
@@ -758,8 +859,8 @@ export class StructureManager {
   }
   
   /**
-   * Create wall with windows using shader-based rendering
-   * @param {THREE.Group} group - Group to add wall to
+   * Create wall geometry and material definition (for merging)
+   * Returns geometry definition and shader material instead of creating a mesh
    * @param {number} width - Wall width
    * @param {number} height - Wall height
    * @param {number} thickness - Wall thickness
@@ -770,8 +871,14 @@ export class StructureManager {
    * @param {Object} dimensions - Building dimensions
    * @param {number} foundationHeight - Foundation height offset
    * @param {number} buildingHeight - Building height above foundation
+   * @param {string} buildingSubtype - Building subtype
+   * @param {string} facade - Facade identifier (front, back, left, right)
+   * @param {Object} colors - Color palette
+   * @param {Array} doorInfo - Door information array
+   * @param {number} cornerTrimWidth - Corner trim width
+   * @returns {Object} Object with {geometry, material, facade}
    */
-  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
+  createWallGeometryDefinition(width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
     // Convert windows to shader-compatible format
     // Limit to 50 windows per wall for shader uniforms
     const MAX_WINDOWS = 50;
@@ -960,12 +1067,45 @@ export class StructureManager {
       isGarageDoor2
     );
     
-    // Create wall mesh with shader material
+    // Create wall geometry
     const geometry = new THREE.BoxGeometry(width, height, thickness);
-    const mesh = new THREE.Mesh(geometry, wallShaderMaterial);
-    mesh.position.set(...position);
-    mesh.rotation.set(...rotation);
     
+    // Return geometry definition instead of creating mesh
+    return {
+      geometry,
+      material: wallShaderMaterial,
+      position,
+      rotation,
+      facade,
+    };
+  }
+
+  /**
+   * Create wall with windows using shader-based rendering (legacy method - creates mesh directly)
+   * @param {THREE.Group} group - Group to add wall to
+   * @param {number} width - Wall width
+   * @param {number} height - Wall height
+   * @param {number} thickness - Wall thickness
+   * @param {Array<number>} position - [x, y, z] position
+   * @param {Array<number>} rotation - [x, y, z] rotation
+   * @param {Array} windows - Array of window objects for this facade
+   * @param {THREE.Material} baseMaterial - Base wall material properties
+   * @param {Object} dimensions - Building dimensions
+   * @param {number} foundationHeight - Foundation height offset
+   * @param {number} buildingHeight - Building height above foundation
+   */
+  createWallWithWindows(group, width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
+    // Get geometry definition
+    const wallDef = this.createWallGeometryDefinition(
+      width, height, thickness, position, rotation, windows, baseMaterial,
+      dimensions, foundationHeight, buildingHeight, buildingSubtype, facade,
+      colors, doorInfo, cornerTrimWidth
+    );
+    
+    // Create mesh and add to group
+    const mesh = new THREE.Mesh(wallDef.geometry, wallDef.material);
+    mesh.position.set(...wallDef.position);
+    mesh.rotation.set(...wallDef.rotation);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);

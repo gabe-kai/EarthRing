@@ -659,7 +659,7 @@ export class ZoneEditor {
     
     // If distance is more than half the ring, wrap it back
     const wrapCoordinate = (x) => {
-      let dist = x - cameraX;
+      const dist = x - cameraX;
       if (dist > MAX_REASONABLE_DISTANCE) {
         return x - RING_CIRCUMFERENCE;
       } else if (dist < -MAX_REASONABLE_DISTANCE) {
