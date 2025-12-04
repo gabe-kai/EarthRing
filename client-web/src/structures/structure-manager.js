@@ -534,7 +534,7 @@ export class StructureManager {
         }
         // Extract doors from model_data if present
         if (modelData && typeof modelData === 'object') {
-          if (modelData.doors && !doors) {
+          if (modelData.doors && (!doors || Object.keys(doors).length === 0)) {
             doors = modelData.doors;
           }
           if (modelData.garage_doors && (!garageDoors || garageDoors.length === 0)) {
@@ -553,7 +553,7 @@ export class StructureManager {
           }
         }
         if (properties && typeof properties === 'object') {
-          if (properties.doors && !doors) {
+          if (properties.doors && (!doors || Object.keys(doors).length === 0)) {
             doors = properties.doors;
           }
           if (properties.garage_doors && (!garageDoors || garageDoors.length === 0)) {

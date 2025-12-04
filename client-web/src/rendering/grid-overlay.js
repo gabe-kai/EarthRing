@@ -193,7 +193,7 @@ export class GridOverlay {
         `,
         transparent: true,
         depthWrite: false,
-        depthTest: true, // Enable depth test so grid respects depth buffer from structures
+        depthTest: false,
         side: THREE.DoubleSide, // Render both sides of quads
       });
     };
@@ -251,8 +251,8 @@ export class GridOverlay {
     if (forceUpdate || (movedEnough && throttleExpired)) {
       // Only update grid group position when regenerating grid lines
       // This keeps the grid stable in world space instead of following the camera
-      // Position below floor to avoid z-fighting with platforms and ensure grid renders under structures
-      this.group.position.set(anchorThree.x, floorHeight - 0.03, anchorThree.z);
+      // Position slightly above floor to ensure proper rendering on both X+ and X- sides
+      this.group.position.set(anchorThree.x, floorHeight + 0.0005, anchorThree.z);
       
       this.lastUpdatePosition = { x: worldX, y: worldY };
       this.lastUpdateTime = now;

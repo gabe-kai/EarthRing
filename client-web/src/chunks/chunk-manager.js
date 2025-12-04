@@ -654,16 +654,20 @@ export class ChunkManager {
    * @param {Object} chunkData - Chunk data containing structures array
    */
   extractStructuresFromChunk(chunkID, chunkData) {
-    console.log(`[Chunks] extractStructuresFromChunk called for ${chunkID}`, {
-      hasChunkData: !!chunkData,
-      hasStructures: !!(chunkData && chunkData.structures),
-      structuresIsArray: Array.isArray(chunkData?.structures),
-      structuresLength: chunkData?.structures?.length || 0,
-      structures: chunkData?.structures
-    });
+    if (window.earthring?.debug) {
+      console.log(`[Chunks] extractStructuresFromChunk called for ${chunkID}`, {
+        hasChunkData: !!chunkData,
+        hasStructures: !!(chunkData && chunkData.structures),
+        structuresIsArray: Array.isArray(chunkData?.structures),
+        structuresLength: chunkData?.structures?.length || 0,
+        structures: chunkData?.structures
+      });
+    }
     
     if (!chunkData || !chunkData.structures || !Array.isArray(chunkData.structures) || chunkData.structures.length === 0) {
-      console.log(`[Chunks] No structures to extract from chunk ${chunkID}`);
+      if (window.earthring?.debug) {
+        console.log(`[Chunks] No structures to extract from chunk ${chunkID}`);
+      }
       return;
     }
 
