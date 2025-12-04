@@ -478,11 +478,13 @@ export function showAdminModal() {
         <button class="admin-modal-tab active" data-tab="player">Player</button>
         <button class="admin-modal-tab" data-tab="zones">Zones</button>
         <button class="admin-modal-tab" data-tab="chunks">Chunks</button>
+        <button class="admin-modal-tab" data-tab="structures">Structures</button>
       </div>
       <div class="admin-modal-body">
         <div class="admin-tab-content active" id="admin-tab-player"></div>
         <div class="admin-tab-content" id="admin-tab-zones"></div>
         <div class="admin-tab-content" id="admin-tab-chunks"></div>
+        <div class="admin-tab-content" id="admin-tab-structures"></div>
       </div>
     </div>
   `;
@@ -588,6 +590,9 @@ function loadTabContent(tabId) {
   } else if (tabId === 'chunks') {
     // Create a wrapper for the chunk panel content
     loadChunksTabContent(contentContainer);
+  } else if (tabId === 'structures') {
+    // Load structures tab content
+    loadStructuresTabContent(contentContainer);
   }
 }
 
@@ -780,6 +785,99 @@ function loadZonesTabContent(container) {
   
   // Load initial zones by floor
   loadZonesByFloor(container);
+}
+
+/**
+ * Load structures tab content
+ */
+function loadStructuresTabContent(container) {
+  // Clear existing content
+  container.innerHTML = '';
+  
+  // Create wrapper div for structures panel content
+  const structuresContent = document.createElement('div');
+  structuresContent.className = 'admin-structures-content';
+  
+  // Create structures panel body content
+  structuresContent.innerHTML = `
+    <div class="chunk-section">
+      <h3>Rebuild Structures</h3>
+      <p class="help-text">
+        This will delete all procedural structures from the database and delete all chunks. 
+        Chunks will be regenerated with new structures when you visit them.
+      </p>
+      <p class="help-text" style="color: #ff6666; font-weight: 600;">
+        WARNING: This action cannot be undone. All procedural structures will be lost and regenerated.
+      </p>
+      <button id="admin-rebuild-structures-btn" class="delete-button" style="width: 100%; margin-top: 1rem;">
+        Rebuild Structures
+      </button>
+      <div id="admin-rebuild-structures-result" class="result-display"></div>
+    </div>
+  `;
+  
+  container.appendChild(structuresContent);
+  
+  setupAdminStructuresListeners(container);
+}
+
+/**
+ * Setup event listeners for structures tab
+ */
+function setupAdminStructuresListeners(container) {
+  const rebuildBtn = container.querySelector('#admin-rebuild-structures-btn');
+  const resultDiv = container.querySelector('#admin-rebuild-structures-result');
+  
+  if (rebuildBtn) {
+    rebuildBtn.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to rebuild all structures? This will delete all procedural structures and chunks. They will be regenerated when you visit them.')) {
+        return;
+      }
+      
+      rebuildBtn.disabled = true;
+      rebuildBtn.textContent = 'Rebuilding...';
+      resultDiv.className = 'result-display';
+      resultDiv.style.display = 'none';
+      
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('Not authenticated');
+        }
+        
+        const response = await fetch('/api/structures/all/procedural', {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to rebuild structures');
+        }
+        
+        resultDiv.className = 'result-display show success';
+        resultDiv.textContent = `Success! Deleted ${data.structures_deleted || 0} procedural structures. Chunks have been reset and will regenerate with new structures when visited.`;
+        
+        // Reload the page after a short delay to see the changes
+        setTimeout(() => {
+          if (confirm('Structures have been rebuilt. Reload the page to see changes?')) {
+            window.location.reload();
+          }
+        }, 2000);
+        
+      } catch (error) {
+        resultDiv.className = 'result-display show error';
+        resultDiv.textContent = `Error: ${error.message}`;
+      } finally {
+        rebuildBtn.disabled = false;
+        rebuildBtn.textContent = 'Rebuild Structures';
+      }
+    });
+  }
 }
 
 /**

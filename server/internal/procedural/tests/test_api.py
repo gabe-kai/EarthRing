@@ -40,7 +40,7 @@ def test_generate_chunk():
     assert data["chunk"]["chunk_index"] == 12345
     # Chunk 12345 is far from any hub, should have base width
     assert data["chunk"]["width"] == 400.0
-    assert data["chunk"]["version"] == 2  # Phase 2 version
+    assert data["chunk"]["version"] == 6  # Phase 2 with 4m floor system and new window types version
     # Geometry should be present (Phase 2) - now with smooth curved geometry
     assert data["geometry"] is not None
     assert data["geometry"]["type"] == "ring_floor"
@@ -50,8 +50,11 @@ def test_generate_chunk():
     assert len(data["geometry"]["faces"]) == 40
     assert data["geometry"]["width"] == 400.0
     assert data["geometry"]["length"] == 1000.0
-    assert data["structures"] == []
-    assert data["zones"] == []
+    # Chunk 12345 is outside hub areas, so structures should be empty
+    assert isinstance(data["structures"], list)
+    # Chunks always include zones (at minimum, restricted zone)
+    assert isinstance(data["zones"], list)
+    assert len(data["zones"]) > 0  # Should have at least restricted zone
 
 
 def test_generate_chunk_at_hub_center():
@@ -71,6 +74,20 @@ def test_generate_chunk_at_hub_center():
     # Geometry width should match
     assert data["geometry"]["width"] > 20000.0
     assert data["geometry"]["width"] <= 25000.0
+    # Hub chunks should have structures (buildings)
+    assert isinstance(data["structures"], list)
+    assert len(data["structures"]) > 0
+    # Verify structures have correct format with dimensions and subtypes
+    for structure in data["structures"]:
+        assert "id" in structure
+        assert "structure_type" in structure
+        assert "dimensions" in structure
+        assert structure["dimensions"]["height"] in [5.0, 10.0, 15.0, 20.0]  # Valid heights
+        # Buildings should have building_subtype
+        if structure.get("structure_type") in ["industrial", "agricultural"]:
+            assert "building_subtype" in structure
+    # Hub chunks should have multiple zones (restricted, industrial, commercial, mixed-use)
+    assert len(data["zones"]) > 1
 
 
 def test_generate_chunk_with_custom_seed():

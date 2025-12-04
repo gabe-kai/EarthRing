@@ -13,6 +13,7 @@ Test documentation is separated from design documentation to keep each focused:
 ### Test Coverage Analysis
 - `minimap-test-coverage.md` - Minimap component test coverage and analysis
 - `zone-system-test-coverage.md` - Zone system test coverage and analysis
+- `procedural-generation-test-coverage.md` - Procedural generation test coverage and analysis
 - `testing-gap-analysis.md` - Overall testing gaps and recommendations
 
 ### Testing Strategies

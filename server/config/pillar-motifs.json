@@ -1,0 +1,784 @@
+{
+    "PillarMotifs": {
+      "PillarOfKongo": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "kongo_utility_bands",
+              "pattern": "horizontal_bands",
+              "preferred_placements": ["foundation", "roofline"],
+              "default_scale": 6.0,
+              "default_thickness": 0.04,
+              "complexity": 0.3
+            },
+            {
+              "name": "kongo_cross_panels",
+              "pattern": "circle_cross_grid",
+              "preferred_placements": ["panel", "spandrel"],
+              "default_scale": 10.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "kongo_sunpath_frieze",
+              "pattern": "sun_disc_band",
+              "preferred_placements": ["frieze", "cornice"],
+              "default_scale": 8.0,
+              "default_thickness": 0.025,
+              "complexity": 0.7
+            },
+            {
+              "name": "kongo_cosmogram_tiles",
+              "pattern": "circle_cross_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 12.0,
+              "default_thickness": 0.018,
+              "complexity": 0.8
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "kongo_soft_dot_grid",
+              "pattern": "dot_grid",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 16.0,
+              "default_thickness": 0.01,
+              "complexity": 0.3
+            },
+            {
+              "name": "kongo_roof_spirals",
+              "pattern": "spiral_band",
+              "preferred_placements": ["roof_eave"],
+              "default_scale": 5.0,
+              "default_thickness": 0.015,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "kongo_path_rings",
+              "pattern": "concentric_circles",
+              "preferred_placements": ["foundation", "low_wall"],
+              "default_scale": 9.0,
+              "default_thickness": 0.02,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "kongo_field_bands",
+              "pattern": "horizontal_stripes",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 5.0,
+              "default_thickness": 0.03,
+              "complexity": 0.25
+            }
+          ]
+        }
+      },
+  
+      "PillarOfKilima": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "mountain_steel_ribs",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 10.0,
+              "default_thickness": 0.03,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "mountain_peak_chevrons",
+              "pattern": "chevron_mountains",
+              "preferred_placements": ["frieze", "cornice"],
+              "default_scale": 7.0,
+              "default_thickness": 0.025,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "mountain_terrace_steps",
+              "pattern": "step_terraces",
+              "preferred_placements": ["panel"],
+              "default_scale": 8.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "mountain_contour_lines",
+              "pattern": "contour_stripes",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 12.0,
+              "default_thickness": 0.015,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "mountain_terrace_bands",
+              "pattern": "horizontal_steps",
+              "preferred_placements": ["foundation"],
+              "default_scale": 6.0,
+              "default_thickness": 0.03,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfLaccade": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "dock_ribbing",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 9.0,
+              "default_thickness": 0.03,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "wave_frieze",
+              "pattern": "sine_wave_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "calm_wave_panels",
+              "pattern": "soft_wave_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 10.0,
+              "default_thickness": 0.015,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "shoreline_bands",
+              "pattern": "wavy_stripes",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.018,
+              "complexity": 0.35
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "channel_grid",
+              "pattern": "rect_grid",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.3
+            }
+          ]
+        }
+      },
+  
+      "PillarOfNusantara": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "plank_ribs",
+              "pattern": "vertical_planks",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 11.0,
+              "default_thickness": 0.025,
+              "complexity": 0.35
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "woven_belt",
+              "pattern": "basket_weave_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "screen_panels",
+              "pattern": "lattice_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 9.0,
+              "default_thickness": 0.018,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "leaf_lattice",
+              "pattern": "diamond_leaf_grid",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 10.0,
+              "default_thickness": 0.017,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "terrace_grid",
+              "pattern": "stepped_grid",
+              "preferred_placements": ["foundation"],
+              "default_scale": 7.0,
+              "default_thickness": 0.025,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfMakassar": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "dock_ribbing",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 9.0,
+              "default_thickness": 0.03,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "wave_frieze",
+              "pattern": "sine_wave_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "calm_wave_panels",
+              "pattern": "soft_wave_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 10.0,
+              "default_thickness": 0.015,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "shoreline_bands",
+              "pattern": "wavy_stripes",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.018,
+              "complexity": 0.35
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "channel_grid",
+              "pattern": "rect_grid",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.3
+            }
+          ]
+        }
+      },
+  
+      "PillarOfArafura": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "plank_ribs",
+              "pattern": "vertical_planks",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 11.0,
+              "default_thickness": 0.025,
+              "complexity": 0.35
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "woven_belt",
+              "pattern": "basket_weave_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "screen_panels",
+              "pattern": "lattice_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 9.0,
+              "default_thickness": 0.018,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "leaf_lattice",
+              "pattern": "diamond_leaf_grid",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 10.0,
+              "default_thickness": 0.017,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "terrace_grid",
+              "pattern": "stepped_grid",
+              "preferred_placements": ["foundation"],
+              "default_scale": 7.0,
+              "default_thickness": 0.025,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfKirana": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "ring_ribs",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 10.0,
+              "default_thickness": 0.025,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "halo_rings",
+              "pattern": "concentric_circles",
+              "preferred_placements": ["panel_top"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "soft_wave_bands",
+              "pattern": "sine_wave_band",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 12.0,
+              "default_thickness": 0.015,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "island_dots",
+              "pattern": "dot_grid",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 9.0,
+              "default_thickness": 0.012,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "reef_lines",
+              "pattern": "wavy_stripes",
+              "preferred_placements": ["foundation"],
+              "default_scale": 8.0,
+              "default_thickness": 0.02,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfPolynesya": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "tattoo_triangles",
+              "pattern": "triangular_teeth",
+              "preferred_placements": ["foundation"],
+              "default_scale": 7.0,
+              "default_thickness": 0.03,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "tapa_band",
+              "pattern": "triangle_diamond_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.022,
+              "complexity": 0.7
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "soft_tapa_grid",
+              "pattern": "diamond_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 11.0,
+              "default_thickness": 0.016,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "wave_triangle_mix",
+              "pattern": "wave_triangle_combo",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 9.0,
+              "default_thickness": 0.018,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "field_tapa_steps",
+              "pattern": "stepped_triangles",
+              "preferred_placements": ["foundation"],
+              "default_scale": 8.0,
+              "default_thickness": 0.024,
+              "complexity": 0.4
+            }
+          ]
+        }
+      },
+  
+      "PillarOfAndenor": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "block_terrace_ribs",
+              "pattern": "vertical_steps",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 9.0,
+              "default_thickness": 0.03,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "sun_step_frieze",
+              "pattern": "step_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "woven_step_panels",
+              "pattern": "step_checker",
+              "preferred_placements": ["panel"],
+              "default_scale": 10.0,
+              "default_thickness": 0.018,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "river_zigzag_band",
+              "pattern": "zigzag_stripe",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "terrace_lines",
+              "pattern": "horizontal_steps",
+              "preferred_placements": ["foundation"],
+              "default_scale": 6.0,
+              "default_thickness": 0.028,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfQuitoPrime": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "block_terrace_ribs",
+              "pattern": "vertical_steps",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 9.0,
+              "default_thickness": 0.03,
+              "complexity": 0.4
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "sun_step_frieze",
+              "pattern": "step_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "woven_step_panels",
+              "pattern": "step_checker",
+              "preferred_placements": ["panel"],
+              "default_scale": 10.0,
+              "default_thickness": 0.018,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "river_zigzag_band",
+              "pattern": "zigzag_stripe",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "terrace_lines",
+              "pattern": "horizontal_steps",
+              "preferred_placements": ["foundation"],
+              "default_scale": 6.0,
+              "default_thickness": 0.028,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfSolamazon": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "ribbed_service",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 10.0,
+              "default_thickness": 0.028,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "leaf_frieze",
+              "pattern": "leaf_repeat_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 7.0,
+              "default_thickness": 0.02,
+              "complexity": 0.6
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "leaf_panel_grid",
+              "pattern": "leaf_panel_grid",
+              "preferred_placements": ["panel"],
+              "default_scale": 9.0,
+              "default_thickness": 0.017,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "river_flow_lines",
+              "pattern": "wavy_stripes",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.018,
+              "complexity": 0.45
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "leaf_channel_grid",
+              "pattern": "rect_grid",
+              "preferred_placements": ["foundation"],
+              "default_scale": 7.0,
+              "default_thickness": 0.022,
+              "complexity": 0.35
+            }
+          ]
+        }
+      },
+  
+      "PillarOfAtlantica": {
+        "Industrial": {
+          "motifs": [
+            {
+              "name": "ship_ribbing",
+              "pattern": "vertical_ribs",
+              "preferred_placements": ["wall_field"],
+              "default_scale": 9.0,
+              "default_thickness": 0.028,
+              "complexity": 0.3
+            }
+          ]
+        },
+        "Commercial": {
+          "motifs": [
+            {
+              "name": "wavecrest_band",
+              "pattern": "sine_wave_band",
+              "preferred_placements": ["frieze"],
+              "default_scale": 6.0,
+              "default_thickness": 0.02,
+              "complexity": 0.5
+            }
+          ]
+        },
+        "Residential": {
+          "motifs": [
+            {
+              "name": "porthole_dots",
+              "pattern": "dot_grid",
+              "preferred_placements": ["panel_top"],
+              "default_scale": 10.0,
+              "default_thickness": 0.014,
+              "complexity": 0.35
+            }
+          ]
+        },
+        "Parks": {
+          "motifs": [
+            {
+              "name": "wave_hex_mix",
+              "pattern": "hex_scales",
+              "preferred_placements": ["low_wall"],
+              "default_scale": 8.0,
+              "default_thickness": 0.02,
+              "complexity": 0.55
+            }
+          ]
+        },
+        "Agricultural": {
+          "motifs": [
+            {
+              "name": "tidal_bands",
+              "pattern": "horizontal_stripes",
+              "preferred_placements": ["foundation"],
+              "default_scale": 7.0,
+              "default_thickness": 0.024,
+              "complexity": 0.3
+            }
+          ]
+        }
+      }
+    }
+  }
+  

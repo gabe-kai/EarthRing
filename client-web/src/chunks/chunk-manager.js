@@ -654,7 +654,16 @@ export class ChunkManager {
    * @param {Object} chunkData - Chunk data containing structures array
    */
   extractStructuresFromChunk(chunkID, chunkData) {
+    console.log(`[Chunks] extractStructuresFromChunk called for ${chunkID}`, {
+      hasChunkData: !!chunkData,
+      hasStructures: !!(chunkData && chunkData.structures),
+      structuresIsArray: Array.isArray(chunkData?.structures),
+      structuresLength: chunkData?.structures?.length || 0,
+      structures: chunkData?.structures
+    });
+    
     if (!chunkData || !chunkData.structures || !Array.isArray(chunkData.structures) || chunkData.structures.length === 0) {
+      console.log(`[Chunks] No structures to extract from chunk ${chunkID}`);
       return;
     }
 
@@ -704,6 +713,37 @@ export class ChunkManager {
             properties: properties.properties,
             model_data: properties.model_data,
           };
+          
+          // Extract doors and garage_doors from model_data if present (for structures loaded from database)
+          if (properties.model_data) {
+            let modelData = properties.model_data;
+            if (typeof modelData === 'string') {
+              try {
+                modelData = JSON.parse(modelData);
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+            if (modelData && typeof modelData === 'object') {
+              // Extract doors and garage_doors to top level for easier access
+              if (modelData.doors) {
+                structure.doors = modelData.doors;
+              }
+              if (modelData.garage_doors) {
+                structure.garage_doors = modelData.garage_doors;
+              }
+              // Also extract windows, dimensions, building_subtype if present
+              if (modelData.windows) {
+                structure.windows = modelData.windows;
+              }
+              if (modelData.dimensions) {
+                structure.dimensions = modelData.dimensions;
+              }
+              if (modelData.building_subtype) {
+                structure.building_subtype = modelData.building_subtype;
+              }
+            }
+          }
         } else {
           console.warn(`[Chunks] Structure from chunk ${chunkID} has invalid geometry type:`, parsedGeometry.type);
           return null;
@@ -720,6 +760,37 @@ export class ChunkManager {
           } catch (e) {
             console.warn(`[Chunks] Failed to parse structure position from chunk ${chunkID}:`, e);
             return null;
+          }
+        }
+        
+        // Extract doors and garage_doors from model_data if present (for structures loaded from database)
+        if (structure.model_data) {
+          let modelData = structure.model_data;
+          if (typeof modelData === 'string') {
+            try {
+              modelData = JSON.parse(modelData);
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+          if (modelData && typeof modelData === 'object') {
+            // Extract doors and garage_doors to top level for easier access
+            if (modelData.doors) {
+              structure.doors = modelData.doors;
+            }
+            if (modelData.garage_doors) {
+              structure.garage_doors = modelData.garage_doors;
+            }
+            // Also extract windows, dimensions, building_subtype if present
+            if (modelData.windows) {
+              structure.windows = modelData.windows;
+            }
+            if (modelData.dimensions) {
+              structure.dimensions = modelData.dimensions;
+            }
+            if (modelData.building_subtype) {
+              structure.building_subtype = modelData.building_subtype;
+            }
           }
         }
       }

@@ -121,7 +121,7 @@ export class GridOverlay {
   buildGridGroup() {
     this.group = new THREE.Group();
     this.group.name = 'GridOverlay';
-    this.group.renderOrder = 1;
+    this.group.renderOrder = 0; // Render first (lowest layer)
     this.group.frustumCulled = false;
     
     // Create separate groups for major and minor lines
@@ -193,17 +193,19 @@ export class GridOverlay {
         `,
         transparent: true,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true, // Enable depth test so grid respects depth buffer from structures
         side: THREE.DoubleSide, // Render both sides of quads
       });
     };
     
     // Materials for grid lines (using shader for fade)
-    this.majorHorizontalMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95);
+    // Major lines: red (horizontal) and blue (vertical) at 5m intervals
+    this.majorHorizontalMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95); // Red
     
-    this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95);
+    this.majorVerticalMaterial = createFadeMaterial(new THREE.Color(0x2d7bff), 0.95); // Blue
     
-    this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.5);
+    // Minor lines: medium gray at 1m intervals (inside the 5m major grid)
+    this.minorMaterial = createFadeMaterial(new THREE.Color(0x9c9c9c), 0.7); // Medium gray
     this.axisMaterial = createFadeMaterial(new THREE.Color(0xff2d2d), 0.95); // Red to match horizontal lines
     
     this.visible = true;
@@ -249,7 +251,8 @@ export class GridOverlay {
     if (forceUpdate || (movedEnough && throttleExpired)) {
       // Only update grid group position when regenerating grid lines
       // This keeps the grid stable in world space instead of following the camera
-      this.group.position.set(anchorThree.x, floorHeight, anchorThree.z);
+      // Position below floor to avoid z-fighting with platforms and ensure grid renders under structures
+      this.group.position.set(anchorThree.x, floorHeight - 0.03, anchorThree.z);
       
       this.lastUpdatePosition = { x: worldX, y: worldY };
       this.lastUpdateTime = now;

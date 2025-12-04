@@ -185,6 +185,30 @@ def find_nearest_station(ring_position: float) -> Optional[Tuple[Station, float]
     return (nearest_station, nearest_distance)
 
 
+def get_hub_name_for_position(ring_position: float) -> Optional[str]:
+    """
+    Get the name of the nearest hub for a given ring position.
+    
+    Args:
+        ring_position: Ring position in meters
+        
+    Returns:
+        Hub name (e.g., "Pillar of Kongo") or None if not near any hub
+    """
+    station_result = find_nearest_station(ring_position)
+    if station_result is None:
+        return None
+    
+    nearest_station, distance = station_result
+    
+    # Find the index of this station in PILLAR_STATIONS
+    try:
+        station_index = PILLAR_STATIONS.index(nearest_station)
+        return PILLAR_HUB_NAMES[station_index]
+    except (ValueError, IndexError):
+        return None
+
+
 def calculate_flare_width(ring_position: float) -> float:
     """
     Calculate chunk width at a given ring position, accounting for station flares.

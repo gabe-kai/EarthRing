@@ -163,6 +163,7 @@ Test strategies, coverage analysis, and testing utilities.
 ### Test Coverage Analysis
 - [`tests/minimap-test-coverage.md`](tests/minimap-test-coverage.md) - Minimap component test coverage
 - [`tests/zone-system-test-coverage.md`](tests/zone-system-test-coverage.md) - Zone system test coverage
+- [`tests/procedural-generation-test-coverage.md`](tests/procedural-generation-test-coverage.md) - Procedural generation test coverage
 - [`tests/ui-test-coverage.md`](tests/ui-test-coverage.md) - UI component test coverage
 
 ### Testing Strategies

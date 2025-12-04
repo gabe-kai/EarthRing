@@ -22,7 +22,15 @@ import (
 //
 //	1: Initial rectangular geometry (4 vertices, 2 faces)
 //	2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
-const CurrentGeometryVersion = 2
+//	3: Phase 2 - Added building generation (grid-based city generation with buildings)
+//	4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
+//	5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
+//	6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
+//	7: Phase 2 - Enhanced building shape weights: industrial (short/wide/long, fewer windows, multiple garage doors),
+//	            commercial (5-story office towers, floor-to-ceiling windows, doors on all sides), residential
+//	            (apartments/campuses/houses with varied door counts), agricultural clusters (house+barn+industrial),
+//	            park buildings (small scattered structures)
+const CurrentGeometryVersion = 7
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {

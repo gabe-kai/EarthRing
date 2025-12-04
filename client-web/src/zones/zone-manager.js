@@ -695,7 +695,7 @@ export class ZoneManager {
     const zoneGroup = new THREE.Group();
     const zoneOriginX = cameraX;
     zoneGroup.position.x = zoneOriginX;
-    zoneGroup.renderOrder = 5; // Render above grid
+    zoneGroup.renderOrder = 1; // Render below structures (which have renderOrder 10)
     zoneGroup.userData.zoneID = zone.id; // Use zoneID for consistency with editor
     zoneGroup.userData.zoneId = zone.id; // Keep both for compatibility
     zoneGroup.userData.zoneType = zoneType;
@@ -859,7 +859,10 @@ export class ZoneManager {
           transparent: true,
           opacity: fillOpacity,
           depthWrite: false,
-          depthTest: false,
+          depthTest: true, // Enable depth test so zones respect depth buffer from structures
+          polygonOffset: true, // Enable polygon offset to prevent z-fighting with platforms
+          polygonOffsetFactor: 2, // Increased: Push zones back more in depth buffer
+          polygonOffsetUnits: 2, // Increased: Additional offset in depth buffer units
           side: THREE.DoubleSide,
           uniforms: {
             opacity: { value: fillOpacity }
@@ -881,14 +884,19 @@ export class ZoneManager {
           transparent: true,
           opacity: fillOpacity,
           depthWrite: false,
-          depthTest: false,
+          depthTest: true, // Enable depth test so zones respect depth buffer from structures
+          polygonOffset: true, // Enable polygon offset to prevent z-fighting with platforms
+          polygonOffsetFactor: 2, // Increased: Push zones back more in depth buffer
+          polygonOffsetUnits: 2, // Increased: Additional offset in depth buffer units
           side: THREE.DoubleSide,
         });
       }
       
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
       fillMesh.rotation.x = -Math.PI / 2;
-      fillMesh.position.y = floorHeight + 0.001; // Slightly above floor
+      // Position zones further below floor to avoid z-fighting, especially on X+ side
+      // Increased separation helps with floating origin precision issues
+      fillMesh.position.y = floorHeight - 0.15; // 15cm below floor
       zoneGroup.add(fillMesh);
 
       // Extract opacity and RGB for stroke
@@ -907,7 +915,8 @@ export class ZoneManager {
       const outlinePoints = outerRing.map(([x, y]) => {
         const wrappedX = wrapZoneX(x);
         const worldPos = toThreeJS({ x: wrappedX, y: y, z: floor });
-        return new THREE.Vector3(worldPos.x, floorHeight + 0.002, worldPos.z);
+        // Position outline slightly above fill to ensure visibility, but still below platforms
+        return new THREE.Vector3(worldPos.x, floorHeight - 0.149, worldPos.z);
       });
       const outlineGeometry = new THREE.BufferGeometry().setFromPoints(outlinePoints);
       const outlineMaterial = new THREE.LineBasicMaterial({
@@ -915,7 +924,10 @@ export class ZoneManager {
         transparent: true,
         opacity: strokeOpacity,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true, // Enable depth test so zone outlines respect depth buffer from structures
+        polygonOffset: true, // Enable polygon offset to prevent z-fighting
+        polygonOffsetFactor: 2, // Increased: Push zone outlines back more
+        polygonOffsetUnits: 2, // Increased: Additional offset
         linewidth: 2,
       });
       const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);

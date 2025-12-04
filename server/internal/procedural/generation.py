@@ -1,11 +1,22 @@
 """
 Chunk generation functions.
-Phase 2: Basic ring floor geometry generation with station flares.
+Phase 2: Basic ring floor geometry generation with station flares and building generation.
 """
 
 from . import seeds
 from . import stations
 import math
+import random
+
+# Optional imports for Phase 2 building generation
+try:
+    from . import grid
+    from . import buildings
+    import shapely.geometry as sg
+    BUILDING_GENERATION_AVAILABLE = True
+except ImportError:
+    # Building generation not available (e.g., missing shapely)
+    BUILDING_GENERATION_AVAILABLE = False
 
 # Constants
 CHUNK_LENGTH = 1000.0  # 1 km chunk length along ring
@@ -16,7 +27,11 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 # Version history:
 #   1: Initial rectangular geometry (4 vertices, 2 faces)
 #   2: Smooth curved geometry with 50m sample intervals (42 vertices, 40 faces)
-CURRENT_GEOMETRY_VERSION = 2
+#   3: Phase 2 - Added building generation (grid-based city generation with buildings)
+#   4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
+#   5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
+#   6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
+CURRENT_GEOMETRY_VERSION = 7
 
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
@@ -351,18 +366,18 @@ def is_within_station_flare_area(chunk_index: int) -> bool:
 def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate industrial zones on either side of the restricted zone within station flare areas.
-    
-    Creates two 20m-wide industrial zones that line the restricted zone:
-    - North industrial zone: from north edge of restricted zone outward by 20m
-    - South industrial zone: from south edge of restricted zone outward by 20m
-    
+
+    Creates two 80m-wide industrial zones that line the restricted zone:
+    - North industrial zone: from north edge of restricted zone outward by 80m
+    - South industrial zone: from south edge of restricted zone outward by 80m
+
     These zones are generated within station flare areas (within flare_length/2 of hub centers,
     which is 25km for pillar/elevator hubs).
-    
+
     Args:
         floor: Floor number
         chunk_index: Chunk index (0-263,999)
-    
+
     Returns:
         List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
     """
@@ -385,14 +400,14 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
         sample_points.append(chunk_end_position)
     
     # Build north industrial zone (negative Y side)
-    # North zone goes from -half_width - 20 to -half_width
+    # North zone goes from -half_width - 80 to -half_width
     north_bottom_edge = []  # Outer edge (further from center)
     north_top_edge = []     # Inner edge (touching restricted zone)
     
     for x_pos in sample_points:
         half_width = calculate_restricted_zone_width(x_pos)
-        # North zone: from -half_width - 20 to -half_width
-        north_bottom_edge.append([x_pos, -half_width - 20.0])
+        # North zone: from -half_width - 80 to -half_width
+        north_bottom_edge.append([x_pos, -half_width - 80.0])
         north_top_edge.append([x_pos, -half_width])
     
     # Reverse top edge to connect in order
@@ -400,15 +415,15 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     north_coordinates = [north_bottom_edge + north_top_edge + [north_bottom_edge[0]]]
     
     # Build south industrial zone (positive Y side)
-    # South zone goes from +half_width to +half_width + 20
+    # South zone goes from +half_width to +half_width + 80
     south_bottom_edge = []  # Inner edge (touching restricted zone)
     south_top_edge = []     # Outer edge (further from center)
     
     for x_pos in sample_points:
         half_width = calculate_restricted_zone_width(x_pos)
-        # South zone: from +half_width to +half_width + 20
+        # South zone: from +half_width to +half_width + 80
         south_bottom_edge.append([x_pos, half_width])
-        south_top_edge.append([x_pos, half_width + 20.0])
+        south_top_edge.append([x_pos, half_width + 80.0])
     
     # Reverse top edge to connect in order
     south_top_edge.reverse()
@@ -470,18 +485,18 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
 def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate commercial zones interspersed within industrial zones at chunk centers.
-    
-    Creates two 10m x 20m commercial zones at the center of each chunk:
-    - North commercial zone: 10m long (X), 20m wide (Y) on the north side of restricted zone
-    - South commercial zone: 10m long (X), 20m wide (Y) on the south side of restricted zone
-    
+
+    Creates two 80m x 80m commercial zones at the center of each chunk:
+    - North commercial zone: 80m long (X), 80m wide (Y) on the north side of restricted zone
+    - South commercial zone: 80m long (X), 80m wide (Y) on the south side of restricted zone
+
     These zones are only generated within station flare areas (where industrial zones exist).
-    They create 20m x 20m squares of commercial zone breaking up the industrial zone every chunk.
-    
+    They create 80m x 80m squares of commercial zone breaking up the industrial zone every chunk.
+
     Args:
         floor: Floor number
         chunk_index: Chunk index (0-263,999)
-    
+
     Returns:
         List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
     """
@@ -493,15 +508,15 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     chunk_start_position = chunk_index * CHUNK_LENGTH
     chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
     
-    # Commercial zone dimensions: 10m long (X), 20m wide (Y)
-    commercial_length = 10.0  # 10m along X axis
-    commercial_width = 20.0   # 20m along Y axis
+    # Commercial zone dimensions: 80m long (X), 80m wide (Y)
+    commercial_length = 80.0  # 80m along X axis
+    commercial_width = 80.0   # 80m along Y axis
     
     # Calculate restricted zone width at chunk center to position commercial zones correctly
     half_width = calculate_restricted_zone_width(chunk_center_position)
     
-    # North commercial zone: from -half_width - 20 to -half_width (20m wide)
-    # Positioned at chunk center, 10m long (5m on each side of center)
+    # North commercial zone: from -half_width - 80 to -half_width (80m wide)
+    # Positioned at chunk center, 80m long (40m on each side of center)
     north_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     north_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
@@ -513,8 +528,8 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
         [north_zone_x_start, -half_width - commercial_width]  # Close polygon
     ]]
     
-    # South commercial zone: from +half_width to +half_width + 20 (20m wide)
-    # Positioned at chunk center, 10m long (5m on each side of center)
+    # South commercial zone: from +half_width to +half_width + 80 (80m wide)
+    # Positioned at chunk center, 80m long (40m on each side of center)
     south_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     south_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
@@ -578,6 +593,127 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     
     return zones
 
+
+def generate_chunk_mixed_use_zones(floor: int, chunk_index: int) -> list:
+    """
+    Generate mixed-use zones outside the industrial/commercial bands within station flare areas.
+
+    Creates two 80m-wide mixed-use strips:
+    - North mixed-use zone: from outside edge of industrial/commercial bands outward by 80m
+    - South mixed-use zone: from outside edge of industrial/commercial bands outward by 80m
+
+    These zones sit outside the industrial + commercial + restricted stack in hub platforms,
+    providing a mixed-use buffer before transitioning to other zones.
+
+    Args:
+        floor: Floor number
+        chunk_index: Chunk index (0-263,999)
+
+    Returns:
+        List of zone dictionaries in GeoJSON format (empty list if not in station flare area)
+    """
+    # Only generate mixed-use zones within station flare areas
+    if not is_within_station_flare_area(chunk_index):
+        return []
+
+    # Calculate chunk boundaries
+    chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_end_position = chunk_start_position + CHUNK_LENGTH
+
+    # Sample zone width at multiple points along the chunk
+    sample_interval = 50.0
+    sample_points = []
+    x = chunk_start_position
+    while x <= chunk_end_position:
+        sample_points.append(x)
+        x += sample_interval
+    if sample_points and sample_points[-1] < chunk_end_position:
+        sample_points.append(chunk_end_position)
+
+    # Build north mixed-use zone (negative Y side)
+    # Restricted: [-half_width, +half_width]
+    # Industrial: [-half_width - 80, -half_width]
+    # Commercial blobs: also within [-half_width - 80, -half_width]
+    # Mixed-use: from -half_width - 160 to -half_width - 80 (80m wide band)
+    north_inner_edge = []  # Inner edge (adjacent to industrial/commercial)
+    north_outer_edge = []  # Outer edge (further from center)
+
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        inner_y = -half_width - 80.0
+        outer_y = -half_width - 160.0
+        north_inner_edge.append([x_pos, inner_y])
+        north_outer_edge.append([x_pos, outer_y])
+
+    # Reverse outer edge so we can connect them in order
+    north_outer_edge.reverse()
+    north_coordinates = [north_inner_edge + north_outer_edge + [north_inner_edge[0]]]
+
+    # Build south mixed-use zone (positive Y side)
+    # Mixed-use: from +half_width + 80 to +half_width + 160
+    south_inner_edge = []  # Inner edge (adjacent to industrial/commercial)
+    south_outer_edge = []  # Outer edge (further from center)
+
+    for x_pos in sample_points:
+        half_width = calculate_restricted_zone_width(x_pos)
+        inner_y = half_width + 80.0
+        outer_y = half_width + 160.0
+        south_inner_edge.append([x_pos, inner_y])
+        south_outer_edge.append([x_pos, outer_y])
+
+    south_outer_edge.reverse()
+    south_coordinates = [south_inner_edge + south_outer_edge + [south_inner_edge[0]]]
+
+    zones = [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Mixed-Use Zone North (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "mixed_use",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_mixed_use",
+                    "description": "Mixed-use zone outside hub industrial/commercial bands",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_coordinates,
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Mixed-Use Zone South (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "mixed_use",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_mixed_use",
+                    "description": "Mixed-use zone outside hub industrial/commercial bands",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_coordinates,
+            },
+        },
+    ]
+
+    return zones
 
 def generate_chunk_agricultural_zones(floor: int, chunk_index: int) -> list:
     """
@@ -731,6 +867,10 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Calculate chunk position along ring (in meters)
     # Chunk index 0 starts at position 0, each chunk is 1000m long
     chunk_start_position = chunk_index * CHUNK_LENGTH
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    
+    # Get hub name for color palette lookup
+    hub_name = stations.get_hub_name_for_position(chunk_center_position)
 
     # Adjust geometry vertices to absolute positions
     # Add chunk start position to X coordinates and set floor level
@@ -757,11 +897,27 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Generate commercial zones interspersed within industrial zones at chunk centers
     commercial_zones = generate_chunk_commercial_zones(floor, chunk_index)
     
+    # Generate mixed-use zones outside the industrial/commercial bands in hub areas
+    mixed_use_zones = generate_chunk_mixed_use_zones(floor, chunk_index)
+    
     # Generate agricultural zones in free space between stations (outside station flare areas)
     agricultural_zones = generate_chunk_agricultural_zones(floor, chunk_index)
     
     # Combine all zones
-    all_zones = [restricted_zone] + industrial_zones + commercial_zones + agricultural_zones
+    all_zones = [restricted_zone] + industrial_zones + commercial_zones + mixed_use_zones + agricultural_zones
+
+    # Phase 2: Generate buildings and structures for zones (if available)
+    if BUILDING_GENERATION_AVAILABLE:
+        try:
+            all_structures = _generate_structures_for_zones(
+                all_zones, floor, chunk_index, chunk_seed, hub_name
+            )
+        except Exception as e:
+            # If building generation fails, return empty structures but still return zones
+            print(f"Warning: Building generation failed: {e}")
+            all_structures = []
+    else:
+        all_structures = []
 
     return {
         "chunk_id": f"{floor}_{chunk_index}",
@@ -769,7 +925,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         "chunk_index": chunk_index,
         "seed": chunk_seed,
         "geometry": geometry,
-        "structures": [],
+        "structures": all_structures,  # Phase 2: Now includes generated buildings
         "zones": all_zones,  # Include restricted zone and industrial zones (if in hub area)
         "metadata": {
             "generated": True,
@@ -787,4 +943,338 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
             },
         },
     }
+
+
+def _generate_structures_for_zones(
+    zones: list, floor: int, chunk_index: int, chunk_seed: int, hub_name: Optional[str] = None
+) -> list:
+    """
+    Generate buildings and structures for zones in a chunk.
+    
+    Phase 2 MVP: Generates buildings in system zones (industrial, commercial, agricultural).
+    Skips restricted zones.
+    
+    Args:
+        zones: List of zone dictionaries (GeoJSON format)
+        floor: Floor number
+        chunk_index: Chunk index (for structure ID generation)
+        chunk_seed: Chunk seed for deterministic generation
+    
+    Returns:
+        List of structure dictionaries (buildings, parks, etc.)
+    """
+    structures = []
+    
+    # Track placed buildings across all zones to prevent overlaps
+    placed_buildings = []  # List of (x, y, width, depth) tuples
+    
+    for zone in zones:
+        zone_type = zone.get("properties", {}).get("zone_type", "").lower()
+        
+        # Skip restricted zones (no buildings allowed)
+        if zone_type == "restricted":
+            continue
+        
+        # Generate buildings in industrial, commercial, mixed-use, agricultural, and park zones
+        if zone_type not in ["industrial", "commercial", "mixed_use", "mixed-use", "agricultural", "park"]:
+            continue
+        
+        # Debug: Print zone type for commercial zones to verify they're being processed
+        if zone_type == "commercial":
+            zone_name = zone.get("properties", {}).get("name", "unknown")
+            print(f"DEBUG: Processing commercial zone: {zone_name}, zone_type={zone_type}")
+        
+        # Extract zone polygon coordinates
+        zone_geometry = zone.get("geometry", {})
+        if zone_geometry.get("type") != "Polygon":
+            continue
+        
+        zone_coordinates = zone_geometry.get("coordinates", [])
+        if not zone_coordinates or not zone_coordinates[0]:
+            continue
+        
+        # Get zone importance (default to 0.5 for system zones)
+        zone_importance = 0.5
+        if "properties" in zone and "properties" in zone["properties"]:
+            zone_props = zone["properties"].get("properties", {})
+            zone_importance = zone_props.get("importance", 0.5)
+        
+        # Generate grid cells for this zone
+        try:
+            grid_cells = grid.generate_city_grid(
+                zone_coordinates,
+                zone_type,
+                zone_importance,
+                chunk_seed,
+            )
+            
+            # Generate buildings for building-type cells
+            # Create Shapely polygon for zone boundary validation
+            zone_polygon_shapely = sg.Polygon(zone_coordinates[0])
+            
+            # For agricultural zones, implement clustering: house + barn + small industrial
+            # ALL building cells in agricultural zones get agricultural building types
+            if zone_type == "agricultural":
+                # Collect all building cells
+                building_cells = [cell for cell in grid_cells if cell.get("type") == "building"]
+                
+                if building_cells:
+                    # Group cells into clusters based on proximity (within 100m)
+                    clusters = []
+                    cluster_radius = 100.0  # 100m cluster radius
+                    used_cells = set()
+                    
+                    for cell in building_cells:
+                        if id(cell) in used_cells:
+                            continue
+                        
+                        # Start a new cluster with this cell
+                        cluster = [cell]
+                        used_cells.add(id(cell))
+                        cell_pos = sg.Point(cell["position"][0], cell["position"][1])
+                        
+                        # Find nearby cells to add to this cluster
+                        for other_cell in building_cells:
+                            if id(other_cell) in used_cells:
+                                continue
+                            other_pos = sg.Point(other_cell["position"][0], other_cell["position"][1])
+                            distance = cell_pos.distance(other_pos)
+                            
+                            if distance <= cluster_radius:
+                                cluster.append(other_cell)
+                                used_cells.add(id(other_cell))
+                        
+                        clusters.append(cluster)
+                    
+                    # For each cluster, assign building types: 1 house, 1 barn, 1-2 small industrial
+                    # Clustered cells get assigned types within each cluster
+                    for cluster_idx, cluster in enumerate(clusters):
+                        cluster_seed = hash((chunk_seed, len(clusters), cluster_idx)) % (2**31)
+                        cluster_rng = random.Random(cluster_seed)
+                        
+                        # Shuffle cluster cells for random assignment
+                        cluster_rng.shuffle(cluster)
+                        
+                        # Assign building types: first is house, second is barn, rest are small industrial
+                        for i, cell in enumerate(cluster):
+                            if i == 0:
+                                # First cell: house
+                                building_type_override = "house"
+                            elif i == 1:
+                                # Second cell: barn
+                                building_type_override = "barn"
+                            else:
+                                # Remaining: small industrial (warehouse subtype)
+                                building_type_override = "small_industrial"
+                            
+                            # Store override for later use
+                            cell["_agri_building_type"] = building_type_override
+                    
+                    # For cells NOT in clusters (isolated cells), assign random agricultural building types
+                    # Use a deterministic seed based on cell position for consistency
+                    for cell in building_cells:
+                        if "_agri_building_type" not in cell:
+                            # Isolated cell - assign random agricultural type (house, barn, or warehouse)
+                            cell_seed = hash((chunk_seed, cell["position"][0], cell["position"][1])) % (2**31)
+                            cell_rng = random.Random(cell_seed)
+                            
+                            # Weighted random: 40% house, 30% barn, 30% small industrial (warehouse)
+                            rand_val = cell_rng.random()
+                            if rand_val < 0.4:
+                                building_type_override = "house"
+                            elif rand_val < 0.7:
+                                building_type_override = "barn"
+                            else:
+                                building_type_override = "small_industrial"
+                            
+                            cell["_agri_building_type"] = building_type_override
+            
+            # Process all building cells (including agricultural clusters)
+            for cell in grid_cells:
+                if cell.get("type") != "building":
+                    continue
+                
+                # Generate building seed
+                cell_x = int(cell["position"][0] / grid.GRID_CELL_SIZE)
+                cell_y = int(cell["position"][1] / grid.GRID_CELL_SIZE)
+                building_seed = buildings.get_building_seed(
+                    chunk_seed, cell_x, cell_y
+                )
+                
+                # For agricultural zones, use subtype override if clustered
+                building_subtype_override = None
+                if zone_type == "agricultural" and "_agri_building_type" in cell:
+                    agri_type = cell["_agri_building_type"]
+                    if agri_type == "small_industrial":
+                        building_subtype_override = "warehouse"  # Use warehouse for small industrial
+                    else:
+                        building_subtype_override = agri_type  # house or barn
+                
+                # Generate building with optional subtype override
+                building = buildings.generate_building(
+                    tuple(cell["position"]),
+                    zone_type,
+                    zone_importance,
+                    building_seed,
+                    floor,
+                    hub_name,
+                    building_subtype_override,
+                )
+                
+                # Debug: Log commercial zone buildings
+                if zone_type == "commercial":
+                    print(f"DEBUG: Generated building in commercial zone: subtype={building['building_subtype']}, type={building['building_type']}")
+                
+                # Validate building footprint is completely within zone
+                # Use multiple validation methods to ensure robustness
+                building_width = building["dimensions"]["width"]
+                building_depth = building["dimensions"]["depth"]
+                half_width = building_width / 2.0
+                half_depth = building_depth / 2.0
+                
+                building_x = building["position"][0]
+                building_y = building["position"][1]
+                
+                # Create building rectangle (footprint)
+                building_rect = sg.box(
+                    building_x - half_width,
+                    building_y - half_depth,
+                    building_x + half_width,
+                    building_y + half_depth
+                )
+                
+                # Method 1: Check that the entire building rectangle is within the zone polygon
+                # Use contains() to ensure the building is completely inside (not just touching)
+                building_fully_contained = zone_polygon_shapely.contains(building_rect)
+                
+                if not building_fully_contained:
+                    # Building would extend outside zone boundary - skip it
+                    continue
+                
+                # Method 2: Check all 4 corners are within the zone
+                # This catches edge cases where contains() might have precision issues
+                corners = [
+                    sg.Point(building_x - half_width, building_y - half_depth),  # Bottom-left
+                    sg.Point(building_x + half_width, building_y - half_depth),  # Bottom-right
+                    sg.Point(building_x + half_width, building_y + half_depth),  # Top-right
+                    sg.Point(building_x - half_width, building_y + half_depth),  # Top-left
+                ]
+                
+                all_corners_within = all(zone_polygon_shapely.contains(corner) for corner in corners)
+                
+                if not all_corners_within:
+                    # At least one corner is outside - skip it
+                    continue
+                
+                # Method 3: Check that building doesn't intersect zone boundary
+                # This ensures the building is fully interior (not touching the edge)
+                # Use a small buffer to check if building is well within zone
+                # Reduced buffer from 50cm to 10cm to allow buildings in narrower zones (e.g., agricultural zones)
+                buffer_margin = 0.1  # 10cm buffer to ensure building is well within zone
+                building_rect_buffered = sg.box(
+                    building_x - half_width + buffer_margin,
+                    building_y - half_depth + buffer_margin,
+                    building_x + half_width - buffer_margin,
+                    building_y + half_depth - buffer_margin
+                )
+                
+                # Buffered building should also be fully contained
+                # But only skip if the zone is large enough - for narrow zones, we'll allow buildings that pass Method 1 and 2
+                zone_area = zone_polygon_shapely.area
+                min_zone_area_for_buffer_check = 100.0  # Only apply buffer check for zones larger than 100 m²
+                if zone_area > min_zone_area_for_buffer_check:
+                    if not zone_polygon_shapely.contains(building_rect_buffered):
+                        # Building is too close to zone edge - skip it (only for larger zones)
+                        continue
+                
+                # Check building spacing against already placed buildings
+                # Rules: Buildings can touch (walls can touch), but if they don't touch,
+                # there must be at least a 5m gap (alleys), 10m gap (small streets), or 20m gap (wide streets)
+                building_rect = sg.box(
+                    building_x - half_width,
+                    building_y - half_depth,
+                    building_x + half_width,
+                    building_y + half_depth
+                )
+                
+                violates_spacing = False
+                for placed_x, placed_y, placed_width, placed_depth in placed_buildings:
+                    placed_half_width = placed_width / 2.0
+                    placed_half_depth = placed_depth / 2.0
+                    placed_rect = sg.box(
+                        placed_x - placed_half_width,
+                        placed_y - placed_half_depth,
+                        placed_x + placed_half_width,
+                        placed_y + placed_half_depth
+                    )
+                    
+                    # Check if buildings are at the exact same position (duplicate)
+                    if abs(building_x - placed_x) < 0.01 and abs(building_y - placed_y) < 0.01:
+                        # Exact duplicate - reject
+                        violates_spacing = True
+                        break
+                    
+                    # Check if buildings overlap (interiors intersect)
+                    if building_rect.intersects(placed_rect):
+                        # Check if they only touch (boundaries touch but interiors don't overlap)
+                        # or if they actually overlap
+                        if building_rect.overlaps(placed_rect):
+                            # Buildings overlap (interiors intersect) - reject
+                            violates_spacing = True
+                            break
+                        # If they only touch (touches() returns True), that's OK
+                    
+                    # Check minimum gap if buildings don't touch or intersect
+                    if not building_rect.touches(placed_rect) and not building_rect.intersects(placed_rect):
+                        # Buildings don't touch - calculate minimum distance
+                        distance = building_rect.distance(placed_rect)
+                        
+                        # Minimum gap must be at least 5m (alleys)
+                        # We allow 5m, 10m, or 20m gaps, but reject gaps smaller than 5m
+                        if distance > 0 and distance < 5.0:
+                            # Gap is too small (not a proper alley/street) - reject
+                            violates_spacing = True
+                            break
+                
+                if violates_spacing:
+                    # Building violates spacing rules - skip it
+                    continue
+                
+                # Building passed all checks - add it to placed buildings
+                placed_buildings.append((building_x, building_y, building_width, building_depth))
+                
+                # Convert building to structure format expected by client
+                # Client expects: { id, structure_type, position: {x, y}, floor, ... }
+                # structure_type must be "building" (not zone type) for client to recognize it
+                structure_id = f"proc_{floor}_{chunk_index}_{cell_x}_{cell_y}"
+                structure = {
+                    "id": structure_id,
+                    "type": "building",
+                    "structure_type": "building",  # Always "building" for client recognition
+                    "building_subtype": building.get("building_subtype"),  # Include building subtype for variety
+                    "position": {
+                        "x": building["position"][0],
+                        "y": building["position"][1],
+                    },
+                    "floor": floor,
+                    "dimensions": building["dimensions"],
+                    "windows": building["windows"],
+                    "doors": building.get("doors", {}),  # Include doors dictionary
+                    "garage_doors": building.get("garage_doors", []),  # Include garage doors list
+                    "properties": building.get("properties", {}),  # Include all properties, including colors
+                    "is_procedural": True,
+                    "procedural_seed": building_seed,
+                }
+                # Verify colors are included (debug)
+                if building.get("properties", {}).get("colors"):
+                    if len(structures) < 3:  # Only log first few
+                        print(f"Structure with colors: {structure_id}, colors present: {bool(structure['properties'].get('colors'))}")
+                structures.append(structure)
+        except Exception as e:
+            # Log error but continue with other zones
+            # In production, use proper logging
+            print(f"Error generating structures for zone {zone_type}: {e}")
+            continue
+    
+    return structures
 

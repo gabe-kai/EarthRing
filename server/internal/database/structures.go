@@ -497,6 +497,23 @@ func (s *StructureStorage) DeleteStructure(id int64) error {
 	return nil
 }
 
+// DeleteAllProceduralStructures deletes all procedural structures from the database.
+// This is used for rebuilding structures.
+func (s *StructureStorage) DeleteAllProceduralStructures() (int64, error) {
+	query := `DELETE FROM structures WHERE is_procedural = TRUE`
+	result, err := s.db.Exec(query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete procedural structures: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
 // ListStructuresByArea retrieves structures within a bounding box.
 func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, floor int) ([]*Structure, error) {
 	query := `
