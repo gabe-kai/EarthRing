@@ -367,9 +367,15 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate industrial zones on either side of the restricted zone within station flare areas.
 
-    Creates two 80m-wide industrial zones that line the restricted zone:
-    - North industrial zone: from north edge of restricted zone outward by 80m
-    - South industrial zone: from south edge of restricted zone outward by 80m
+    Creates four 80m-wide industrial zones that line the restricted zone, split to avoid
+    overlapping with commercial zones:
+    - North-West industrial zone: from chunk start to commercial zone start
+    - North-East industrial zone: from commercial zone end to chunk end
+    - South-West industrial zone: from chunk start to commercial zone start
+    - South-East industrial zone: from commercial zone end to chunk end
+
+    Commercial zones are 120m long (east-west) and centered in the chunk, so industrial
+    zones are split into west and east sections to avoid overlap.
 
     These zones are generated within station flare areas (within flare_length/2 of hub centers,
     which is 25km for pillar/elevator hubs).
@@ -385,99 +391,212 @@ def generate_chunk_industrial_zones(floor: int, chunk_index: int) -> list:
     if not is_within_station_flare_area(chunk_index):
         return []
     
-    # Calculate chunk boundaries
+    # Calculate chunk boundaries and commercial zone boundaries
     chunk_start_position = chunk_index * CHUNK_LENGTH
     chunk_end_position = chunk_start_position + CHUNK_LENGTH
+    chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
+    
+    # Commercial zone dimensions (must match generate_chunk_commercial_zones)
+    commercial_length = 120.0  # 120m along X axis (east-west)
+    commercial_zone_x_start = chunk_center_position - (commercial_length / 2.0)
+    commercial_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
     # Sample zone width at multiple points along the chunk
     sample_interval = 50.0
-    sample_points = []
-    x = chunk_start_position
-    while x <= chunk_end_position:
-        sample_points.append(x)
-        x += sample_interval
-    if sample_points[-1] < chunk_end_position:
-        sample_points.append(chunk_end_position)
     
-    # Build north industrial zone (negative Y side)
-    # North zone goes from -half_width - 80 to -half_width
-    north_bottom_edge = []  # Outer edge (further from center)
-    north_top_edge = []     # Inner edge (touching restricted zone)
+    # West section: from chunk start to commercial zone start
+    west_sample_points = []
+    if chunk_start_position < commercial_zone_x_start:
+        x = chunk_start_position
+        while x < commercial_zone_x_start:
+            west_sample_points.append(x)
+            x += sample_interval
+        # Add the commercial zone start boundary if we haven't reached it exactly
+        if west_sample_points and west_sample_points[-1] < commercial_zone_x_start:
+            west_sample_points.append(commercial_zone_x_start)
+        # Ensure we have at least start and end points
+        if len(west_sample_points) == 0:
+            west_sample_points = [chunk_start_position, commercial_zone_x_start]
+        elif len(west_sample_points) == 1:
+            west_sample_points.append(commercial_zone_x_start)
     
-    for x_pos in sample_points:
-        half_width = calculate_restricted_zone_width(x_pos)
-        # North zone: from -half_width - 80 to -half_width
-        north_bottom_edge.append([x_pos, -half_width - 80.0])
-        north_top_edge.append([x_pos, -half_width])
+    # East section: from commercial zone end to chunk end
+    east_sample_points = []
+    if commercial_zone_x_end < chunk_end_position:
+        x = commercial_zone_x_end
+        while x <= chunk_end_position:
+            east_sample_points.append(x)
+            x += sample_interval
+        # Add the chunk end boundary if we haven't reached it exactly
+        if east_sample_points and east_sample_points[-1] < chunk_end_position:
+            east_sample_points.append(chunk_end_position)
+        # Ensure we have at least start and end points
+        if len(east_sample_points) == 0:
+            east_sample_points = [commercial_zone_x_end, chunk_end_position]
+        elif len(east_sample_points) == 1:
+            east_sample_points.append(chunk_end_position)
     
-    # Reverse top edge to connect in order
-    north_top_edge.reverse()
-    north_coordinates = [north_bottom_edge + north_top_edge + [north_bottom_edge[0]]]
+    zones = []
     
-    # Build south industrial zone (positive Y side)
-    # South zone goes from +half_width to +half_width + 80
-    south_bottom_edge = []  # Inner edge (touching restricted zone)
-    south_top_edge = []     # Outer edge (further from center)
-    
-    for x_pos in sample_points:
-        half_width = calculate_restricted_zone_width(x_pos)
-        # South zone: from +half_width to +half_width + 80
-        south_bottom_edge.append([x_pos, half_width])
-        south_top_edge.append([x_pos, half_width + 80.0])
-    
-    # Reverse top edge to connect in order
-    south_top_edge.reverse()
-    south_coordinates = [south_bottom_edge + south_top_edge + [south_bottom_edge[0]]]
-    
-    # Create zone dictionaries
-    zones = [
-        {
+    # Build north-west industrial zone (negative Y side, west of commercial)
+    if len(west_sample_points) >= 2:
+        north_west_bottom_edge = []  # Outer edge (further from center)
+        north_west_top_edge = []      # Inner edge (touching restricted zone)
+        
+        for x_pos in west_sample_points:
+            half_width = calculate_restricted_zone_width(x_pos)
+            # North zone: from -half_width - 80 to -half_width
+            north_west_bottom_edge.append([x_pos, -half_width - 80.0])
+            north_west_top_edge.append([x_pos, -half_width])
+        
+        # Reverse top edge to connect in order
+        north_west_top_edge.reverse()
+        north_west_coordinates = [north_west_bottom_edge + north_west_top_edge + [north_west_bottom_edge[0]]]
+        
+        zones.append({
             "type": "Feature",
             "properties": {
-                "name": f"Hub Industrial Zone North (Floor {floor}, Chunk {chunk_index})",
+                "name": f"Hub Industrial Zone North-West (Floor {floor}, Chunk {chunk_index})",
                 "zone_type": "industrial",
                 "floor": floor,
                 "is_system_zone": True,
                 "properties": {
                     "purpose": "hub_industrial",
-                    "description": "Industrial zone lining maglev transit area at hub platform",
+                    "description": "Industrial zone lining maglev transit area at hub platform (west of commercial)",
                 },
                 "metadata": {
                     "default_zone": True,
                     "hub_zone": True,
                     "chunk_index": chunk_index,
                     "side": "north",
+                    "subsection": "west",
                 },
             },
             "geometry": {
                 "type": "Polygon",
-                "coordinates": north_coordinates,
+                "coordinates": north_west_coordinates,
             },
-        },
-        {
+        })
+    
+    # Build north-east industrial zone (negative Y side, east of commercial)
+    if len(east_sample_points) >= 2:
+        north_east_bottom_edge = []  # Outer edge (further from center)
+        north_east_top_edge = []      # Inner edge (touching restricted zone)
+        
+        for x_pos in east_sample_points:
+            half_width = calculate_restricted_zone_width(x_pos)
+            # North zone: from -half_width - 80 to -half_width
+            north_east_bottom_edge.append([x_pos, -half_width - 80.0])
+            north_east_top_edge.append([x_pos, -half_width])
+        
+        # Reverse top edge to connect in order
+        north_east_top_edge.reverse()
+        north_east_coordinates = [north_east_bottom_edge + north_east_top_edge + [north_east_bottom_edge[0]]]
+        
+        zones.append({
             "type": "Feature",
             "properties": {
-                "name": f"Hub Industrial Zone South (Floor {floor}, Chunk {chunk_index})",
+                "name": f"Hub Industrial Zone North-East (Floor {floor}, Chunk {chunk_index})",
                 "zone_type": "industrial",
                 "floor": floor,
                 "is_system_zone": True,
                 "properties": {
                     "purpose": "hub_industrial",
-                    "description": "Industrial zone lining maglev transit area at hub platform",
+                    "description": "Industrial zone lining maglev transit area at hub platform (east of commercial)",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "north",
+                    "subsection": "east",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": north_east_coordinates,
+            },
+        })
+    
+    # Build south-west industrial zone (positive Y side, west of commercial)
+    if len(west_sample_points) >= 2:
+        south_west_bottom_edge = []  # Inner edge (touching restricted zone)
+        south_west_top_edge = []     # Outer edge (further from center)
+        
+        for x_pos in west_sample_points:
+            half_width = calculate_restricted_zone_width(x_pos)
+            # South zone: from +half_width to +half_width + 80
+            south_west_bottom_edge.append([x_pos, half_width])
+            south_west_top_edge.append([x_pos, half_width + 80.0])
+        
+        # Reverse top edge to connect in order
+        south_west_top_edge.reverse()
+        south_west_coordinates = [south_west_bottom_edge + south_west_top_edge + [south_west_bottom_edge[0]]]
+        
+        zones.append({
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Industrial Zone South-West (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "industrial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_industrial",
+                    "description": "Industrial zone lining maglev transit area at hub platform (west of commercial)",
                 },
                 "metadata": {
                     "default_zone": True,
                     "hub_zone": True,
                     "chunk_index": chunk_index,
                     "side": "south",
+                    "subsection": "west",
                 },
             },
             "geometry": {
                 "type": "Polygon",
-                "coordinates": south_coordinates,
+                "coordinates": south_west_coordinates,
             },
-        },
-    ]
+        })
+    
+    # Build south-east industrial zone (positive Y side, east of commercial)
+    if len(east_sample_points) >= 2:
+        south_east_bottom_edge = []  # Inner edge (touching restricted zone)
+        south_east_top_edge = []     # Outer edge (further from center)
+        
+        for x_pos in east_sample_points:
+            half_width = calculate_restricted_zone_width(x_pos)
+            # South zone: from +half_width to +half_width + 80
+            south_east_bottom_edge.append([x_pos, half_width])
+            south_east_top_edge.append([x_pos, half_width + 80.0])
+        
+        # Reverse top edge to connect in order
+        south_east_top_edge.reverse()
+        south_east_coordinates = [south_east_bottom_edge + south_east_top_edge + [south_east_bottom_edge[0]]]
+        
+        zones.append({
+            "type": "Feature",
+            "properties": {
+                "name": f"Hub Industrial Zone South-East (Floor {floor}, Chunk {chunk_index})",
+                "zone_type": "industrial",
+                "floor": floor,
+                "is_system_zone": True,
+                "properties": {
+                    "purpose": "hub_industrial",
+                    "description": "Industrial zone lining maglev transit area at hub platform (east of commercial)",
+                },
+                "metadata": {
+                    "default_zone": True,
+                    "hub_zone": True,
+                    "chunk_index": chunk_index,
+                    "side": "south",
+                    "subsection": "east",
+                },
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": south_east_coordinates,
+            },
+        })
     
     return zones
 
@@ -486,12 +605,13 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     """
     Generate commercial zones interspersed within industrial zones at chunk centers.
 
-    Creates two 80m x 80m commercial zones at the center of each chunk:
-    - North commercial zone: 80m long (X), 80m wide (Y) on the north side of restricted zone
-    - South commercial zone: 80m long (X), 80m wide (Y) on the south side of restricted zone
+    Creates two commercial zones at the center of each chunk:
+    - North commercial zone: 120m long (X), 80m wide (Y) on the north side of restricted zone
+    - South commercial zone: 120m long (X), 80m wide (Y) on the south side of restricted zone
 
     These zones are only generated within station flare areas (where industrial zones exist).
-    They create 80m x 80m squares of commercial zone breaking up the industrial zone every chunk.
+    They create 120m x 80m rectangles of commercial zone breaking up the industrial zone every chunk.
+    Commercial zones are centered in the chunk (60m on each side of chunk center).
 
     Args:
         floor: Floor number
@@ -508,15 +628,15 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     chunk_start_position = chunk_index * CHUNK_LENGTH
     chunk_center_position = chunk_start_position + (CHUNK_LENGTH / 2.0)
     
-    # Commercial zone dimensions: 80m long (X), 80m wide (Y)
-    commercial_length = 80.0  # 80m along X axis
-    commercial_width = 80.0   # 80m along Y axis
+    # Commercial zone dimensions: 120m long (X), 80m wide (Y)
+    commercial_length = 120.0  # 120m along X axis (east-west)
+    commercial_width = 80.0    # 80m along Y axis (north-south)
     
     # Calculate restricted zone width at chunk center to position commercial zones correctly
     half_width = calculate_restricted_zone_width(chunk_center_position)
     
     # North commercial zone: from -half_width - 80 to -half_width (80m wide)
-    # Positioned at chunk center, 80m long (40m on each side of center)
+    # Positioned at chunk center, 120m long (60m on each side of center)
     north_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     north_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     
@@ -529,7 +649,7 @@ def generate_chunk_commercial_zones(floor: int, chunk_index: int) -> list:
     ]]
     
     # South commercial zone: from +half_width to +half_width + 80 (80m wide)
-    # Positioned at chunk center, 80m long (40m on each side of center)
+    # Positioned at chunk center, 120m long (60m on each side of center)
     south_zone_x_start = chunk_center_position - (commercial_length / 2.0)
     south_zone_x_end = chunk_center_position + (commercial_length / 2.0)
     

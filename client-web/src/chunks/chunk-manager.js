@@ -222,8 +222,12 @@ export class ChunkManager {
         
         // Zone overlay: Render zones using point-in-polygon test
         if (uShowZones && uZoneCount > 0.0) {
-          // Snap fragment position to nearest 1m grid cell center
-          // This means many fragments will evaluate the same grid cell, reducing redundant calculations
+          // OPTIMIZATION: Snap fragment position to nearest 1m grid cell centerpoint
+          // This samples one point per minor grid cell (1m) instead of per-pixel sampling.
+          // Many fragments will map to the same grid cell center, effectively reducing
+          // point-in-polygon tests from thousands per chunk to one per 1m grid cell.
+          // Note: The GPU still executes the shader per fragment, but all fragments
+          // within the same 1m grid cell will use the same sampled position.
           float gridCellSize = uGridMinorSpacing; // 1m grid cells
           vec2 fragPosWorld = vec2(vWorldPosition.x, vWorldPosition.z);
           vec2 fragPos = floor(fragPosWorld / gridCellSize) * gridCellSize + gridCellSize * 0.5;
