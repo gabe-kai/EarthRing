@@ -41,6 +41,37 @@ export class StructureManager {
     
     this.setupListeners();
   }
+
+  /**
+   * Get the current camera X position in EarthRing coordinates (raw, unwrapped).
+   *
+   * Why this exists (and why it must stay raw):
+   * - Chunk meshes are positioned using the Three.js camera's raw X (unwrapped).
+   * - The cameraController returns a wrapped X (0..circumference); when we normalized
+   *   structures relative to that wrapped value, west-of-origin structures were
+   *   offset to the opposite side after about -10 km, so they vanished on X- while
+   *   still appearing on X+.
+   * - Using the raw camera X keeps the structure normalization aligned with the
+   *   chunk wrapping math, preventing west-side disappearance.
+   *
+   * Fallback to the controller is intentionally noisy (warn) so we notice if the
+   * raw camera isn’t available.
+   */
+  getCurrentCameraX() {
+    const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
+    if (camera) {
+      return camera.position.x;
+    }
+    if (this.cameraController?.getEarthRingPosition) {
+      const pos = this.cameraController.getEarthRingPosition();
+      if (pos && typeof pos.x === 'number') {
+        // Fallback: wrapped, but better than nothing
+        console.warn('[Structures] Using wrapped camera position from controller (may reduce rendering range)');
+        return pos.x;
+      }
+    }
+    return 0;
+  }
   
   /**
    * Merge multiple BoxGeometry objects into a single BufferGeometry
@@ -192,8 +223,7 @@ export class StructureManager {
       return;
     }
 
-    const cameraPos = this.cameraController.getEarthRingPosition();
-    const cameraX = cameraPos.x;
+    const cameraX = this.getCurrentCameraX();
     const cameraXWrapped = wrapRingPosition(cameraX);
 
     // Check if we need to re-render due to camera movement across wrap boundary
@@ -343,8 +373,7 @@ export class StructureManager {
    * @param {number} cameraXWrapped - Wrapped camera X position
    */
   updateStructurePosition(mesh, structure, cameraXWrapped) {
-    const cameraPos = this.cameraController.getEarthRingPosition();
-    const cameraX = cameraPos.x;
+    const cameraX = this.getCurrentCameraX();
     const structureOriginX = cameraX;
     
     const structureX = structure.position.x;
