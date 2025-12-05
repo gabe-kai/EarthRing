@@ -624,7 +624,7 @@ export class StructureManager {
     }
     
     // Debug: Log door data for first building (to verify doors are being loaded)
-    if (structure.id && structure.id.includes('proc_') && Object.keys(doors).length === 0 && garageDoors.length === 0) {
+    if (structure.id && typeof structure.id === 'string' && structure.id.includes('proc_') && Object.keys(doors).length === 0 && garageDoors.length === 0) {
       console.warn(`[Structures] No doors found for structure ${structure.id}:`, { 
         doors, 
         garage_doors: garageDoors, 

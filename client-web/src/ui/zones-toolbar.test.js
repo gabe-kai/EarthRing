@@ -21,6 +21,7 @@ describe('Zones Toolbar', () => {
   let mockZoneManager;
   let mockGridOverlay;
   let mockGameStateManager;
+  let mockChunkManager;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -33,9 +34,16 @@ describe('Zones Toolbar', () => {
       setVisibility: vi.fn(), // Also used by "All Zones" toggle
     };
     
-    // Mock grid overlay
+    // Mock grid overlay (deprecated, but kept for API compatibility)
     mockGridOverlay = {
       setVisible: vi.fn(),
+    };
+    
+    // Mock chunk manager (now handles grid and zone visibility)
+    mockChunkManager = {
+      setGridVisible: vi.fn(),
+      setZonesVisible: vi.fn(),
+      updateZoneShaderData: vi.fn(),
     };
     
     // Mock game state manager with event emitter interface
@@ -57,8 +65,10 @@ describe('Zones Toolbar', () => {
 
   describe('Initialization', () => {
     it('creates toolbar with correct structure', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       
+      expect(toolbarObj).toBeDefined();
       expect(toolbar).toBeDefined();
       expect(toolbar.id).toBe('zones-toolbar');
       expect(toolbar.className).toBe('zones-toolbar');
@@ -67,40 +77,48 @@ describe('Zones Toolbar', () => {
     });
 
     it('starts in collapsed state', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const panel = toolbar.querySelector('.zones-toolbar-panel');
       
       expect(panel.classList.contains('expanded')).toBe(false);
+      expect(toolbarObj.isExpanded()).toBe(false);
     });
   });
 
   describe('Expand/Collapse', () => {
     it('expands panel when icon clicked', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       const panel = toolbar.querySelector('.zones-toolbar-panel');
       
       icon.click();
       
       expect(panel.classList.contains('expanded')).toBe(true);
+      expect(toolbarObj.isExpanded()).toBe(true);
     });
 
     it('collapses panel when icon clicked again', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       const panel = toolbar.querySelector('.zones-toolbar-panel');
       
       icon.click();
       expect(panel.classList.contains('expanded')).toBe(true);
+      expect(toolbarObj.isExpanded()).toBe(true);
       
       icon.click();
       expect(panel.classList.contains('expanded')).toBe(false);
+      expect(toolbarObj.isExpanded()).toBe(false);
     });
   });
 
   describe('Grid Visibility', () => {
     it('toggles grid visibility', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -115,17 +133,18 @@ describe('Zones Toolbar', () => {
       
       gridToggle.click();
       
-      expect(mockGridOverlay.setVisible).toHaveBeenCalledWith(false);
+      expect(mockChunkManager.setGridVisible).toHaveBeenCalledWith(false);
       
       gridToggle.click();
       
-      expect(mockGridOverlay.setVisible).toHaveBeenCalledWith(true);
+      expect(mockChunkManager.setGridVisible).toHaveBeenCalledWith(true);
     });
   });
 
   describe('Zone Type Visibility', () => {
     it('toggles individual zone type visibility', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -147,7 +166,8 @@ describe('Zones Toolbar', () => {
     });
 
     it('toggles all zones visibility', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -161,11 +181,11 @@ describe('Zones Toolbar', () => {
       
       allZonesToggle.click();
       
-      expect(mockZoneManager.setVisibility).toHaveBeenCalledWith(false);
+      expect(mockChunkManager.setZonesVisible).toHaveBeenCalledWith(false);
       
       allZonesToggle.click();
       
-      expect(mockZoneManager.setVisibility).toHaveBeenCalledWith(true);
+      expect(mockChunkManager.setZonesVisible).toHaveBeenCalledWith(true);
     });
   });
 
@@ -173,7 +193,8 @@ describe('Zones Toolbar', () => {
     it('displays current active floor', () => {
       mockGameStateManager.getActiveFloor.mockReturnValue(2);
       
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -185,7 +206,8 @@ describe('Zones Toolbar', () => {
     it('increments active floor', () => {
       mockGameStateManager.getActiveFloor.mockReturnValue(0);
       
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -203,7 +225,8 @@ describe('Zones Toolbar', () => {
     it('decrements active floor', () => {
       mockGameStateManager.getActiveFloor.mockReturnValue(1);
       
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -221,7 +244,8 @@ describe('Zones Toolbar', () => {
     it('respects floor limits', () => {
       mockGameStateManager.getActiveFloor.mockReturnValue(15);
       
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       
@@ -239,7 +263,8 @@ describe('Zones Toolbar', () => {
 
   describe('Button States', () => {
     it('updates button text based on visibility state', () => {
-      const toolbar = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager);
+      const toolbarObj = createZonesToolbar(mockZoneManager, mockGridOverlay, mockGameStateManager, mockChunkManager);
+      const toolbar = toolbarObj.element;
       const icon = toolbar.querySelector('.zones-toolbar-icon');
       icon.click(); // Expand panel
       

@@ -4,7 +4,7 @@
  */
 
 import { wsClient } from '../network/websocket-client.js';
-import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS } from '../utils/coordinates-new.js';
+import { positionToChunkIndex, toThreeJS, wrapRingPosition, fromThreeJS, normalizeRelativeToCamera, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { 
   legacyPositionToRingPolar, 
   ringPolarToRingArc, 
@@ -51,6 +51,10 @@ export class ChunkManager {
     this.subscriptionRadiusMeters = 5000; // Store subscription radius
     this.subscriptionWidthMeters = 5000; // Store subscription width
     
+    // Shared platform material for all chunks (with grid overlay support)
+    this.sharedPlatformMaterial = null;
+    this.createSharedPlatformMaterial();
+    
     // Set up WebSocket message handlers
     this.setupWebSocketHandlers();
     
@@ -59,6 +63,622 @@ export class ChunkManager {
     
     // Store re-render threshold
     this.WRAP_RE_RENDER_THRESHOLD = WRAP_RE_RENDER_THRESHOLD;
+  }
+
+  /**
+   * Create shared platform shader material for all chunks with grid overlay support
+   */
+  createSharedPlatformMaterial() {
+    const vertexShader = `
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(normalMatrix * normal);
+        
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const fragmentShader = `
+      uniform vec3 uPlatformColor;
+      uniform float uMetalness;
+      uniform float uRoughness;
+      
+      // Grid overlay uniforms
+      uniform bool uShowGrid;
+      uniform float uGridMajorSpacing;  // 5m
+      uniform float uGridMinorSpacing;  // 1m
+      uniform vec3 uGridColorMajorH;    // Red for horizontal
+      uniform vec3 uGridColorMajorV;    // Blue for vertical
+      uniform vec3 uGridColorMinor;     // Gray for minor lines
+      uniform float uGridLineWidth;     // Line width in meters
+      uniform float uGridFadeRadius;    // Distance where fade starts
+      uniform float uGridMaxRadius;     // Max distance for grid visibility
+      uniform vec3 uCameraPosition;     // Camera position for fade calculation
+      
+      // Zone overlay uniforms
+      // Reduced limits to fit within WebGL uniform limits (~1024 float components)
+      uniform bool uShowZones;
+      uniform float uZoneCount;               // Number of active zones
+      uniform sampler2D uZoneMetaTex;         // RGBA: color.rgb, opacity.a
+      uniform sampler2D uZoneInfoTex;         // RGBA: vertexCount (r), baseIndex (g), minX (b), maxX (a)
+      uniform sampler2D uZoneBoundsTex;       // RGBA: minZ (r), maxZ (g), unused (b, a)
+      uniform sampler2D uZoneVerticesTex;     // RGBA per vertex: x (r), z (g)
+      uniform float uZoneMetaTexSize;         // width of meta/info textures (height=1)
+      uniform float uZoneInfoTexSize;
+      uniform float uZoneBoundsTexSize;
+      uniform float uZoneVerticesTexSize;
+      
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      
+      // Calculate distance from camera (for fade effect)
+      float distanceFromCamera() {
+        return distance(vWorldPosition, uCameraPosition);
+      }
+      
+      // Calculate grid fade factor (0.0 = fully faded, 1.0 = fully visible)
+      float getGridFadeFactor() {
+        float dist = distanceFromCamera();
+        if (dist > uGridFadeRadius) {
+          float fadeFactor = (dist - uGridFadeRadius) / (uGridMaxRadius - uGridFadeRadius);
+          return max(0.0, 1.0 - fadeFactor);
+        }
+        return 1.0;
+      }
+      
+      // Helper function to handle mod with negative values correctly
+      float safeMod(float x, float m) {
+        return mod(mod(x, m) + m, m);
+      }
+      
+      // Draw grid lines procedurally
+      vec3 drawGrid(vec3 baseColor) {
+        if (!uShowGrid) {
+          return baseColor;
+        }
+        
+        // Convert world position to local grid coordinates
+        // After toThreeJS conversion:
+        //   EarthRing X (ring position/arc length) -> Three.js X
+        //   EarthRing Y (radial offset/width) -> Three.js Z
+        //   EarthRing Z (floor) -> Three.js Y
+        // For grid rendering on the platform surface:
+        //   gridX = ring position (arc length) = vWorldPosition.x
+        //   gridY = radial offset (width) = vWorldPosition.z (NOT .y!)
+        float gridX = vWorldPosition.x;  // Ring position (arc length)
+        float gridY = vWorldPosition.z;  // Radial offset (width) - Z axis, not Y!
+        
+        // Calculate distance from grid line using proper mod
+        // Mod ensures we get position within one spacing interval [0, spacing)
+        float majorXMod = safeMod(gridX, uGridMajorSpacing);
+        float majorYMod = safeMod(gridY, uGridMajorSpacing);
+        float minorXMod = safeMod(gridX, uGridMinorSpacing);
+        float minorYMod = safeMod(gridY, uGridMinorSpacing);
+        
+        // Check if we're near a grid line
+        // Need to check both near 0 and near spacing value (wrapping)
+        float halfLineWidth = uGridLineWidth * 0.5;
+        
+        // Distance from nearest grid line (handles wrapping)
+        float distMajorX = min(majorXMod, uGridMajorSpacing - majorXMod);
+        float distMajorY = min(majorYMod, uGridMajorSpacing - majorYMod);
+        float distMinorX = min(minorXMod, uGridMinorSpacing - minorXMod);
+        float distMinorY = min(minorYMod, uGridMinorSpacing - minorYMod);
+        
+        // Check if on grid lines
+        bool onMajorH = distMajorX < halfLineWidth;
+        bool onMajorV = distMajorY < halfLineWidth;
+        bool onMinorH = distMinorX < halfLineWidth && !onMajorH;
+        bool onMinorV = distMinorY < halfLineWidth && !onMajorV;
+        
+        // Special case: Y=0 axis (station spine) - always red, thicker
+        bool onAxisY = abs(gridY) < halfLineWidth * 2.0;
+        
+        // Check for multiples of 20m (thicker lines)
+        float multipleXMod = safeMod(gridX, 20.0);
+        float multipleYMod = safeMod(gridY, 20.0);
+        float distMultipleX = min(multipleXMod, 20.0 - multipleXMod);
+        float distMultipleY = min(multipleYMod, 20.0 - multipleYMod);
+        bool onMultiple20H = distMultipleX < halfLineWidth * 1.5 && !onAxisY;
+        bool onMultiple20V = distMultipleY < halfLineWidth * 1.5 && !onAxisY;
+        
+        vec3 gridColor = baseColor;
+        float fadeFactor = getGridFadeFactor();
+        
+        // Draw grid lines with fade (priority order matters)
+        if (onAxisY) {
+          // Station spine - thickest, always red
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
+        } else if (onMultiple20H) {
+          // 20m horizontal multiples
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.9);
+        } else if (onMultiple20V) {
+          // 20m vertical multiples
+          gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.9);
+        } else if (onMajorH) {
+          // Major horizontal grid lines (5m)
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
+        } else if (onMajorV) {
+          // Major vertical grid lines (5m)
+          gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.95);
+        } else if (onMinorH || onMinorV) {
+          // Minor grid lines (1m)
+          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.7);
+        }
+        
+        return gridColor;
+      }
+      
+      void main() {
+        // Base platform color with PBR properties
+        vec3 color = uPlatformColor;
+        
+        // Apply grid overlay
+        color = drawGrid(color);
+        
+        // Zone overlay: Render zones using point-in-polygon test
+        if (uShowZones && uZoneCount > 0.0) {
+          // Snap fragment position to nearest 1m grid cell center
+          // This means many fragments will evaluate the same grid cell, reducing redundant calculations
+          float gridCellSize = uGridMinorSpacing; // 1m grid cells
+          vec2 fragPosWorld = vec2(vWorldPosition.x, vWorldPosition.z);
+          vec2 fragPos = floor(fragPosWorld / gridCellSize) * gridCellSize + gridCellSize * 0.5;
+          
+          // Test if fragment is inside any zone polygon
+          vec3 zoneColor = vec3(0.0);
+          float zoneOpacity = 0.0;
+          float metaSize = uZoneMetaTexSize;
+          float infoSize = uZoneInfoTexSize;
+          float vertSize = uZoneVerticesTexSize;
+          if (metaSize > 0.0 && infoSize > 0.0 && vertSize > 0.0) {
+            // Limit to checking first 128 zones per fragment for performance
+            // Most fragments will only match 0-1 zones anyway
+            int maxZonesToCheck = min(int(uZoneCount), 128);
+            for (int i = 0; i < 128; i++) {
+              if (i >= maxZonesToCheck) break;
+              
+              // Sample meta (color, opacity)
+              float uMeta = (float(i) + 0.5) / metaSize;
+              vec4 meta = texture2D(uZoneMetaTex, vec2(uMeta, 0.5));
+              vec3 zColor = meta.rgb;
+              float zOpacityRaw = meta.a;
+              
+              // Check if this zone uses gradient (opacity > 1.0 is a flag)
+              bool useGradient = zOpacityRaw > 1.0;
+              float zOpacity = useGradient ? zOpacityRaw - 1.0 : zOpacityRaw;
+              
+              // Generate rainbow gradient for mixed-use zones
+              if (useGradient) {
+                // Create rainbow gradient based on fragment position
+                // Use a combination of X and Z to create a diagonal gradient pattern
+                float gradientPos = mod(fragPos.x * 0.01 + fragPos.y * 0.01, 1.0);
+                // Convert to hue (0-1 maps to 0-360 degrees)
+                float hue = gradientPos * 6.0; // 0-6 for full rainbow cycle
+                float r = abs(hue - 3.0) - 1.0;
+                float g = 2.0 - abs(hue - 2.0);
+                float b = 2.0 - abs(hue - 4.0);
+                r = clamp(r, 0.0, 1.0);
+                g = clamp(g, 0.0, 1.0);
+                b = clamp(b, 0.0, 1.0);
+                zColor = vec3(r, g, b);
+              }
+
+              // Sample info (vertexCount, baseIndex, minX, maxX)
+              float uInfo = (float(i) + 0.5) / infoSize;
+              vec4 info = texture2D(uZoneInfoTex, vec2(uInfo, 0.5));
+              float vCount = info.r;
+              float baseIndex = info.g;
+              float minX = info.b;
+              float maxX = info.a;
+              
+              if (vCount < 3.0) {
+                continue;
+              }
+              
+              // Quick bounding box check - skip expensive point-in-polygon if fragment is outside bounds
+              if (fragPos.x < minX || fragPos.x > maxX) {
+                continue;
+              }
+              
+              // Sample bounds (minZ, maxZ) - early exit if bounds texture not available
+              if (uZoneBoundsTexSize > 0.0) {
+                float uBounds = (float(i) + 0.5) / uZoneBoundsTexSize;
+                vec4 boundsData = texture2D(uZoneBoundsTex, vec2(uBounds, 0.5));
+                float minZ = boundsData.r;
+                float maxZ = boundsData.g;
+                
+                // Quick Z-axis bounding box check
+                if (fragPos.y < minZ || fragPos.y > maxZ) {
+                  continue;
+                }
+              }
+              
+              // Fragment passed bounding box check - do expensive point-in-polygon test
+              // Point-in-polygon test using ray casting
+              bool inside = false;
+              for (int j = 0; j < 128; j++) { // up to MAX_VERTICES_PER_ZONE
+                if (float(j) >= vCount) break;
+                float idx1 = baseIndex + float(j);
+                float idx2 = baseIndex + float(mod(float(j + 1), vCount));
+                
+                float uV1 = (idx1 + 0.5) / vertSize;
+                float uV2 = (idx2 + 0.5) / vertSize;
+                vec4 v1s = texture2D(uZoneVerticesTex, vec2(uV1, 0.5));
+                vec4 v2s = texture2D(uZoneVerticesTex, vec2(uV2, 0.5));
+                vec2 v1 = vec2(v1s.r, v1s.g);
+                vec2 v2 = vec2(v2s.r, v2s.g);
+
+                float dy = v2.y - v1.y;
+                if (abs(dy) > 0.0001) {
+                  float t = (fragPos.y - v1.y) / dy;
+                  float intersectX = v1.x + t * (v2.x - v1.x);
+                  if (((v1.y > fragPos.y) != (v2.y > fragPos.y)) && (fragPos.x < intersectX)) {
+                    inside = !inside;
+                  }
+                }
+              }
+              
+              if (inside) {
+                zoneColor = zColor;
+                zoneOpacity = zOpacity;
+                break; // take first matching zone
+              }
+            }
+          }
+          
+          // Apply zone color if fragment is inside a zone
+          if (zoneOpacity > 0.0) {
+            color = mix(color, zoneColor, zoneOpacity);
+          }
+        }
+        
+        // Simple PBR-like lighting (can be enhanced later)
+        vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+        float NdotL = max(dot(vWorldNormal, lightDir), 0.0);
+        // Brighter lighting: increased ambient from 0.3 to 0.5, diffuse from 0.7 to 0.8
+        vec3 diffuse = color * (0.5 + 0.8 * NdotL); // Ambient + diffuse
+        
+        gl_FragColor = vec4(diffuse, 1.0);
+      }
+    `;
+
+    // Get current camera position for initial uniform value
+    const camera = this.sceneManager?.getCamera();
+    const initialCameraPos = camera ? camera.position : new THREE.Vector3(0, 0, 0);
+
+    this.sharedPlatformMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uPlatformColor: { value: new THREE.Color(0x999999) }, // Brighter gray (was 0x666666)
+        uMetalness: { value: 0.1 },
+        uRoughness: { value: 0.8 },
+        
+        // Grid overlay uniforms
+        uShowGrid: { value: true },
+        uGridMajorSpacing: { value: 5.0 },
+        uGridMinorSpacing: { value: 1.0 },
+        uGridColorMajorH: { value: new THREE.Color(0xff2d2d) }, // Red
+        uGridColorMajorV: { value: new THREE.Color(0x2d7bff) }, // Blue
+        uGridColorMinor: { value: new THREE.Color(0x9c9c9c) },  // Gray
+        uGridLineWidth: { value: 0.2 }, // 20cm line width (increased for visibility)
+        uGridFadeRadius: { value: 200.0 }, // Start fading at 200m
+        uGridMaxRadius: { value: 250.0 },  // Fully faded at 250m
+        uCameraPosition: { value: initialCameraPos },
+        
+        // Zone overlay uniforms via data textures
+        uShowZones: { value: true },
+        uZoneCount: { value: 0.0 },
+        uZoneMetaTex: { value: null },
+        uZoneInfoTex: { value: null },
+        uZoneBoundsTex: { value: null },
+        uZoneVerticesTex: { value: null },
+        uZoneMetaTexSize: { value: 1.0 },
+        uZoneInfoTexSize: { value: 1.0 },
+        uZoneBoundsTexSize: { value: 1.0 },
+        uZoneVerticesTexSize: { value: 1.0 },
+      },
+      vertexShader,
+      fragmentShader,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: 1,
+      depthWrite: true,
+      depthTest: true,
+    });
+  }
+
+  /**
+   * Update camera position uniform for grid fade calculation
+   */
+  updateCameraPosition() {
+    if (!this.sharedPlatformMaterial) return;
+    
+    const camera = this.sceneManager?.getCamera();
+    if (camera && this.sharedPlatformMaterial.uniforms.uCameraPosition) {
+      this.sharedPlatformMaterial.uniforms.uCameraPosition.value.copy(camera.position);
+    }
+  }
+
+  /**
+   * Set grid visibility
+   * @param {boolean} visible - Whether grid should be visible
+   */
+  setGridVisible(visible) {
+    if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowGrid) {
+      this.sharedPlatformMaterial.uniforms.uShowGrid.value = visible;
+    }
+  }
+
+  /**
+   * Set zones visibility
+   * @param {boolean} visible - Whether zones should be visible
+   */
+  setZonesVisible(visible) {
+    if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones) {
+      this.sharedPlatformMaterial.uniforms.uShowZones.value = visible;
+      // Update zone data when visibility changes
+      if (visible) {
+        this.updateZoneShaderData();
+      }
+    }
+  }
+
+  /**
+   * Collect active zones from gameState and update shader uniforms
+   * Limits to zones on current floor and within reasonable bounds
+   */
+  updateZoneShaderData() {
+    if (!this.sharedPlatformMaterial || !this.gameStateManager) {
+      return;
+    }
+
+    const activeFloor = this.gameStateManager.getActiveFloor();
+    const allZones = this.gameStateManager.getAllZones();
+    const cameraX = this.getCurrentCameraX();
+    
+    // Filter zones by active floor and zone type visibility
+    const activeZones = allZones.filter(zone => {
+      const zoneFloor = zone.floor ?? 0;
+      const hasGeometry = zone.geometry && zone.geometry.type === 'Polygon';
+      
+      // Check if zone type is visible
+      let zoneTypeVisible = true;
+      if (this.zoneManager && this.zoneManager.zoneTypeVisibility) {
+        const zoneType = zone.zone_type?.toLowerCase() || 'default';
+        const normalizedType = zoneType === 'mixed_use' ? 'mixed-use' : zoneType.replace('_', '-');
+        zoneTypeVisible = this.zoneManager.zoneTypeVisibility.get(normalizedType) ?? true;
+      }
+      
+      return zoneFloor === activeFloor && hasGeometry && zoneTypeVisible;
+    });
+
+    // Get visible chunk IDs and their approximate X ranges
+    const visibleChunkRanges = [];
+    this.chunkMeshes.forEach((mesh, chunkID) => {
+      const chunkData = this.gameStateManager.getChunk(chunkID);
+      if (chunkData && chunkData.geometry) {
+        // Get chunk's X range from its geometry
+        const vertices = chunkData.geometry.vertices || [];
+        if (vertices.length > 0) {
+          const xCoords = vertices.map(v => v[0] || 0);
+          const minX = Math.min(...xCoords);
+          const maxX = Math.max(...xCoords);
+          visibleChunkRanges.push({ chunkID, minX, maxX });
+        }
+      }
+    });
+
+    // Filter zones to only those that overlap with visible chunks
+    // A zone overlaps if any of its vertices are within a visible chunk's X range
+    const zonesInVisibleChunks = activeZones.filter(zone => {
+      try {
+        const outer = zone.geometry?.coordinates?.[0];
+        if (!outer || outer.length === 0) return false;
+        
+        // Check if any zone vertex is within any visible chunk's range
+        for (const [x] of outer) {
+          const wrappedX = normalizeRelativeToCamera(x, cameraX);
+          for (const range of visibleChunkRanges) {
+            const wrappedMinX = normalizeRelativeToCamera(range.minX, cameraX);
+            const wrappedMaxX = normalizeRelativeToCamera(range.maxX, cameraX);
+            // Handle wrapping: check if wrappedX is between wrappedMinX and wrappedMaxX
+            // Account for potential wrapping by checking both direct and wrapped ranges
+            if ((wrappedX >= wrappedMinX && wrappedX <= wrappedMaxX) ||
+                (wrappedMinX > wrappedMaxX && (wrappedX >= wrappedMinX || wrappedX <= wrappedMaxX))) {
+              return true;
+            }
+          }
+        }
+        return false;
+      } catch (e) {
+        return false;
+      }
+    });
+
+    // Use all zones in visible chunks (up to texture limit of 256)
+    const MAX_ZONES = 256; // Full texture capacity
+    const zonesToRender = zonesInVisibleChunks.slice(0, MAX_ZONES);
+
+    if (zonesToRender.length === 0 && activeZones.length > 0 && window.earthring?.debug) {
+      console.warn(`[ChunkManager] WARNING: ${activeZones.length} active zones found but none selected for rendering`);
+    }
+
+    // Convert zones to texture-friendly format
+    const zoneData = this.convertZonesToShaderFormat(zonesToRender);
+    
+    // Update shader uniforms and data textures
+    this.updateZoneTextures(zoneData);
+  }
+
+  /**
+   * Convert zone data to shader-friendly format
+   * @param {Array} zones - Array of zone objects
+   * @returns {Object} Shader data format
+   */
+  convertZonesToShaderFormat(zones) {
+    const MAX_ZONES = 256;
+    const MAX_VERTICES_PER_ZONE = 64;
+    const MAX_TOTAL_VERTICES = 8192; // safety cap
+    
+    const meta = [];   // color rgb, opacity
+    const info = [];   // vertexCount, baseIndex, minX, maxX
+    const bounds = []; // minZ, maxZ (per zone)
+    const verts = [];  // x, z
+    let vertexCursor = 0;
+
+    const cameraX = this.getCurrentCameraX();
+    const camera = this.sceneManager?.getCamera();
+    const cameraThreeJSPos = camera ? camera.position : new THREE.Vector3(cameraX, 0, 0);
+    const RING_CIRCUMFERENCE = 264000000;
+    const halfCirc = RING_CIRCUMFERENCE / 2;
+
+    for (const zone of zones) {
+      if (!zone.geometry || zone.geometry.type !== 'Polygon') continue;
+      const coordinates = zone.geometry.coordinates;
+      if (!coordinates || !coordinates[0] || coordinates[0].length < 3) continue;
+
+      // Style - lighter, brighter, more transparent colors
+      const ZONE_STYLES = {
+        residential: { fill: 'rgba(150,230,180,0.25)', stroke: 'rgba(111,207,151,0.95)' },
+        commercial: { fill: 'rgba(120,220,255,0.25)', stroke: 'rgba(86,204,242,0.95)' },
+        industrial: { fill: 'rgba(255,230,120,0.3)', stroke: 'rgba(242,201,76,0.95)' },
+        'mixed-use': { fill: 'rgba(255,214,102,0.3)', stroke: 'rgba(255,159,67,0.95)', gradient: true }, // Special: rainbow gradient
+        mixed_use: { fill: 'rgba(255,214,102,0.3)', stroke: 'rgba(255,159,67,0.95)', gradient: true }, // Special: rainbow gradient
+        park: { fill: 'rgba(100,220,140,0.2)', stroke: 'rgba(46,204,113,0.95)' },
+        agricultural: { fill: 'rgba(200,150,100,0.3)', stroke: 'rgba(139,69,19,0.95)' },
+        restricted: { fill: 'rgba(255,120,120,0.3)', stroke: 'rgba(192,57,43,0.95)' },
+        dezone: { fill: 'rgba(180,140,100,0.2)', stroke: 'rgba(139,69,19,0.8)' },
+        default: { fill: 'rgba(255,255,255,0.15)', stroke: 'rgba(255,255,255,0.9)' },
+      };
+      const styleKey = zone.zone_type?.toLowerCase() === 'mixed_use' ? 'mixed-use' : zone.zone_type?.toLowerCase();
+      const style = ZONE_STYLES[styleKey] || ZONE_STYLES.default || { fill: 'rgba(255,255,255,0.2)' };
+      const fillRgbMatch = style.fill.match(/rgba?\(([\d.]+),([\d.]+),([\d.]+)/);
+      const fillOpacityMatch = style.fill.match(/[\d.]+\)$/);
+      const fillOpacity = fillOpacityMatch ? parseFloat(fillOpacityMatch[0].slice(0, -1)) : 0.35;
+      const fillColor = fillRgbMatch
+        ? new THREE.Color(
+            parseFloat(fillRgbMatch[1]) / 255,
+            parseFloat(fillRgbMatch[2]) / 255,
+            parseFloat(fillRgbMatch[3]) / 255
+          )
+        : new THREE.Color(1, 1, 1);
+
+      const outerRing = coordinates[0].slice(0, MAX_VERTICES_PER_ZONE);
+      const vertexCount = outerRing.length;
+      if (vertexCount < 3) continue;
+
+      if (vertexCursor + vertexCount > MAX_TOTAL_VERTICES) {
+        if (window.earthring?.debug) {
+          console.warn(`[ChunkManager] Zone vertex cap reached (${MAX_TOTAL_VERTICES}); remaining zones skipped`);
+        }
+        break;
+      }
+
+      // Base index for this zone
+      const baseIndex = vertexCursor;
+
+      // Convert vertices and compute bounding box
+      let minX = Infinity, maxX = -Infinity;
+      let minZ = Infinity, maxZ = -Infinity;
+      const zoneVertices = [];
+
+      for (let i = 0; i < outerRing.length; i++) {
+        const [x, y] = outerRing[i];
+        const wrappedX = normalizeRelativeToCamera(x, cameraX);
+        let threeJSPos = toThreeJS({ x: wrappedX, y: y, z: zone.floor ?? 0 }, DEFAULT_FLOOR_HEIGHT);
+        const deltaX = threeJSPos.x - cameraThreeJSPos.x;
+        let wrappedDeltaX = deltaX;
+        if (wrappedDeltaX > halfCirc) wrappedDeltaX -= RING_CIRCUMFERENCE;
+        else if (wrappedDeltaX < -halfCirc) wrappedDeltaX += RING_CIRCUMFERENCE;
+        threeJSPos.x = cameraThreeJSPos.x + wrappedDeltaX;
+
+        // Track bounding box
+        minX = Math.min(minX, threeJSPos.x);
+        maxX = Math.max(maxX, threeJSPos.x);
+        minZ = Math.min(minZ, threeJSPos.z);
+        maxZ = Math.max(maxZ, threeJSPos.z);
+
+        zoneVertices.push(threeJSPos.x, threeJSPos.z);
+      }
+
+      // Add vertices to array (pad to RGBA per texel)
+      for (let i = 0; i < zoneVertices.length; i += 2) {
+        verts.push(zoneVertices[i], zoneVertices[i + 1], 0, 0);
+        vertexCursor += 1;
+      }
+
+      // Meta, info, and bounds
+      // For mixed-use zones, store a flag in the alpha channel (opacity > 1.0 means use gradient)
+      const useGradient = style.gradient === true;
+      const metaOpacity = useGradient ? fillOpacity + 1.0 : fillOpacity; // Flag: opacity > 1.0 = gradient
+      meta.push(fillColor.r, fillColor.g, fillColor.b, metaOpacity);
+      info.push(vertexCount, baseIndex, minX, maxX);
+      bounds.push(minZ, maxZ, 0, 0); // pad to RGBA
+
+      if (meta.length / 4 >= MAX_ZONES) {
+        if (window.earthring?.debug) {
+          console.warn(`[ChunkManager] Zone count cap reached (${MAX_ZONES}); remaining zones skipped`);
+        }
+        break;
+      }
+    }
+
+    return {
+      zoneCount: meta.length / 4,
+      meta: new Float32Array(meta.length > 0 ? meta : [0, 0, 0, 0]),
+      info: new Float32Array(info.length > 0 ? info : [0, 0, 0, 0]),
+      bounds: new Float32Array(bounds.length > 0 ? bounds : [0, 0, 0, 0]),
+      vertices: new Float32Array(verts.length > 0 ? verts : [0, 0, 0, 0]),
+      vertexCount: vertexCursor,
+    };
+  }
+
+  /**
+   * Create or update data textures for zone data and assign to uniforms
+   */
+  updateZoneTextures(zoneData) {
+    if (!this.sharedPlatformMaterial) return;
+
+    const makeTex = (dataArray, width) => {
+      const tex = new THREE.DataTexture(
+        dataArray,
+        width,
+        1,
+        THREE.RGBAFormat,
+        THREE.FloatType
+      );
+      tex.needsUpdate = true;
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.flipY = false;
+      return tex;
+    };
+
+    const metaLen = zoneData.meta.length / 4;
+    const infoLen = zoneData.info.length / 4;
+    const boundsLen = zoneData.bounds.length / 4;
+    const vertLen = zoneData.vertices.length / 4;
+
+    const metaTex = makeTex(zoneData.meta, Math.max(1, metaLen));
+    const infoTex = makeTex(zoneData.info, Math.max(1, infoLen));
+    const boundsTex = makeTex(zoneData.bounds, Math.max(1, boundsLen));
+    const vertTex = makeTex(zoneData.vertices, Math.max(1, vertLen));
+
+    this.sharedPlatformMaterial.uniforms.uZoneCount.value = zoneData.zoneCount;
+    this.sharedPlatformMaterial.uniforms.uZoneMetaTex.value = metaTex;
+    this.sharedPlatformMaterial.uniforms.uZoneInfoTex.value = infoTex;
+    this.sharedPlatformMaterial.uniforms.uZoneBoundsTex.value = boundsTex;
+    this.sharedPlatformMaterial.uniforms.uZoneVerticesTex.value = vertTex;
+    this.sharedPlatformMaterial.uniforms.uZoneMetaTexSize.value = Math.max(1, metaLen);
+    this.sharedPlatformMaterial.uniforms.uZoneInfoTexSize.value = Math.max(1, infoLen);
+    this.sharedPlatformMaterial.uniforms.uZoneBoundsTexSize.value = Math.max(1, boundsLen);
+    this.sharedPlatformMaterial.uniforms.uZoneVerticesTexSize.value = Math.max(1, vertLen);
   }
 
   /**
@@ -182,6 +802,33 @@ export class ChunkManager {
       // Extract and handle structures from chunk before rendering
       this.extractStructuresFromChunk(chunkID, chunkData);
       this.renderChunk(chunkID, chunkData);
+      
+      // Update zone shader data when zones are added
+      // Use setTimeout to ensure zones are in gameState by the time we update
+      setTimeout(() => {
+        if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+          this.updateZoneShaderData();
+        }
+      }, 0);
+    });
+    
+    // Listen for zone events to update shader data
+    this.gameStateManager.on('zoneAdded', () => {
+      if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+        this.updateZoneShaderData();
+      }
+    });
+    
+    this.gameStateManager.on('zoneUpdated', () => {
+      if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+        this.updateZoneShaderData();
+      }
+    });
+    
+    this.gameStateManager.on('zoneRemoved', () => {
+      if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+        this.updateZoneShaderData();
+      }
     });
     
     // When a chunk is removed from state, remove its mesh and zones
@@ -195,6 +842,11 @@ export class ChunkManager {
       // Clean up structures for this chunk
       if (this.structureManager) {
         this.structureManager.cleanupStructuresForChunk(chunkID);
+      }
+      
+      // Update zone shader data after cleanup
+      if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+        this.updateZoneShaderData();
       }
     });
     
@@ -220,6 +872,11 @@ export class ChunkManager {
           .catch(error => {
             console.error('[Chunks] Failed to load chunks for new floor:', error);
           });
+      }
+      
+      // Update zone shader data for new floor
+      if (this.sharedPlatformMaterial && this.sharedPlatformMaterial.uniforms.uShowZones?.value) {
+        this.updateZoneShaderData();
       }
     });
   }
@@ -511,7 +1168,6 @@ export class ChunkManager {
     const chunkIndex = chunkParts.length >= 2 ? parseInt(chunkParts[1], 10) : null;
     const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
     if (isBoundary) {
-      console.log(`[Chunks] Extracting ${chunkData.zones.length} zone(s) from boundary chunk ${chunkID}`);
     }
     
     // Convert chunk zones to zone format expected by zone manager
@@ -634,7 +1290,6 @@ export class ChunkManager {
     
     // Log successful extraction for boundary chunks (using already-declared isBoundary)
     if (isBoundary) {
-      console.log(`[Chunks] Extracted ${zones.length} valid zone(s) from chunk ${chunkID}, passing to zone manager`);
     }
     
     // Pass zones to zone manager with chunkID for tracking
@@ -842,7 +1497,6 @@ export class ChunkManager {
 
     const chunkIDs = data.chunks.map(c => c.id).join(', ');
     const chunksWithZones = data.chunks.filter(c => c.zones && Array.isArray(c.zones) && c.zones.length > 0).length;
-    console.log(`[Chunks] Received ${data.chunks.length} chunk(s) from server: [${chunkIDs}] (${chunksWithZones} with zones)`);
     
     // Track statistics for summary logging
     const stats = {
@@ -941,7 +1595,6 @@ export class ChunkManager {
         if (isBoundary && chunkData.zones) {
           const zoneCount = Array.isArray(chunkData.zones) ? chunkData.zones.length : 0;
           if (zoneCount > 0) {
-            console.log(`[Chunks] Chunk ${chunkData.id} (boundary) has ${zoneCount} zone(s) before adding to state`);
           } else {
             console.warn(`[Chunks] Chunk ${chunkData.id} (boundary) has empty zones array:`, chunkData.zones);
           }
@@ -1055,6 +1708,9 @@ export class ChunkManager {
    * @param {boolean} forceReRender - Force re-render even if data is the same (for wrapping)
    */
   renderChunk(chunkID, chunkData, forceReRender = false) {
+    // Update camera position in shared material for grid fade calculation
+    this.updateCameraPosition();
+    
     const cameraX = this.getCurrentCameraX();
     const newVersionToken = this.getChunkVersionToken(chunkData);
 
@@ -1264,28 +1920,13 @@ export class ChunkManager {
     // Compute vertex normals automatically (Three.js will handle this correctly)
     threeGeometry.computeVertexNormals();
     
-    // Create material with color based on chunk width (wider chunks = different color)
-    // Station flares will appear as wider, lighter-colored chunks
-    const baseColor = 0x666666; // Base gray
-    const width = geometry.width || 400; // Default to 400m if not provided
-    // Wider chunks (near stations) get lighter color for visual distinction
-    const colorIntensity = Math.min(1.0, (width / 25000) * 0.5 + 0.5); // Scale from 0.5 to 1.0 based on width
-    const color = new THREE.Color(baseColor).multiplyScalar(colorIntensity);
+    // Use shared platform material (with grid overlay support)
+    // Note: Since we're using a shared material, all chunks will have the same base color
+    // If per-chunk colors are needed in the future, we can use vertex colors or material variants
+    // For now, we use a single base color for all chunks for simplicity
     
-    const material = new THREE.MeshStandardMaterial({
-      color: color,
-      metalness: 0.1,
-      roughness: 0.8,
-      side: THREE.DoubleSide, // Render both sides of the plane
-      polygonOffset: true, // Enable polygon offset to prevent z-fighting
-      polygonOffsetFactor: chunkIndex % 10, // Vary offset factor per chunk
-      polygonOffsetUnits: 1, // Units for polygon offset
-      depthWrite: true,
-      depthTest: true,
-    });
-    
-    // Create mesh
-    const mesh = new THREE.Mesh(threeGeometry, material);
+    // Create mesh using shared material
+    const mesh = new THREE.Mesh(threeGeometry, this.sharedPlatformMaterial || this.createFallbackMaterial(new THREE.Color(0x666666)));
     mesh.userData.chunkID = chunkID;
     mesh.userData.chunkData = chunkData;
     mesh.position.x = chunkOriginX;
@@ -1402,6 +2043,25 @@ export class ChunkManager {
     return mesh;
   }
   
+  /**
+   * Create fallback material if shared material is not available
+   * @param {THREE.Color} color - Base color
+   * @returns {THREE.Material}
+   */
+  createFallbackMaterial(color) {
+    return new THREE.MeshStandardMaterial({
+      color: color,
+      metalness: 0.1,
+      roughness: 0.8,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: 1,
+      depthWrite: true,
+      depthTest: true,
+    });
+  }
+
   /**
    * Remove a chunk mesh from the scene
    * @param {string} chunkID - Chunk ID

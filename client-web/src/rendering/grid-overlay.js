@@ -89,6 +89,11 @@ const pushThickLineVertices = (
   return 4; // Return number of vertices added
 };
 
+/**
+ * TODO: DEPRECATED - Grid rendering moved to platform shader material in ChunkManager
+ * This class will be removed in a future update
+ * Grid is now rendered procedurally in the platform shader fragment shader
+ */
 export class GridOverlay {
   constructor(sceneManager, cameraController, gameStateManager = null, options = {}) {
     this.sceneManager = sceneManager;
