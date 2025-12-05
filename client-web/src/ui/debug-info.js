@@ -1,16 +1,15 @@
 /**
  * Debug Info Panel
- * Displays performance, camera, grid, and rendering information
+ * Displays performance, camera, and rendering information
  */
 
 import * as THREE from 'three';
 import { legacyPositionToRingPolar, ringPolarToRingArc } from '../utils/coordinates-new.js';
 
 export class DebugInfoPanel {
-  constructor(sceneManager, cameraController, gridOverlay, gameStateManager, chunkManager, zoneManager) {
+  constructor(sceneManager, cameraController, gameStateManager, chunkManager, zoneManager) {
     this.sceneManager = sceneManager;
     this.cameraController = cameraController;
-    this.gridOverlay = gridOverlay;
     this.gameStateManager = gameStateManager;
     this.chunkManager = chunkManager;
     this.zoneManager = zoneManager;

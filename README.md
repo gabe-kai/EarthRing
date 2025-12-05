@@ -367,7 +367,7 @@ EarthRing/
 │   │   ├── WRAP_POINT_FIX_SUMMARY.md  # Summary of wrap point coordinate fixes
 │   │   └── ZONE_TOOLS_WRAP_ANALYSIS.md # Analysis of zone tool wrapping issues
 │   ├── performance/                   # Performance analysis
-│   │   └── grid-overlay-performance-analysis.md # Grid overlay performance profiling
+│   │   └── grid-overlay-performance-analysis.md # Grid overlay performance profiling (historical - grid now in platform shader)
 │   ├── refactor/                      # Refactoring documentation
 │   │   ├── CLIENT_REFACTOR_STATUS.md  # Client refactoring status and progress
 │   │   ├── client-server-responsibility.md # Client-server responsibility boundaries
@@ -508,8 +508,7 @@ EarthRing/
 │   │   │   └── websocket-client.js    # WebSocket client implementation
 │   │   ├── rendering/                 # Rendering engine
 │   │   │   ├── scene-manager.js       # Scene manager (scene, camera, renderer, lighting)
-│   │   │   ├── grid-overlay.js         # Grid overlay (LineSegments grid w/ shader fade, centerline, LOD)
-│   │   │   └── grid-overlay.test.js   # Grid overlay tests
+│   │   │   └── (grid rendering moved to platform shader material in ChunkManager)
 │   │   ├── state/                     # Game state management
 │   │   │   └── game-state.js          # Game state manager (chunks, player, connection, zones)
 │   │   ├── structures/                # Structure management

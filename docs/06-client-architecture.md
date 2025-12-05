@@ -223,7 +223,7 @@ Manages local game state and synchronization with server.
 **Active Floor System**:
 - The active floor is a player-selected floor (-2 to +2) that determines which floor's content is loaded and where actions occur
 - **Independent of camera elevation**: The camera can zoom out for a wider view while keeping actions on the selected floor
-- **System-wide filtering**: All rendering systems (ChunkManager, ZoneManager, GridOverlay) filter content by active floor
+- **System-wide filtering**: All rendering systems (ChunkManager, ZoneManager) filter content by active floor
 - **Automatic cleanup**: When the active floor changes, all content from the old floor is removed and content for the new floor is loaded
 - **Event-driven**: Systems listen to `activeFloorChanged` events to update automatically
 - **UI Control**: Active floor can be changed using the `+`/`−` buttons in the zones toolbar (click "Z" icon to expand)
@@ -549,19 +549,13 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 - **Authentication-aware**: Defers all API calls until user is authenticated (prevents "Not authenticated" spam)
 - **Stream delta handling**: Listens for `stream_delta` messages and processes `zones` array automatically
 
-**Grid Overlay** (`client-web/src/rendering/grid-overlay.js`):
-- Circular 250m radius grid overlay centered on camera target
-- 5m major grid lines (red horizontal, blue vertical) with 1m minor subdivisions
-- Minor grid lines use medium gray color (0x9c9c9c) for reduced visual contrast
-- Sharpened rendering via dynamic `THREE.LineSegments` geometry (no textures, no blurring at zoom)
-- Shader-driven fade at the outer radius (currently directional: horizontal lines fade N-S, vertical fade E-W; TODO: implement true radial fade)
-- Base opacity controls so zones stay fully visible
-- Medium-thickness lines on every 20m multiple and a bold centerline at Y=0 for station spine navigation
-- Minor-line LOD automatically hides fine lines when the camera zooms far away or gains altitude
-- **Rendering depth**: Uses `depthTest: true` with `polygonOffset` (factor: 1, units: 1) to prevent z-fighting while ensuring structures render on top
-- Grid positioned at `floorHeight + 0.0005` to appear below zones and structures
-- **TODO: Platform edge clipping** - The grid currently shows over the edge of platforms where they flare. Previous attempts to implement platform-aware clipping caused severe performance issues (FPS dropped to <1) and were reverted. A future implementation should clip grid lines to follow the curved edges of platform flares, but must do so without impacting performance.
-- Visibility control via `setVisible()` method
+**Grid Rendering** (Platform Shader Material in `ChunkManager`):
+- Grid is rendered procedurally in the platform shader fragment shader
+- 5m major grid lines with 1m minor subdivisions
+- Shader-driven fade based on distance from camera
+- Medium-thickness lines on every 20m multiple for better navigation
+- Grid visibility controlled via `ChunkManager.setGridVisible()` method
+- Grid is rendered as part of the chunk platform material for optimal performance
 
 **Zone Service** (`client-web/src/api/zone-service.js`):
 - Typed helpers for area queries, owner listing, and CRUD operations (auth-required)
@@ -603,12 +597,10 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 ```javascript
 import { ZoneManager } from './zones/zone-manager.js';
 import { ZoneEditor } from './zones/zone-editor.js';
-import { GridOverlay } from './rendering/grid-overlay.js';
 import { createBottomToolbar } from './ui/bottom-toolbar.js';
 import { initializeZonesTab } from './ui/zone-ui.js';
 
 const zoneManager = new ZoneManager(gameStateManager, cameraController, sceneManager);
-const gridOverlay = new GridOverlay(sceneManager, cameraController, { radius: 250 });
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 
 // Initialize bottom toolbar
@@ -624,7 +616,7 @@ zoneManager.loadZonesAroundCamera();
 // Control visibility:
 zoneManager.setVisibility(true); // Show all zones
 zoneManager.setZoneTypeVisibility('industrial', false); // Hide industrial zones
-gridOverlay.setVisible(false); // Hide grid
+chunkManager.setGridVisible(false); // Hide grid (grid rendered in platform shader)
 ```
 
 #### Technical Implementation Details
@@ -899,7 +891,7 @@ client-web/
 │   │   └── debug-info.js              ✅ Debug info panel
 │   ├── rendering/
 │   │   ├── scene-manager.js           ✅ Scene manager
-│   │   └── grid-overlay.js            ✅ Grid overlay
+│   │   └── (grid rendering moved to platform shader material in ChunkManager)
 │   ├── utils/
 │   │   ├── coordinates.js             ✅ Coordinate conversion
 │   │   └── rendering.js               ✅ Rendering utilities
