@@ -386,7 +386,7 @@ go test -v ./internal/database/... -run TestDatabaseSchemaVerification
 - [ ] Documentation updated
 - [ ] No hardcoded secrets or passwords
 - [ ] Error handling is appropriate
-- [ ] Logging is helpful but not excessive
+- [ ] Logging is helpful but not excessive (use `window.earthring.debug` flag for verbose logging)
 
 ### For Authors
 

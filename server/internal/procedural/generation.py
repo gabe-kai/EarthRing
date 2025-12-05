@@ -1034,7 +1034,9 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
             )
         except Exception as e:
             # If building generation fails, return empty structures but still return zones
-            print(f"Warning: Building generation failed: {e}")
+            # Log only significant errors (not expected exceptions)
+            if "ImportError" not in str(type(e).__name__):
+                print(f"Warning: Building generation failed: {e}")
             all_structures = []
     else:
         all_structures = []
@@ -1098,11 +1100,6 @@ def _generate_structures_for_zones(
         # Generate buildings in industrial, commercial, mixed-use, agricultural, and park zones
         if zone_type not in ["industrial", "commercial", "mixed_use", "mixed-use", "agricultural", "park"]:
             continue
-        
-        # Debug: Print zone type for commercial zones to verify they're being processed
-        if zone_type == "commercial":
-            zone_name = zone.get("properties", {}).get("name", "unknown")
-            print(f"DEBUG: Processing commercial zone: {zone_name}, zone_type={zone_type}")
         
         # Extract zone polygon coordinates
         zone_geometry = zone.get("geometry", {})
@@ -1240,10 +1237,6 @@ def _generate_structures_for_zones(
                     hub_name,
                     building_subtype_override,
                 )
-                
-                # Debug: Log commercial zone buildings
-                if zone_type == "commercial":
-                    print(f"DEBUG: Generated building in commercial zone: subtype={building['building_subtype']}, type={building['building_type']}")
                 
                 # Validate building footprint is completely within zone
                 # Use multiple validation methods to ensure robustness
@@ -1385,10 +1378,6 @@ def _generate_structures_for_zones(
                     "is_procedural": True,
                     "procedural_seed": building_seed,
                 }
-                # Verify colors are included (debug)
-                if building.get("properties", {}).get("colors"):
-                    if len(structures) < 3:  # Only log first few
-                        print(f"Structure with colors: {structure_id}, colors present: {bool(structure['properties'].get('colors'))}")
                 structures.append(structure)
         except Exception as e:
             # Log error but continue with other zones

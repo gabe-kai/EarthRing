@@ -185,10 +185,8 @@ def generate_building(
                     # Hub or zone type not found in palette - this is OK, use defaults
                     pass
         except Exception as e:
-            # If color loading fails, log but continue without colors
-            print(f"Warning: Failed to load colors for hub={hub_name}, zone={zone_type}, subtype={building_subtype}: {e}")
-            import traceback
-            traceback.print_exc()
+            # If color loading fails, continue without colors (don't spam logs)
+            pass
     
     # Building properties
     building = {
@@ -218,9 +216,6 @@ def generate_building(
     # Add color information if available
     if colors:
         building["properties"]["colors"] = colors
-        # Debug: print first building with colors to verify they're being loaded
-        if building_seed % 1000 == 0:  # Only print occasionally
-            print(f"Building with colors: hub={hub_name}, zone={zone_type}, colors={colors}")
     
     return building
 

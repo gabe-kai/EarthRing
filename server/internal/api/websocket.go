@@ -1064,9 +1064,6 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 		return
 	}
 
-	log.Printf("[Stream] stream_subscribe received: user_id=%d, ring_position=%d, active_floor=%d, radius=%d, include_chunks=%v, include_zones=%v",
-		conn.userID, req.Pose.RingPosition, req.Pose.ActiveFloor, req.RadiusMeters, req.IncludeChunks, req.IncludeZones)
-
 	op := h.profiler.Start("stream_subscribe")
 	plan, err := h.streamManager.PlanSubscription(conn.userID, req)
 	op.End()
@@ -1075,9 +1072,6 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 		conn.sendError(msg.ID, err.Error(), "InvalidSubscriptionRequest")
 		return
 	}
-
-	log.Printf("[Stream] PlanSubscription success: subscription_id=%s, chunk_count=%d, chunk_ids=%v",
-		plan.SubscriptionID, len(plan.ChunkIDs), plan.ChunkIDs)
 
 	response := WebSocketMessage{
 		Type: "stream_ack",
@@ -1123,27 +1117,15 @@ func (h *WebSocketHandlers) handleStreamSubscribe(conn *WebSocketConnection, msg
 					log.Printf("[Stream] Recovered from panic while sending chunks for subscription %s: %v", plan.SubscriptionID, r)
 				}
 			}()
-			log.Printf("[Stream] Loading %d chunks for subscription %s: %v", len(plan.ChunkIDs), plan.SubscriptionID, plan.ChunkIDs)
 			// Load chunks using server-side pipeline (database lookup, generation, compression)
 			chunks := h.loadChunksForIDs(plan.ChunkIDs, "medium")
-			log.Printf("[Stream] Loaded %d chunks (requested %d) for subscription %s", len(chunks), len(plan.ChunkIDs), plan.SubscriptionID)
 			if len(chunks) > 0 {
 				// Send chunks as stream_delta message (server-driven format)
 				h.sendChunkData(conn, chunks, "stream_delta", "")
-				log.Printf("[Stream] Sent %d initial chunks for subscription %s", len(chunks), plan.SubscriptionID)
-			} else {
+			} else if len(plan.ChunkIDs) > 0 {
 				log.Printf("[Stream] WARNING: No chunks loaded for subscription %s (requested %d chunk IDs)", plan.SubscriptionID, len(plan.ChunkIDs))
 			}
 		}()
-	} else {
-		log.Printf("[Stream] Skipping chunk delivery: include_chunks=%v, chunk_count=%d", req.IncludeChunks, len(plan.ChunkIDs))
-	}
-
-	// Zones are now bound to chunks - they come WITH chunk data, not separately
-	// Zones are included in each chunk's zones array, so we don't need separate zone delivery
-	// This ensures zones appear and disappear with their chunks
-	if req.IncludeZones {
-		log.Printf("[Stream] Zones will be delivered with chunks (not separately) for subscription %s", plan.SubscriptionID)
 	}
 }
 
@@ -1195,8 +1177,6 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 	// Send chunk deltas if chunks are included and there are changes
 	if subscription.Request.IncludeChunks {
 		if len(chunkDelta.AddedChunks) > 0 || len(chunkDelta.RemovedChunks) > 0 {
-			log.Printf("[Stream] Chunk delta: added=%d, removed=%d", len(chunkDelta.AddedChunks), len(chunkDelta.RemovedChunks))
-
 			// Load and send added chunks
 			if len(chunkDelta.AddedChunks) > 0 {
 				go func() {
@@ -1208,24 +1188,12 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 					chunks := h.loadChunksForIDs(chunkDelta.AddedChunks, "medium")
 					if len(chunks) > 0 {
 						h.sendChunkData(conn, chunks, "stream_delta", "")
-						log.Printf("[Stream] Sent %d added chunks for subscription %s", len(chunks), req.SubscriptionID)
 					}
 				}()
 			}
-
 			// Note: Removed chunks are communicated via the delta structure
 			// The client should handle removal based on the delta message
-			if len(chunkDelta.RemovedChunks) > 0 {
-				log.Printf("[Stream] Chunks to remove: %v", chunkDelta.RemovedChunks)
-			}
 		}
-	}
-
-	// Zones are now bound to chunks - they come WITH chunk data, not separately
-	// Zones are included in each chunk's zones array, so we don't need separate zone delta handling
-	// This ensures zones appear and disappear with their chunks
-	if subscription.Request.IncludeZones {
-		log.Printf("[Stream] Zones are bound to chunks - no separate zone delta needed for subscription %s", req.SubscriptionID)
 	}
 
 	// Send acknowledgment
@@ -1291,8 +1259,6 @@ func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pos
 				log.Printf("Failed to load zones for RingArc area: %v", err)
 				return nil
 			}
-			log.Printf("[Stream] Loaded %d zones for floor %d using RingArc coordinates (s: %.0f-%.0f, r: %.0f-%.0f)",
-				len(zones), bbox.Floor, bbox.MinS, bbox.MaxS, bbox.MinR, bbox.MaxR)
 		} else {
 			// Convert RingPolar to RingArc for query
 			// This is a fallback - should use RingArc directly when available
@@ -1322,8 +1288,6 @@ func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pos
 			log.Printf("Failed to load zones for area: %v", err)
 			return nil
 		}
-		log.Printf("[Stream] Loaded %d zones for floor %d using legacy coordinates (x: %.0f-%.0f, y: %.0f-%.0f)",
-			len(zones), bbox.Floor, bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)
 	}
 
 	return zones

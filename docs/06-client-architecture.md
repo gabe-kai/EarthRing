@@ -259,12 +259,16 @@ gameStateManager.updatePlayerState({
 
 // Listen to state changes
 gameStateManager.on('chunkAdded', ({ chunkID, chunkData }) => {
-  console.log('Chunk added:', chunkID);
+  if (window.earthring?.debug) {
+    console.log('Chunk added:', chunkID);
+  }
 });
 
 // Listen to active floor changes
 gameStateManager.on('activeFloorChanged', ({ oldFloor, newFloor }) => {
-  console.log(`Floor changed from ${oldFloor} to ${newFloor}`);
+  if (window.earthring?.debug) {
+    console.log(`Floor changed from ${oldFloor} to ${newFloor}`);
+  }
   // All systems automatically handle the floor change
 });
 ```

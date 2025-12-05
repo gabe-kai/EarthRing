@@ -162,11 +162,6 @@ export class StructureManager {
       return;
     }
 
-    // Debug: Log structure count
-    if (typeof window !== 'undefined' && window.earthring?.debug) {
-      console.log(`[Structures] Received ${structures.length} structure(s) for chunk ${chunkID}`);
-    }
-
     // Track structures for this chunk
     if (!this.chunkStructures.has(chunkID)) {
       this.chunkStructures.set(chunkID, new Set());
@@ -176,11 +171,6 @@ export class StructureManager {
     const activeFloor = this.gameState.getActiveFloor();
 
     structures.forEach(structure => {
-      // Debug: Log structure details
-      if (typeof window !== 'undefined' && window.earthring?.debug && structure.structure_type === 'building') {
-        const dims = structure.dimensions || {};
-        console.log(`[Structures] Building ${structure.id}: type=${structure.structure_type}, subtype=${structure.building_subtype || 'N/A'}, windows=${(structure.windows || []).length}, dims=${dims.width || '?'}x${dims.depth || '?'}x${dims.height || '?'}`);
-      }
 
       // Upsert to game state
       this.gameState.upsertStructure(structure);
@@ -277,10 +267,6 @@ export class StructureManager {
     const dimensions = this.getStructureDimensions(structure);
     
     // Debug: Log building variability
-    if (typeof window !== 'undefined' && window.earthring?.debug && structure.structure_type === 'building') {
-      const subtype = structure.building_subtype || 'N/A';
-      console.log(`[Structures] Building ${structure.id}: ${subtype} - ${dimensions.width.toFixed(1)}x${dimensions.depth.toFixed(1)}x${dimensions.height.toFixed(1)}m`);
-    }
     const structureX = structure.position.x;
     const structureY = structure.position.y;
     const floor = structure.floor ?? 0;
