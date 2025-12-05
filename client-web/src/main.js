@@ -56,16 +56,37 @@ window.structureManager = structureManager;
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController, zoneManager);
 // Wire structure manager into chunk manager for streamed structures and cleanup
 chunkManager.structureManager = structureManager;
+// TODO: DEPRECATED - Grid rendering moved to platform shader material in ChunkManager
+// GridOverlay will be removed in a future update
+// Keeping for now for fallback, but disabled
 const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateManager, {
   radius: 250, // 250m radius circular grid
   majorSpacing: 5,
   minorSpacing: 1,
   fadeStart: 0.7, // Start fading at 70% of radius
 });
+// Disable old grid overlay rendering - now handled by platform shader
+gridOverlay.setVisible(false);
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 // Expose zone editor globally for debugging/access
 window.zoneEditor = zoneEditor;
-createZonesToolbar(zoneManager, gridOverlay, gameStateManager);
+const zonesToolbar = createZonesToolbar(zoneManager, gridOverlay, gameStateManager, chunkManager);
+
+// Import and create zone info tags
+import { ZoneInfoTags } from './zones/zone-info-tags.js';
+const zoneInfoTags = new ZoneInfoTags(sceneManager, cameraController, gameStateManager, zoneManager, zoneEditor);
+window.zoneInfoTags = zoneInfoTags; // Expose for debugging
+
+// Wire up toolbar state to zone info tags
+zonesToolbar.setOnExpandedChanged((expanded) => {
+  zoneInfoTags.setToolbarExpanded(expanded);
+});
+zonesToolbar.setOnZonesVisibilityChanged((visible) => {
+  zoneInfoTags.setZonesVisible(visible);
+});
+// Initialize state (zones start visible by default)
+zoneInfoTags.setToolbarExpanded(zonesToolbar.isExpanded());
+zoneInfoTags.setZonesVisible(true); // Zones are visible by default
 
 // Initialize debug info panel
 const debugPanel = new DebugInfoPanel(
@@ -220,8 +241,16 @@ sceneManager.onRender((deltaTime) => {
   // Update zone editor floor based on camera position
   zoneEditor.updateFloorFromCamera();
   
-  // Update grid overlay position to follow camera
-  gridOverlay.update();
+  // TODO: DEPRECATED - Grid rendering moved to platform shader material
+  // gridOverlay.update(); // Disabled - grid now rendered in platform shader
+  
+  // Update camera position in shared platform material for grid fade calculation
+  chunkManager.updateCameraPosition();
+  
+  // Update zone info tag positions
+  if (window.zoneInfoTags) {
+    window.zoneInfoTags.updateTagPositions();
+  }
   
   // Update debug info panel
   debugPanel.update();

@@ -189,6 +189,8 @@ describe('ZoneManager', () => {
     });
 
     it('renders zones at ring boundary (chunk 0)', () => {
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       const zone = {
         id: 1,
         zone_type: 'restricted',
@@ -203,11 +205,13 @@ describe('ZoneManager', () => {
       mockCamera.position.x = 0;
       zoneManager.renderZone(zone);
 
-      // Zone should be rendered (scene.add called)
-      expect(mockScene.add).toHaveBeenCalled();
+      // renderZone() is disabled, so it returns early and scene.add should NOT be called
+      expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     it('renders zones at ring boundary (chunk 263999)', () => {
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       const zone = {
         id: 2,
         zone_type: 'restricted',
@@ -222,10 +226,13 @@ describe('ZoneManager', () => {
       mockCamera.position.x = 264000000;
       zoneManager.renderZone(zone);
 
-      expect(mockScene.add).toHaveBeenCalled();
+      // renderZone() is disabled, so scene.add should NOT be called
+      expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     it('handles negative camera positions (west of origin)', () => {
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       const zone = {
         id: 3,
         zone_type: 'restricted',
@@ -240,11 +247,13 @@ describe('ZoneManager', () => {
       mockCamera.position.x = -5000;
       zoneManager.renderZone(zone);
 
-      // Zone should still render correctly (wrapping handled)
-      expect(mockScene.add).toHaveBeenCalled();
+      // renderZone() is disabled, so scene.add should NOT be called
+      expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     it('handles zones spanning wrap boundary', () => {
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       const zone = {
         id: 4,
         zone_type: 'restricted',
@@ -267,11 +276,13 @@ describe('ZoneManager', () => {
       mockCamera.position.x = 0;
       zoneManager.renderZone(zone);
 
-      // Zone spanning boundary should render correctly
-      expect(mockScene.add).toHaveBeenCalled();
+      // renderZone() is disabled, so scene.add should NOT be called
+      expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     it('only renders zones on active floor', () => {
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       gameStateManager.getActiveFloor = () => 1; // Active floor is 1
       const zone = {
         id: 5,
@@ -285,30 +296,14 @@ describe('ZoneManager', () => {
 
       zoneManager.renderZone(zone);
 
-      // Zone should be removed (wrong floor), not added
-      expect(gameStateManager.removeZone).toHaveBeenCalledWith(5);
+      // renderZone() is disabled, so it returns early and doesn't check floor or call removeZone
+      expect(gameStateManager.removeZone).not.toHaveBeenCalled();
       expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     it('handles full-ring zones (spans > 50% of ring)', () => {
-      // For a zone to have effectiveSpan > 132M, we need a zone that wraps around.
-      // A zone from near the end to near the start will have:
-      // - A small direct span (if we go the long way)
-      // - A large wrapped span (if we go the short way)
-      // But the effective span is the MINIMUM, so we need both to be > 132M, which is impossible.
-      //
-      // Actually, the code's logic means a contiguous zone can never be "full-ring" by this definition.
-      // The test might be testing the wrong thing. Let's test with a zone that has coordinates
-      // that when unwrapped would span > 132M, but the actual coordinates might wrap.
-      // 
-      // Actually, let me check: if a zone has coordinates that wrap (e.g., [263999000, ... 1000]),
-      // the minX would be 1000 and maxX would be 263999000, giving:
-      // - directSpan = 263999000 - 1000 = 263998000 (huge!)
-      // - wrappedSpan = 264000000 - 263998000 = 2000 (tiny)
-      // - effectiveSpan = 2000 (not full-ring!)
-      //
-      // So the current logic doesn't handle wrapped coordinates well. For now, let's just
-      // test that a large zone gets rendered, and adjust the expectation.
+      // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+      // the platform shader in ChunkManager. renderZone() returns early.
       const zone = {
         id: 6,
         zone_type: 'restricted',
@@ -327,16 +322,14 @@ describe('ZoneManager', () => {
 
       zoneManager.renderZone(zone);
 
-      // Zone should be rendered
-      expect(mockScene.add).toHaveBeenCalled();
-      // Note: Due to effective span calculation (min of direct and wrapped),
-      // zones typically won't be cached as full-ring unless they truly wrap
-      // in a way that makes both spans > 132M, which is geometrically difficult.
-      // The cache check might not pass, but rendering should work.
+      // renderZone() is disabled, so scene.add should NOT be called
+      expect(mockScene.add).not.toHaveBeenCalled();
     });
 
     describe('floating origin pattern', () => {
       it('positions zone group at camera X position (floating origin)', () => {
+        // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+        // the platform shader in ChunkManager. renderZone() returns early.
         const zone = {
           id: 7,
           zone_type: 'restricted',
@@ -352,19 +345,13 @@ describe('ZoneManager', () => {
         mockCamera.position.x = largeCameraX;
         zoneManager.renderZone(zone);
 
-        // Verify zone group was added to scene
-        expect(mockScene.add).toHaveBeenCalled();
-        
-        // Get the zone group that was added (first call, first argument)
-        const addedGroup = mockScene.add.mock.calls[0][0];
-        
-        // CRITICAL: Zone group should be positioned at camera X (floating origin)
-        // This ensures vertices are built relative to camera, maintaining precision
-        // The position.x property should equal the camera X position
-        expect(addedGroup.position.x).toBe(largeCameraX);
+        // renderZone() is disabled, so scene.add should NOT be called
+        expect(mockScene.add).not.toHaveBeenCalled();
       });
 
       it('converts zone coordinates to local space (floating origin)', () => {
+        // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+        // the platform shader in ChunkManager. renderZone() returns early.
         const zone = {
           id: 8,
           zone_type: 'restricted',
@@ -380,23 +367,15 @@ describe('ZoneManager', () => {
         mockCamera.position.x = largeCameraX;
         zoneManager.renderZone(zone);
 
-        // Verify zone group was added
-        expect(mockScene.add).toHaveBeenCalled();
-        
-        // Get the zone group
-        const addedGroup = mockScene.add.mock.calls[0][0];
-        
-        // Zone group should be positioned at camera X (floating origin)
-        expect(addedGroup.position.x).toBe(largeCameraX);
-        
-        // The zone's vertices should be in local coordinates (relative to camera)
-        // Since the zone starts at X=22,000,000 and camera is at X=22,000,000,
-        // the local X coordinates should be near 0 (not 22,000,000)
-        // We can verify this by checking that the group has children (fill/outline meshes)
-        expect(addedGroup.children.length).toBeGreaterThan(0);
+        // renderZone() is disabled, so scene.add should NOT be called
+        expect(mockScene.add).not.toHaveBeenCalled();
       });
 
       it('maintains precision at large distances (prevents flickering)', () => {
+        // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+        // the platform shader in ChunkManager. renderZone() returns early.
+        // The shader-based rendering handles precision through the floating origin pattern
+        // at the chunk level, not at the individual zone level.
         const zone = {
           id: 9,
           zone_type: 'restricted',
@@ -413,24 +392,17 @@ describe('ZoneManager', () => {
         
         // Render zone first time
         zoneManager.renderZone(zone);
-        expect(mockScene.add).toHaveBeenCalled();
-        const firstGroup = mockScene.add.mock.calls[0][0];
-        const firstPosition = firstGroup.position.x;
+        expect(mockScene.add).not.toHaveBeenCalled();
         
         // Clear and render again (simulating frame update)
         mockScene.add.mockClear();
         zoneManager.renderZone(zone);
-        expect(mockScene.add).toHaveBeenCalled();
-        const secondGroup = mockScene.add.mock.calls[0][0];
-        const secondPosition = secondGroup.position.x;
-        
-        // Position should be consistent (no flickering from precision loss)
-        // If floating origin wasn't used, positions would vary slightly due to precision loss
-        expect(secondPosition).toBe(firstPosition);
-        expect(secondPosition).toBe(largeCameraX);
+        expect(mockScene.add).not.toHaveBeenCalled();
       });
 
       it('handles floating origin at different camera positions', () => {
+        // NOTE: Mesh-based zone rendering is disabled. Zone rendering is now handled by
+        // the platform shader in ChunkManager. renderZone() returns early.
         const zone = {
           id: 10,
           zone_type: 'restricted',
@@ -444,25 +416,19 @@ describe('ZoneManager', () => {
         // Test at origin
         mockCamera.position.x = 0;
         zoneManager.renderZone(zone);
-        expect(mockScene.add).toHaveBeenCalled();
-        let addedGroup = mockScene.add.mock.calls[0][0];
-        expect(addedGroup.position.x).toBe(0);
+        expect(mockScene.add).not.toHaveBeenCalled();
         
         // Test at large distance
         mockScene.add.mockClear();
         mockCamera.position.x = 22000000;
         zoneManager.renderZone(zone);
-        expect(mockScene.add).toHaveBeenCalled();
-        addedGroup = mockScene.add.mock.calls[0][0];
-        expect(addedGroup.position.x).toBe(22000000);
+        expect(mockScene.add).not.toHaveBeenCalled();
         
         // Test at negative position
         mockScene.add.mockClear();
         mockCamera.position.x = -5000;
         zoneManager.renderZone(zone);
-        expect(mockScene.add).toHaveBeenCalled();
-        addedGroup = mockScene.add.mock.calls[0][0];
-        expect(addedGroup.position.x).toBe(-5000);
+        expect(mockScene.add).not.toHaveBeenCalled();
       });
     });
   });

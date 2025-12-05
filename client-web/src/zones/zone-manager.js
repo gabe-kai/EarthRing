@@ -156,8 +156,6 @@ export class ZoneManager {
     if (isBoundary || renderedCount.count === 0) {
       if (renderedCount.count === 0 && zones.length > 0) {
         console.warn(`[Zones] Chunk ${chunkID}: 0 zones rendered (all ${skippedCount.count} skipped - wrong floor)`);
-      } else if (renderedCount.count > 0 && isBoundary) {
-        console.log(`[Zones] Chunk ${chunkID}: ${renderedCount.count} zone(s) rendered, ${skippedCount.count} skipped`);
       }
     }
   }
@@ -207,9 +205,6 @@ export class ZoneManager {
       // Only log if we actually removed zones or if we're near boundaries
       if (removedViaMetadata > 0) {
         const isBoundary = chunkIndex !== null && (chunkIndex < 10 || chunkIndex > 263990);
-        if (isBoundary) {
-          console.log(`[Zones] Cleanup chunk ${chunkID}: removed ${removedViaMetadata} zone(s) via metadata`);
-        }
       }
       return;
     }
@@ -232,7 +227,6 @@ export class ZoneManager {
     if (isBoundary && zoneIDs.size > 0) {
       const cameraPos = this.cameraController?.getEarthRingPosition?.();
       const cameraS = cameraPos ? cameraPos.x : 0;
-      console.log(`[Zones] Cleanup chunk ${chunkID} (idx=${chunkIndex}): removed ${zoneIDs.size} zone(s) at camera s=${cameraS.toFixed(1)}`);
     }
     
     // Remove chunk from tracking
@@ -494,7 +488,16 @@ export class ZoneManager {
     }
   }
 
+  /**
+   * TODO: DEPRECATED - Zone rendering will be moved to platform shader material
+   * This method is disabled - zones will be rendered in the platform shader
+   */
   renderZone(zone) {
+    // Disabled - zone rendering will be handled by platform shader material
+    // Keeping method signature for API compatibility during migration
+    return;
+    
+    /* Original implementation below (disabled):
     if (!zone || !zone.geometry) {
       return;
     }
@@ -695,7 +698,7 @@ export class ZoneManager {
     const zoneGroup = new THREE.Group();
     const zoneOriginX = cameraX;
     zoneGroup.position.x = zoneOriginX;
-    zoneGroup.renderOrder = 1; // Render below structures (which have renderOrder 10)
+    zoneGroup.renderOrder = 0; // Group renderOrder (children override this with higher values)
     zoneGroup.userData.zoneID = zone.id; // Use zoneID for consistency with editor
     zoneGroup.userData.zoneId = zone.id; // Keep both for compatibility
     zoneGroup.userData.zoneType = zoneType;
@@ -858,11 +861,11 @@ export class ZoneManager {
           fragmentShader,
           transparent: true,
           opacity: fillOpacity,
-          depthWrite: false,
+          depthWrite: true, // Write depth to ensure proper ordering
           depthTest: true,
           polygonOffset: true,
-          polygonOffsetFactor: 2,
-          polygonOffsetUnits: 2,
+          polygonOffsetFactor: -1, // Negative to push forward
+          polygonOffsetUnits: -1,
           side: THREE.DoubleSide,
           uniforms: {
             opacity: { value: fillOpacity }
@@ -883,19 +886,19 @@ export class ZoneManager {
           color: fillColor,
           transparent: true,
           opacity: fillOpacity,
-          depthWrite: false,
+          depthWrite: true, // Write depth to ensure proper ordering
           depthTest: true,
           polygonOffset: true,
-          polygonOffsetFactor: 2,
-          polygonOffsetUnits: 2,
+          polygonOffsetFactor: -1, // Negative to push forward
+          polygonOffsetUnits: -1,
           side: THREE.DoubleSide,
         });
       }
       
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
       fillMesh.rotation.x = -Math.PI / 2;
-      fillMesh.position.y = floorHeight + 0.001; // Slightly above floor
-      fillMesh.renderOrder = 1;
+      fillMesh.position.y = floorHeight + 0.01; // Higher above floor to avoid z-fighting with platform shader
+      fillMesh.renderOrder = 10; // Higher render order to appear above platform
       zoneGroup.add(fillMesh);
 
       // Extract opacity and RGB for stroke
@@ -929,7 +932,7 @@ export class ZoneManager {
         linewidth: 2,
       });
       const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
-      outline.renderOrder = 2;
+      outline.renderOrder = 11; // Even higher to appear above fills
       zoneGroup.add(outline);
     });
 
@@ -937,6 +940,9 @@ export class ZoneManager {
       return;
     }
 
+    // Disabled - zone rendering will be handled by platform shader material
+    // TODO: Implement zone rendering in platform shader
+    /*
     this.scene.add(zoneGroup);
     this.zoneMeshes.set(zone.id, zoneGroup);
     
@@ -950,6 +956,7 @@ export class ZoneManager {
         console.log('[ZoneManager] Cached full-ring zone:', zone.id);
       }
     }
+    */
   }
 
   removeZone(zoneID) {
@@ -991,18 +998,31 @@ export class ZoneManager {
     this.setVisibility(!this.zonesVisible);
   }
 
+  /**
+   * TODO: DEPRECATED - Zone rendering disabled, will be moved to platform shader
+   * This method still works but has no effect until zone rendering is implemented in the shader
+   * Zone CRUD operations (create, update, delete) still work via ZoneEditor
+   */
   setVisibility(visible) {
     this.zonesVisible = visible;
-    this.updateAllZoneVisibility();
-    console.info(`[Zones] ${visible ? 'shown' : 'hidden'} (meshes: ${this.zoneMeshes.size})`);
+    // Disabled - zone rendering moved to platform shader
+    // Visibility is now controlled via ChunkManager.setZonesVisible()
+    // this.updateAllZoneVisibility();
+    console.info(`[Zones] ${visible ? 'shown' : 'hidden'} (shader-based rendering)`);
   }
 
+  /**
+   * Set visibility for a specific zone type
+   * @param {string} zoneType - Zone type (e.g., 'residential', 'commercial')
+   * @param {boolean} visible - Whether zone type should be visible
+   */
   setZoneTypeVisibility(zoneType, visible) {
     // Normalize zone type (mixed_use -> mixed-use)
     const normalizedType = zoneType.toLowerCase().replace('_', '-');
     this.zoneTypeVisibility.set(normalizedType, visible);
-    this.updateAllZoneVisibility();
-    console.info(`[Zones] ${normalizedType} ${visible ? 'shown' : 'hidden'}`);
+    console.info(`[Zones] ${normalizedType} ${visible ? 'shown' : 'hidden'} (shader-based rendering)`);
+    // Note: ChunkManager will query zoneTypeVisibility when updating shader data
+    // Caller should trigger chunkManager.updateZoneShaderData() after calling this
   }
 
   updateAllZoneVisibility() {

@@ -8,6 +8,7 @@ export default defineConfig({
     environmentMatchGlobs: [
       ['**/ui/**/*.test.js', 'jsdom'],
       ['**/ui/**/*.spec.js', 'jsdom'],
+      ['**/zones/zone-info-tags.test.js', 'jsdom'],
     ],
     // Setup file to handle unhandled errors from jsdom dependencies
     setupFiles: ['./vitest.setup.js'],

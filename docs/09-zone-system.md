@@ -482,6 +482,45 @@ Zone splitting occurs automatically when a new zone bisects an existing zone:
 
 **Status**: ✅ **IMPLEMENTED** - Zone merging and bisection are fully implemented in the server-side conflict resolution system.
 
+## Zone Interaction
+
+### Zone Info Tags
+
+**Status**: ✅ **IMPLEMENTED** - Zone info tags provide interactive UI elements for zone selection and details viewing.
+
+When the zone toolbar is open and zones are visible, floating "i" (info) buttons appear above zones near the camera. Clicking an info button opens the zone details in the Info panel.
+
+**Features**:
+- **Distance Filtering**: Only zones within 1000m of the camera display info tags
+- **Maximum Display**: Up to 30 nearest zones show tags at once to reduce clutter
+- **Floor Filtering**: Tags only appear for zones on the active floor
+- **Zone Type Filtering**: Tags respect individual zone type visibility toggles
+- **Coordinate Wrapping**: Tags work correctly on both X+ and X- sides of the ring, handling boundary wrapping
+- **Automatic Updates**: Tags update when zones are added, removed, or modified
+
+**Implementation Details**:
+- Tags are positioned 15m above the zone center using floating origin pattern for accurate placement
+- Tag positions are computed relative to the camera's Three.js position to maintain precision
+- Distance calculations properly wrap around the ring boundary using `wrapArcLength` for shortest path
+- Tags are hidden when outside the viewport or behind the camera
+
+**Files**:
+- `client-web/src/zones/zone-info-tags.js` - Main implementation
+- `client-web/src/zones/zone-info-tags.test.js` - Unit tests
+
+### Zone Selection
+
+Zones can be selected through:
+1. **Info Tags**: Click the "i" button above a zone when the toolbar is open
+2. **Direct Click**: (Future) Click directly on a zone polygon in the 3D view
+
+When a zone is selected, its details appear in the Info panel, including:
+- Zone type and properties
+- Polygon geometry
+- Floor assignment
+- Associated structures
+- Edit controls
+
 ## Transportation System
 
 [Rest of the document continues...]

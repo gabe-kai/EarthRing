@@ -3,7 +3,7 @@
  * Left-side vertical toolbar with expandable zone controls
  */
 
-export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
+export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager, chunkManager = null) {
   const toolbar = document.createElement('div');
   toolbar.id = 'zones-toolbar';
   toolbar.className = 'zones-toolbar';
@@ -20,6 +20,12 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
     park: true,
     agricultural: true,
     restricted: true,
+  };
+  
+  // Callbacks for external state tracking
+  const callbacks = {
+    onExpandedChanged: null,
+    onZonesVisibilityChanged: null,
   };
 
   // Styles
@@ -210,6 +216,9 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
   icon.onclick = () => {
     expanded = !expanded;
     panel.classList.toggle('expanded', expanded);
+    if (callbacks.onExpandedChanged) {
+      callbacks.onExpandedChanged(expanded);
+    }
   };
   toolbar.appendChild(icon);
 
@@ -221,6 +230,12 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
   header.className = 'zones-toolbar-header';
   header.textContent = 'Zones & Grid';
   panel.appendChild(header);
+
+  // Initialize shader uniforms to match toolbar state
+  if (chunkManager) {
+    chunkManager.setGridVisible(visibilityState.grid);
+    chunkManager.setZonesVisible(visibilityState.allZones);
+  }
 
   // Create toggle item helper
   const createToggleItem = (label, key, onClick) => {
@@ -305,20 +320,34 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
     gameStateManager.on('activeFloorChanged', updateFloorDisplay);
   }
 
-  // Grid toggle
+  // Grid toggle - now uses platform shader material
   panel.appendChild(
     createToggleItem('Grid', 'grid', (visible) => {
-      if (gridOverlay) {
-        gridOverlay.setVisible(visible);
+      // Use new platform shader material for grid visibility
+      if (chunkManager) {
+        chunkManager.setGridVisible(visible);
       }
+      // TODO: DEPRECATED - Old grid overlay kept for fallback but disabled
+      // if (gridOverlay) {
+      //   gridOverlay.setVisible(visible);
+      // }
     })
   );
 
-  // All Zones toggle
+  // All Zones toggle - now uses platform shader material
   panel.appendChild(
     createToggleItem('All Zones', 'allZones', (visible) => {
-      if (zoneManager) {
-        zoneManager.setVisibility(visible);
+      // Use new platform shader material for zone visibility
+      if (chunkManager) {
+        chunkManager.setZonesVisible(visible);
+      }
+      // TODO: DEPRECATED - Zone rendering will be moved to platform shader
+      // Keep ZoneManager.setVisibility for zone CRUD operations (not rendering)
+      // if (zoneManager) {
+      //   zoneManager.setVisibility(visible);
+      // }
+      if (callbacks.onZonesVisibilityChanged) {
+        callbacks.onZonesVisibilityChanged(visible);
       }
     })
   );
@@ -341,6 +370,10 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
         if (zoneManager) {
           zoneManager.setZoneTypeVisibility(key, visible);
         }
+        // Update shader when zone type visibility changes
+        if (chunkManager) {
+          chunkManager.updateZoneShaderData();
+        }
       })
     );
   });
@@ -348,6 +381,11 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager) {
   toolbar.appendChild(panel);
   document.body.appendChild(toolbar);
 
-  return toolbar;
+  return {
+    element: toolbar,
+    isExpanded: () => expanded,
+    setOnExpandedChanged: (callback) => { callbacks.onExpandedChanged = callback; },
+    setOnZonesVisibilityChanged: (callback) => { callbacks.onZonesVisibilityChanged = callback; },
+  };
 }
 
