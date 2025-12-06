@@ -162,6 +162,7 @@ export class ChunkManager {
         // Check if we're near a grid line
         // Need to check both near 0 and near spacing value (wrapping)
         float halfLineWidth = uGridLineWidth * 0.5;
+        float halfMinorLineWidth = halfLineWidth * 0.5; // Minor lines are half as thick
         
         // Distance from nearest grid line (handles wrapping)
         float distMajorX = min(majorXMod, uGridMajorSpacing - majorXMod);
@@ -174,8 +175,8 @@ export class ChunkManager {
         // Vertical lines (north-south): constant X (arc length), varying Y (radial offset)
         bool onMajorH = distMajorY < halfLineWidth;  // Horizontal: constant Y = red
         bool onMajorV = distMajorX < halfLineWidth;  // Vertical: constant X = blue
-        bool onMinorH = distMinorY < halfLineWidth && !onMajorH;
-        bool onMinorV = distMinorX < halfLineWidth && !onMajorV;
+        bool onMinorH = distMinorY < halfMinorLineWidth && !onMajorH;
+        bool onMinorV = distMinorX < halfMinorLineWidth && !onMajorV;
         
         // Special case: Y=0 axis (station spine) - always red, thicker
         bool onAxisY = abs(gridY) < halfLineWidth * 2.0;
@@ -210,8 +211,8 @@ export class ChunkManager {
           // Major vertical grid lines (5m, north-south) - blue
           gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.95);
         } else if (onMinorH || onMinorV) {
-          // Minor grid lines (1m)
-          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.7);
+          // Minor grid lines (1m) - thinner and more contrasty
+          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.775);
         }
         
         return gridColor;
@@ -369,8 +370,8 @@ export class ChunkManager {
         uGridMajorSpacing: { value: 5.0 },
         uGridMinorSpacing: { value: 1.0 },
         uGridColorMajorH: { value: new THREE.Color(0xff2d2d) }, // Red
-        uGridColorMajorV: { value: new THREE.Color(0x2d7bff) }, // Blue
-        uGridColorMinor: { value: new THREE.Color(0x9c9c9c) },  // Gray
+        uGridColorMajorV: { value: new THREE.Color(0x0088ff) }, // Blue (brighter for better contrast)
+        uGridColorMinor: { value: new THREE.Color(0xb2b2b2) },  // Medium-light gray (halfway between old and bright)
         uGridLineWidth: { value: 0.2 }, // 20cm line width (increased for visibility)
         uGridFadeRadius: { value: 200.0 }, // Start fading at 200m
         uGridMaxRadius: { value: 250.0 },  // Fully faded at 250m

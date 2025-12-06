@@ -552,9 +552,13 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 **Grid Rendering** (Platform Shader Material in `ChunkManager`):
 - Grid is rendered procedurally in the platform shader fragment shader
 - 5m major grid lines with 1m minor subdivisions
-- **Grid Line Colors**: All red lines run east-west (horizontal), all blue lines run north-south (vertical)
+- **Grid Line Colors**: 
+  - Red lines (`0xff2d2d`): Run east-west (horizontal)
+  - Blue lines (`0x0088ff`): Run north-south (vertical) - bright blue for better contrast against zones
+  - Minor lines (`0xb2b2b2`): Medium-light gray, half the thickness of major lines
 - **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
-- Shader-driven fade based on distance from camera
+- **Line Widths**: Major lines use 20cm width; minor lines use 10cm width (half of major)
+- Shader-driven fade based on distance from camera (starts at 200m, fully faded at 250m)
 - Medium-thickness lines on every 20m multiple for better navigation
 - Grid visibility controlled via `ChunkManager.setGridVisible()` method
 - Grid is rendered as part of the chunk platform material for optimal performance

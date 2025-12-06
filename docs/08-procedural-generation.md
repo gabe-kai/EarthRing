@@ -1647,8 +1647,9 @@ The procedural generation system has extensive test coverage for building genera
 - ✅ **Enhanced**: Wall height calculations - `totalWallHeight` now correctly includes foundation height (foundation + building height) for proper positioning
 
 ### Grid Overlay
-- ✅ **Updated**: Minor grid lines changed from white (0xffffff) back to medium gray (0x9c9c9c) to reduce visual contrast
-- ✅ **Maintained**: All red grid lines run east-west (horizontal), all blue grid lines run north-south (vertical)
+- ✅ **Updated**: Blue grid lines changed to brighter blue (`0x0088ff`) for better contrast against zones
+- ✅ **Updated**: Minor grid lines use medium-light gray (`0xb2b2b2`) and are half the thickness of major lines for subtle visibility
+- ✅ **Maintained**: All red grid lines (`0xff2d2d`) run east-west (horizontal), all blue grid lines (`0x0088ff`) run north-south (vertical)
 - ✅ **Maintained**: Major grid lines at 5m intervals (red for horizontal/east-west, blue for vertical/north-south), with gray 1m minor grid inside
 - ✅ **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
 
