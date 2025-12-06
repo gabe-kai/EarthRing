@@ -19,7 +19,6 @@ import { ChunkManager } from './chunks/chunk-manager.js';
 import { ZoneManager } from './zones/zone-manager.js';
 import { ZoneEditor } from './zones/zone-editor.js';
 import { StructureManager } from './structures/structure-manager.js';
-import { GridOverlay } from './rendering/grid-overlay.js';
 import { DebugInfoPanel } from './ui/debug-info.js';
 import { Minimap } from './ui/minimap.js';
 import { createZonesToolbar } from './ui/zones-toolbar.js';
@@ -56,21 +55,10 @@ window.structureManager = structureManager;
 const chunkManager = new ChunkManager(sceneManager, gameStateManager, cameraController, zoneManager);
 // Wire structure manager into chunk manager for streamed structures and cleanup
 chunkManager.structureManager = structureManager;
-// TODO: DEPRECATED - Grid rendering moved to platform shader material in ChunkManager
-// GridOverlay will be removed in a future update
-// Keeping for now for fallback, but disabled
-const gridOverlay = new GridOverlay(sceneManager, cameraController, gameStateManager, {
-  radius: 250, // 250m radius circular grid
-  majorSpacing: 5,
-  minorSpacing: 1,
-  fadeStart: 0.7, // Start fading at 70% of radius
-});
-// Disable old grid overlay rendering - now handled by platform shader
-gridOverlay.setVisible(false);
 const zoneEditor = new ZoneEditor(sceneManager, cameraController, zoneManager, gameStateManager);
 // Expose zone editor globally for debugging/access
 window.zoneEditor = zoneEditor;
-const zonesToolbar = createZonesToolbar(zoneManager, gridOverlay, gameStateManager, chunkManager);
+const zonesToolbar = createZonesToolbar(zoneManager, gameStateManager, chunkManager);
 
 // Import and create zone info tags
 import { ZoneInfoTags } from './zones/zone-info-tags.js';
@@ -92,7 +80,6 @@ zoneInfoTags.setZonesVisible(true); // Zones are visible by default
 const debugPanel = new DebugInfoPanel(
   sceneManager,
   cameraController,
-  gridOverlay,
   gameStateManager,
   chunkManager,
   zoneManager
@@ -119,7 +106,6 @@ window.earthring = {
   zoneManager,
   zoneEditor,
   structureManager,
-  gridOverlay,
   debugPanel,
   wsClient,
   mousePosition: globalMousePosition, // Global mouse position for debug panel
@@ -242,7 +228,6 @@ sceneManager.onRender((deltaTime) => {
   zoneEditor.updateFloorFromCamera();
   
   // TODO: DEPRECATED - Grid rendering moved to platform shader material
-  // gridOverlay.update(); // Disabled - grid now rendered in platform shader
   
   // Update camera position in shared platform material for grid fade calculation
   chunkManager.updateCameraPosition();

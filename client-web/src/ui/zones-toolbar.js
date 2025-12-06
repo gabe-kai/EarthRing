@@ -3,7 +3,7 @@
  * Left-side vertical toolbar with expandable zone controls
  */
 
-export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager, chunkManager = null) {
+export function createZonesToolbar(zoneManager, gameStateManager, chunkManager = null) {
   const toolbar = document.createElement('div');
   toolbar.id = 'zones-toolbar';
   toolbar.className = 'zones-toolbar';
@@ -327,10 +327,6 @@ export function createZonesToolbar(zoneManager, gridOverlay, gameStateManager, c
       if (chunkManager) {
         chunkManager.setGridVisible(visible);
       }
-      // TODO: DEPRECATED - Old grid overlay kept for fallback but disabled
-      // if (gridOverlay) {
-      //   gridOverlay.setVisible(visible);
-      // }
     })
   );
 

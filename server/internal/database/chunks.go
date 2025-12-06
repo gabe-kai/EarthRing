@@ -268,7 +268,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Convert zone data (GeoJSON Feature) to ZoneCreateInput
 				zoneMap, ok := zoneData.(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: zone data is not a map, skipping: %T", zoneData)
 					continue
 				}
 
@@ -289,7 +288,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Build zone geometry GeoJSON
 				geometryJSON, err := json.Marshal(geometry)
 				if err != nil {
-					log.Printf("[StoreChunk] Warning: failed to marshal zone geometry: %v", err)
+					// Failed to marshal zone geometry - skip this zone
 					continue
 				}
 
@@ -362,7 +361,7 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					zoneIDs = append(zoneIDs, zoneID)
 					continue
 				} else if err != sql.ErrNoRows {
-					log.Printf("[StoreChunk] Warning: failed to check for existing zone: %v", err)
+					// Failed to check for existing zone - skip this zone
 					continue
 				}
 
@@ -397,31 +396,26 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Convert structure data to StructureCreateInput
 				structureMap, ok := structureData.(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: structure data is not a map, skipping: %T", structureData)
 					continue
 				}
 
 				// Extract structure properties
 				structureType, ok := structureMap["structure_type"].(string)
 				if !ok || structureType == "" {
-					log.Printf("[StoreChunk] Warning: structure missing structure_type, skipping")
 					continue
 				}
 
 				// Extract position
 				posMap, ok := structureMap["position"].(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: structure position is not a map, skipping")
 					continue
 				}
 				posX, ok := posMap["x"].(float64)
 				if !ok {
-					log.Printf("[StoreChunk] Warning: structure missing X coordinate, skipping")
 					continue
 				}
 				posY, ok := posMap["y"].(float64)
 				if !ok {
-					log.Printf("[StoreChunk] Warning: structure missing Y coordinate, skipping")
 					continue
 				}
 

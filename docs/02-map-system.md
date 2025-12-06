@@ -893,7 +893,7 @@ The maglev rail runs through Level 0 (the primary floor) along the entire ring l
 
 **Implementation**:
 - Active floor is managed by `GameStateManager.activeFloor` (defaults to 0)
-- All rendering systems (ChunkManager, ZoneManager, GridOverlay) listen to `activeFloorChanged` events
+- All rendering systems (ChunkManager, ZoneManager) listen to `activeFloorChanged` events
 - Floor changes trigger automatic cleanup and reload of content for the new floor
 - Camera can move freely in elevation without affecting which floor's content is displayed
 

@@ -794,15 +794,8 @@ export class Minimap {
           this.ctx.lineWidth = 2;
           this.ctx.fillRect(simpleRectX, simpleRectY, chunkLengthScreen, chunkLengthScreen);
           this.ctx.strokeRect(simpleRectX, simpleRectY, chunkLengthScreen, chunkLengthScreen);
-          
-          // Debug logging removed to reduce spam - uncomment if needed
-          // console.log(`[Minimap] Drawing fallback rectangle for chunk ${chunkIndex} at screen (${screenX.toFixed(0)}, ${screenY.toFixed(0)}), size=${chunkLengthScreen.toFixed(0)}`);
           return; // Skip the detailed drawing below
         }
-        
-        // We have data or mesh, so draw the platform
-        // Debug logging removed to reduce spam - uncomment if needed
-        // console.log(`[Minimap] Chunk ${chunkIndex} has data/mesh, screen (${screenX.toFixed(0)}, ${screenY.toFixed(0)})`);
         
         // Always draw platforms that are within arc distance - don't filter by screen bounds
         // The view is 2km, so if chunk is within that distance, draw it

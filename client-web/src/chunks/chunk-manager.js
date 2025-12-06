@@ -222,8 +222,12 @@ export class ChunkManager {
         
         // Zone overlay: Render zones using point-in-polygon test
         if (uShowZones && uZoneCount > 0.0) {
-          // Snap fragment position to nearest 1m grid cell center
-          // This means many fragments will evaluate the same grid cell, reducing redundant calculations
+          // OPTIMIZATION: Snap fragment position to nearest 1m grid cell centerpoint
+          // This samples one point per minor grid cell (1m) instead of per-pixel sampling.
+          // Many fragments will map to the same grid cell center, effectively reducing
+          // point-in-polygon tests from thousands per chunk to one per 1m grid cell.
+          // Note: The GPU still executes the shader per fragment, but all fragments
+          // within the same 1m grid cell will use the same sampled position.
           float gridCellSize = uGridMinorSpacing; // 1m grid cells
           vec2 fragPosWorld = vec2(vWorldPosition.x, vWorldPosition.z);
           vec2 fragPos = floor(fragPosWorld / gridCellSize) * gridCellSize + gridCellSize * 0.5;
@@ -733,7 +737,6 @@ export class ChunkManager {
       
       // stream_delta can contain chunks, zones, or both
       if (data.chunks && Array.isArray(data.chunks)) {
-        console.log(`[Chunks] stream_delta received: ${data.chunks.length} chunks`);
         this.handleChunkData({ chunks: data.chunks });
       }
       // Also check for chunk_delta structure (for removed chunks)
@@ -741,7 +744,6 @@ export class ChunkManager {
         const delta = data.chunk_delta;
         const removed = delta.RemovedChunks || [];
         if (removed.length > 0) {
-          console.log(`[Chunks] stream_delta: Removing ${removed.length} chunks:`, removed);
           removed.forEach(chunkID => {
             this.removeChunkMesh(chunkID);
             this.gameStateManager.removeChunk(chunkID);
@@ -759,16 +761,12 @@ export class ChunkManager {
         return;
       }
       
-      if (window.earthring?.debug) {
-        console.log('[Chunks] Pose update acknowledged (async):', data);
-      }
       // Handle chunk delta if provided (removed chunks need to be cleaned up)
       if (data.chunk_delta) {
         const delta = data.chunk_delta;
         // Go struct fields are capitalized (RemovedChunks)
         const removed = delta.RemovedChunks || [];
         if (removed.length > 0) {
-          console.log(`[Chunks] Removing ${removed.length} chunks from async pose update:`, removed);
           removed.forEach(chunkID => {
             this.removeChunkMesh(chunkID);
             this.gameStateManager.removeChunk(chunkID);
@@ -779,9 +777,7 @@ export class ChunkManager {
     
     // Handle stream_ack messages (subscription confirmation)
     wsClient.on('stream_ack', (data) => {
-      if (window.earthring?.debug) {
-        console.log('[Chunks] Streaming subscription confirmed:', data);
-      }
+      // Subscription confirmed (no logging needed)
     });
     
     // Handle error messages
@@ -923,8 +919,6 @@ export class ChunkManager {
     // Wrap for legacy coordinate (backward compatibility)
     const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
 
-    console.log(`[Chunks] updateStreamingPose: subscription_id=${this.streamingSubscriptionID}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(4)}, floor=${floor}`);
-
     try {
       const response = await wsClient.request('stream_update_pose', {
         subscription_id: this.streamingSubscriptionID,
@@ -941,8 +935,6 @@ export class ChunkManager {
         },
       });
 
-      console.log(`[Chunks] stream_update_pose response:`, response);
-
       // Update stored position
       this.lastSubscriptionPosition = wrappedRingPosition;
       
@@ -952,31 +944,9 @@ export class ChunkManager {
         // Go struct fields are capitalized (AddedChunks, RemovedChunks)
         const added = delta.AddedChunks || [];
         const removed = delta.RemovedChunks || [];
-        // Log chunk delta changes (especially near boundaries)
-        const cameraX = this.getCurrentCameraX();
-        const isNearBoundary = cameraX > 263990000 || cameraX < 10000;
-        if (added.length > 0 || removed.length > 0 || isNearBoundary) {
-          console.log(`[Chunks] Chunk delta at cameraX=${cameraX.toFixed(1)}: added=${added.length}, removed=${removed.length}`);
-          if (isNearBoundary && (added.length > 0 || removed.length > 0)) {
-            console.log(`[Chunks] Near boundary - added chunks: ${added.slice(0, 5).join(', ')}${added.length > 5 ? '...' : ''}`);
-            console.log(`[Chunks] Near boundary - removed chunks: ${removed.slice(0, 5).join(', ')}${removed.length > 5 ? '...' : ''}`);
-          }
-        }
         
         // Handle removed chunks immediately
         if (removed.length > 0) {
-          const cameraX = this.getCurrentCameraX();
-          // Log only if we're removing many chunks (potential issue) or near boundaries
-          const chunkIndices = removed.map(id => {
-            const parts = id.split('_');
-            return parts.length >= 2 ? parseInt(parts[1], 10) : null;
-          }).filter(idx => idx !== null);
-          const isBoundary = chunkIndices.some(idx => idx < 10 || idx > 263990);
-          
-          if (removed.length > 5 || isBoundary) {
-            console.warn(`[Chunks] Removing ${removed.length} chunks from pose update at cameraX=${cameraX.toFixed(0)}:`, removed.slice(0, 10));
-          }
-          
           removed.forEach(chunkID => {
             this.removeChunkMesh(chunkID);
             this.gameStateManager.removeChunk(chunkID);
@@ -1017,9 +987,6 @@ export class ChunkManager {
     // Wrap for legacy coordinate (backward compatibility)
     const wrappedRingPosition = ((Math.round(ringPosition) % NEW_RING_CIRCUMFERENCE) + NEW_RING_CIRCUMFERENCE) % NEW_RING_CIRCUMFERENCE;
 
-    console.log(`[Chunks] subscribeToStreaming: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedRingPosition.toFixed(0)}, arc_length=${arc.s.toFixed(0)}, theta=${polar.theta.toFixed(6)}, r=${polar.r.toFixed(2)}, z=${polar.z.toFixed(2)}, floor=${floor}, radius=${radiusMeters}m`);
-    console.log(`[Chunks] subscribeToStreaming: conversion chain: raw=${ringPosition.toFixed(0)} → theta=${polar.theta.toFixed(6)} → arc=${arc.s.toFixed(0)}`);
-
     try {
       const response = await wsClient.request('stream_subscribe', {
         pose: {
@@ -1039,14 +1006,11 @@ export class ChunkManager {
         include_zones: true, // Include zones for ZoneManager to consume
       });
 
-      console.log(`[Chunks] stream_subscribe response:`, response);
-
       this.streamingSubscriptionID = response.subscription_id;
       // Store wrapped position for consistent distance calculations
       this.lastSubscriptionPosition = wrappedRingPosition;
       this.subscriptionRadiusMeters = radiusMeters;
       this.subscriptionWidthMeters = widthMeters;
-      console.log(`[Chunks] Subscription stored: ID=${this.streamingSubscriptionID}, position=${this.lastSubscriptionPosition.toFixed(0)}`);
       return response.subscription_id;
     } catch (error) {
       console.error('[Chunks] Failed to subscribe to streaming:', error);
@@ -1064,9 +1028,6 @@ export class ChunkManager {
    * @returns {Promise} Promise that resolves when request is sent
    */
   async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium') {
-    // DEBUG: Always log this call to track what's happening
-    console.log(`[Chunks] requestChunksAtPosition called: position=${ringPosition.toFixed(0)}, floor=${floor}, streaming=${this.useStreaming}, hasSubscription=${!!this.streamingSubscriptionID}`);
-    
     // If streaming is enabled and we have a subscription, update subscription if camera moved significantly
     if (this.useStreaming && this.streamingSubscriptionID) {
       // Check if camera has moved significantly (more than 1000m, different chunk, or different floor)
@@ -1095,10 +1056,6 @@ export class ChunkManager {
         const lastChunkIndex = ringArcToChunkIndex(lastArc);
         
         chunkChanged = currentChunkIndex !== lastChunkIndex;
-        
-        console.log(`[Chunks] Distance calc: raw=${ringPosition.toFixed(0)}, wrapped=${wrappedCurrent.toFixed(0)}, last=${this.lastSubscriptionPosition.toFixed(0)}, lastWrapped=${wrappedLast.toFixed(0)}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged} (${lastChunkIndex}→${currentChunkIndex})`);
-      } else {
-        console.log(`[Chunks] First subscription update (no last position)`);
       }
       
       // Update subscription if:
@@ -1111,28 +1068,21 @@ export class ChunkManager {
                            chunkChanged ||
                            (this.lastSubscriptionFloor !== undefined && this.lastSubscriptionFloor !== floor);
       
-      console.log(`[Chunks] Should update subscription: ${shouldUpdate} (lastPos=${this.lastSubscriptionPosition}, distance=${distanceMoved.toFixed(0)}m, chunkChanged=${chunkChanged}, floorChanged=${this.lastSubscriptionFloor !== floor})`);
-      
       if (shouldUpdate) {
-        console.log(`[Chunks] Updating streaming pose (moved ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged}, from ${this.lastSubscriptionPosition?.toFixed(0)} to ${ringPosition.toFixed(0)})`);
         // Update pose using stream_update_pose instead of re-subscribing
         try {
           await this.updateStreamingPose(ringPosition, floor);
           this.lastSubscriptionFloor = floor;
-          console.log(`[Chunks] Pose updated successfully`);
         } catch (error) {
           console.error('[Chunks] Failed to update streaming pose:', error);
           throw error;
         }
-      } else {
-        console.log(`[Chunks] Pose NOT updated (distance: ${distanceMoved.toFixed(0)}m, chunk changed: ${chunkChanged})`);
       }
       return;
     }
     
     // If we don't have a subscription, create one
     if (!this.streamingSubscriptionID) {
-      console.log('[Chunks] No streaming subscription found, creating one...');
       await this.subscribeToStreaming(ringPosition, floor, radius * 1000, radius * 1000);
       return;
     }
@@ -1309,20 +1259,7 @@ export class ChunkManager {
    * @param {Object} chunkData - Chunk data containing structures array
    */
   extractStructuresFromChunk(chunkID, chunkData) {
-    if (window.earthring?.debug) {
-      console.log(`[Chunks] extractStructuresFromChunk called for ${chunkID}`, {
-        hasChunkData: !!chunkData,
-        hasStructures: !!(chunkData && chunkData.structures),
-        structuresIsArray: Array.isArray(chunkData?.structures),
-        structuresLength: chunkData?.structures?.length || 0,
-        structures: chunkData?.structures
-      });
-    }
-    
     if (!chunkData || !chunkData.structures || !Array.isArray(chunkData.structures) || chunkData.structures.length === 0) {
-      if (window.earthring?.debug) {
-        console.log(`[Chunks] No structures to extract from chunk ${chunkID}`);
-      }
       return;
     }
 
@@ -1569,18 +1506,7 @@ export class ChunkManager {
       })
     );
     
-    // Log summary statistics
-    if (stats.compressed > 0) {
-      const avgRatio = (stats.totalUncompressedSize / stats.totalCompressedSize).toFixed(2);
-      const avgTime = (stats.totalDecompressTime / stats.compressed).toFixed(2);
-      console.log(`[Chunks] Decompressed ${stats.compressed} chunk(s): ${(stats.totalCompressedSize / 1024).toFixed(1)}KB → ${(stats.totalUncompressedSize / 1024).toFixed(1)}KB (avg ${avgRatio}:1) in ${avgTime}ms avg`);
-    }
-    if (stats.uncompressed > 0) {
-      console.log(`[Chunks] ${stats.uncompressed} chunk(s) already uncompressed`);
-    }
-    if (stats.withGeometry > 0 || stats.withoutGeometry > 0) {
-      console.log(`[Chunks] Processed: ${stats.withGeometry} with geometry, ${stats.withoutGeometry} without geometry`);
-    }
+    // Performance stats available via window.earthring.debug if needed
     if (stats.failed > 0) {
       console.warn(`[Chunks] ${stats.failed} chunk(s) failed to process`);
     }
@@ -1767,32 +1693,9 @@ export class ChunkManager {
         mesh.userData.lastCameraXUsed = cameraX;
         this.scene.add(mesh);
         this.chunkMeshes.set(chunkID, mesh);
-        
-        // Only log individual chunk rendering in debug mode
-        if (window.earthring?.debug) {
-          const geometry = chunkData.geometry;
-          if (geometry.vertices && geometry.vertices.length > 0) {
-            const firstVertex = geometry.vertices[0];
-            const earthringPos = { x: firstVertex[0], y: firstVertex[1], z: firstVertex[2] };
-            const threeJSPos = toThreeJS(earthringPos);
-            console.log(`[Chunks] Rendered ${chunkID} (width: ${geometry.width}m) at EarthRing (${earthringPos.x.toFixed(1)}, ${earthringPos.y.toFixed(1)}, ${earthringPos.z}) → Three.js (${threeJSPos.x.toFixed(1)}, ${threeJSPos.y.toFixed(1)}, ${threeJSPos.z.toFixed(1)})`);
-          } else {
-            console.log(`[Chunks] Rendered ${chunkID} (width: ${geometry.width}m)`);
-          }
-        }
         return;
       } else {
         console.warn(`[Chunks] Failed to create mesh for ${chunkID}, falling back to placeholder`);
-      }
-    } else {
-      // Chunk has no geometry - this is expected for chunks that haven't been generated yet
-      // Only log if we're debugging
-      if (window.earthring?.debug) {
-        if (!chunkData.geometry) {
-          console.log(`[Chunks] ${chunkID} has no geometry (not yet generated), using placeholder`);
-        } else {
-          console.log(`[Chunks] ${chunkID} has wrong geometry type (${chunkData.geometry?.type || 'none'}), using placeholder`);
-        }
       }
     }
     
@@ -1803,10 +1706,6 @@ export class ChunkManager {
       placeholder.userData.lastCameraXUsed = cameraX;
       this.scene.add(placeholder);
       this.chunkMeshes.set(chunkID, placeholder);
-      // Only log placeholder rendering in debug mode
-      if (window.earthring?.debug) {
-        console.log(`[Chunks] Rendered placeholder for ${chunkID}`);
-      }
     }
   }
   
@@ -1841,12 +1740,6 @@ export class ChunkManager {
     
     // Determine chunk index and base position
     const chunkIndex = (chunkData.chunk_index ?? parseInt(chunkID.split('_')[1], 10)) || 0;
-    
-    // DEBUG: Only log near boundaries where issues occur
-    const isBoundary = chunkIndex < 10 || chunkIndex > 263990;
-    if (isBoundary || window.earthring?.debug) {
-      console.log(`[Chunks] Rendering ${chunkID}: cameraX=${cameraX.toFixed(0)}, chunkIndex=${chunkIndex}, cameraXOverride=${cameraXOverride}`);
-    }
     const CHUNK_LENGTH = 1000;
     const chunkBaseX = chunkIndex * CHUNK_LENGTH;
     
@@ -1854,11 +1747,6 @@ export class ChunkManager {
     const circumferenceOffsetMultiple = Math.round((cameraX - chunkBaseX) / NEW_RING_CIRCUMFERENCE);
     const chunkOffset = circumferenceOffsetMultiple * NEW_RING_CIRCUMFERENCE;
     const chunkOriginX = chunkBaseX + chunkOffset;
-    
-    // DEBUG: Only log near boundaries
-    if (isBoundary || window.earthring?.debug) {
-      console.log(`[Chunks] Chunk ${chunkID} positioning: chunkIndex=${chunkIndex}, chunkBaseX=${chunkBaseX.toFixed(0)}, cameraX=${cameraX.toFixed(0)}, offsetMultiple=${circumferenceOffsetMultiple}, chunkOffset=${chunkOffset.toFixed(0)}, chunkOriginX=${chunkOriginX.toFixed(0)}`);
-    }
     
     // Process vertices
     let minX = Infinity, maxX = -Infinity;
@@ -1892,20 +1780,6 @@ export class ChunkManager {
       maxZ = Math.max(maxZ, threeJSPos.z);
     });
     
-    // Debug: Log wrapping info for boundary chunks
-    if (window.earthring?.debug && (chunkID.includes('26399') || chunkID.includes('_0'))) {
-      console.log(`Chunk ${chunkID} wrapping: cameraX=${cameraX.toFixed(0)}, firstVertexX=${geometry.vertices[0][0]}, wrappedX=${wrapRingPosition(geometry.vertices[0][0])}, finalX=${minX > -10000 && minX < 10000 ? minX.toFixed(0) : 'far'}`);
-    }
-    
-    // Debug: Log mesh bounds
-    if (window.earthring?.debug) {
-      console.log(`Chunk ${chunkID} mesh bounds:`, {
-        x: [minX, maxX],
-        y: [minY, maxY],
-        z: [minZ, maxZ],
-      });
-    }
-    
     // Process faces
     const indices = [];
     geometry.faces.forEach(face => {
@@ -1938,21 +1812,6 @@ export class ChunkManager {
     
     // Use renderOrder to ensure consistent rendering order (helps with transparency)
     mesh.renderOrder = chunkIndex % 1000; // Use modulo to keep values reasonable
-    
-    // Debug: Log mesh position and visibility info
-    if (window.earthring?.debug) {
-      // Calculate mesh center
-      threeGeometry.computeBoundingBox();
-      const center = new THREE.Vector3();
-      threeGeometry.boundingBox.getCenter(center);
-      console.log(`Chunk ${chunkID} mesh created:`, {
-        position: mesh.position,
-        center: center,
-        boundingBox: threeGeometry.boundingBox,
-        visible: mesh.visible,
-        material: material.color.getHexString(),
-      });
-    }
     
     return mesh;
   }

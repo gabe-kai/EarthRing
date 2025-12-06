@@ -2,7 +2,6 @@ package streaming
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"sync"
 	"time"
@@ -144,12 +143,8 @@ func (m *Manager) UpdatePose(userID int64, subscriptionID string, pose CameraPos
 		return nil, fmt.Errorf("subscription %s does not belong to the current user", subscriptionID)
 	}
 
-	log.Printf("[Stream] UpdatePose: subscription=%s, pose.ArcLength=%.0f, pose.Theta=%.6f, pose.RingPosition=%d, floor=%d",
-		subscriptionID, pose.ArcLength, pose.Theta, pose.RingPosition, pose.ActiveFloor)
 	newChunkIDs := ComputeChunkWindow(pose, subscription.Request.RadiusMeters)
-	log.Printf("[Stream] UpdatePose: old_chunks=%d, new_chunks=%d", len(subscription.ChunkIDs), len(newChunkIDs))
 	added, removed := diffChunkSets(subscription.ChunkIDs, newChunkIDs)
-	log.Printf("[Stream] UpdatePose: added=%d chunks, removed=%d chunks", len(added), len(removed))
 
 	// Update zone bounding box if zones are included
 	// Note: Zone delta computation requires zone storage access, so it's handled
@@ -227,9 +222,6 @@ func ComputeChunkWindow(pose CameraPose, radiusMeters int64) []string {
 				Z: pose.Z,
 			}
 			centerIndex = ringmap.RingArcToChunkIndex(arc)
-			wrappedS := ringmap.WrapArcLength(pose.ArcLength)
-			log.Printf("[Stream] ComputeChunkWindow: arc_length=%.0f (wrapped=%.0f), center_chunk=%d, chunk_radius=%d, floor=%d",
-				pose.ArcLength, wrappedS, centerIndex, int(math.Ceil(float64(radiusMeters)/float64(ringmap.ChunkLength))), pose.ActiveFloor)
 		} else if pose.Theta != 0 {
 			// Use RingPolar (convert to chunk index via RingArc)
 			polar := ringmap.RingPolar{
@@ -238,14 +230,10 @@ func ComputeChunkWindow(pose CameraPose, radiusMeters int64) []string {
 				Z:     pose.Z,
 			}
 			centerIndex = ringmap.RingPolarToChunkIndex(polar)
-			log.Printf("[Stream] ComputeChunkWindow: theta=%.4f, center_chunk=%d, chunk_radius=%d, floor=%d",
-				pose.Theta, centerIndex, int(math.Ceil(float64(radiusMeters)/float64(ringmap.ChunkLength))), pose.ActiveFloor)
 		}
 	} else {
 		// Fall back to legacy coordinate system
 		centerIndex = ringmap.PositionToChunkIndex(pose.RingPosition)
-		log.Printf("[Stream] ComputeChunkWindow: ring_position=%d, center_chunk=%d, chunk_radius=%d, floor=%d",
-			pose.RingPosition, centerIndex, int(math.Ceil(float64(radiusMeters)/float64(ringmap.ChunkLength))), pose.ActiveFloor)
 	}
 
 	chunkRadius := int(math.Ceil(float64(radiusMeters) / float64(ringmap.ChunkLength)))
@@ -263,15 +251,6 @@ func ComputeChunkWindow(pose CameraPose, radiusMeters int64) []string {
 		chunkIDs = append(chunkIDs, chunkID)
 	}
 
-	if len(chunkIDs) > 0 {
-		firstN := 10
-		if len(chunkIDs) < firstN {
-			firstN = len(chunkIDs)
-		}
-		log.Printf("[Stream] ComputeChunkWindow result: %d chunk IDs (first %d): %v", len(chunkIDs), firstN, chunkIDs[:firstN])
-	} else {
-		log.Printf("[Stream] ComputeChunkWindow result: 0 chunk IDs")
-	}
 	return chunkIDs
 }
 

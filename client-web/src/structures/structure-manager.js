@@ -41,6 +41,37 @@ export class StructureManager {
     
     this.setupListeners();
   }
+
+  /**
+   * Get the current camera X position in EarthRing coordinates (raw, unwrapped).
+   *
+   * Why this exists (and why it must stay raw):
+   * - Chunk meshes are positioned using the Three.js camera's raw X (unwrapped).
+   * - The cameraController returns a wrapped X (0..circumference); when we normalized
+   *   structures relative to that wrapped value, west-of-origin structures were
+   *   offset to the opposite side after about -10 km, so they vanished on X- while
+   *   still appearing on X+.
+   * - Using the raw camera X keeps the structure normalization aligned with the
+   *   chunk wrapping math, preventing west-side disappearance.
+   *
+   * Fallback to the controller is intentionally noisy (warn) so we notice if the
+   * raw camera isn’t available.
+   */
+  getCurrentCameraX() {
+    const camera = this.sceneManager?.getCamera ? this.sceneManager.getCamera() : null;
+    if (camera) {
+      return camera.position.x;
+    }
+    if (this.cameraController?.getEarthRingPosition) {
+      const pos = this.cameraController.getEarthRingPosition();
+      if (pos && typeof pos.x === 'number') {
+        // Fallback: wrapped, but better than nothing
+        console.warn('[Structures] Using wrapped camera position from controller (may reduce rendering range)');
+        return pos.x;
+      }
+    }
+    return 0;
+  }
   
   /**
    * Merge multiple BoxGeometry objects into a single BufferGeometry
@@ -131,11 +162,6 @@ export class StructureManager {
       return;
     }
 
-    // Debug: Log structure count
-    if (typeof window !== 'undefined' && window.earthring?.debug) {
-      console.log(`[Structures] Received ${structures.length} structure(s) for chunk ${chunkID}`);
-    }
-
     // Track structures for this chunk
     if (!this.chunkStructures.has(chunkID)) {
       this.chunkStructures.set(chunkID, new Set());
@@ -145,11 +171,6 @@ export class StructureManager {
     const activeFloor = this.gameState.getActiveFloor();
 
     structures.forEach(structure => {
-      // Debug: Log structure details
-      if (typeof window !== 'undefined' && window.earthring?.debug && structure.structure_type === 'building') {
-        const dims = structure.dimensions || {};
-        console.log(`[Structures] Building ${structure.id}: type=${structure.structure_type}, subtype=${structure.building_subtype || 'N/A'}, windows=${(structure.windows || []).length}, dims=${dims.width || '?'}x${dims.depth || '?'}x${dims.height || '?'}`);
-      }
 
       // Upsert to game state
       this.gameState.upsertStructure(structure);
@@ -192,8 +213,7 @@ export class StructureManager {
       return;
     }
 
-    const cameraPos = this.cameraController.getEarthRingPosition();
-    const cameraX = cameraPos.x;
+    const cameraX = this.getCurrentCameraX();
     const cameraXWrapped = wrapRingPosition(cameraX);
 
     // Check if we need to re-render due to camera movement across wrap boundary
@@ -247,10 +267,6 @@ export class StructureManager {
     const dimensions = this.getStructureDimensions(structure);
     
     // Debug: Log building variability
-    if (typeof window !== 'undefined' && window.earthring?.debug && structure.structure_type === 'building') {
-      const subtype = structure.building_subtype || 'N/A';
-      console.log(`[Structures] Building ${structure.id}: ${subtype} - ${dimensions.width.toFixed(1)}x${dimensions.depth.toFixed(1)}x${dimensions.height.toFixed(1)}m`);
-    }
     const structureX = structure.position.x;
     const structureY = structure.position.y;
     const floor = structure.floor ?? 0;
@@ -343,8 +359,7 @@ export class StructureManager {
    * @param {number} cameraXWrapped - Wrapped camera X position
    */
   updateStructurePosition(mesh, structure, cameraXWrapped) {
-    const cameraPos = this.cameraController.getEarthRingPosition();
-    const cameraX = cameraPos.x;
+    const cameraX = this.getCurrentCameraX();
     const structureOriginX = cameraX;
     
     const structureX = structure.position.x;
