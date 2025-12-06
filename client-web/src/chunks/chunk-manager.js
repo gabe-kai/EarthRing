@@ -170,10 +170,12 @@ export class ChunkManager {
         float distMinorY = min(minorYMod, uGridMinorSpacing - minorYMod);
         
         // Check if on grid lines
-        bool onMajorH = distMajorX < halfLineWidth;
-        bool onMajorV = distMajorY < halfLineWidth;
-        bool onMinorH = distMinorX < halfLineWidth && !onMajorH;
-        bool onMinorV = distMinorY < halfLineWidth && !onMajorV;
+        // Horizontal lines (east-west): constant Y (radial offset), varying X (arc length)
+        // Vertical lines (north-south): constant X (arc length), varying Y (radial offset)
+        bool onMajorH = distMajorY < halfLineWidth;  // Horizontal: constant Y = red
+        bool onMajorV = distMajorX < halfLineWidth;  // Vertical: constant X = blue
+        bool onMinorH = distMinorY < halfLineWidth && !onMajorH;
+        bool onMinorV = distMinorX < halfLineWidth && !onMajorV;
         
         // Special case: Y=0 axis (station spine) - always red, thicker
         bool onAxisY = abs(gridY) < halfLineWidth * 2.0;
@@ -183,27 +185,29 @@ export class ChunkManager {
         float multipleYMod = safeMod(gridY, 20.0);
         float distMultipleX = min(multipleXMod, 20.0 - multipleXMod);
         float distMultipleY = min(multipleYMod, 20.0 - multipleYMod);
-        bool onMultiple20H = distMultipleX < halfLineWidth * 1.5 && !onAxisY;
-        bool onMultiple20V = distMultipleY < halfLineWidth * 1.5 && !onAxisY;
+        bool onMultiple20H = distMultipleY < halfLineWidth * 1.5 && !onAxisY;  // Horizontal 20m lines
+        bool onMultiple20V = distMultipleX < halfLineWidth * 1.5;  // Vertical 20m lines
         
         vec3 gridColor = baseColor;
         float fadeFactor = getGridFadeFactor();
         
         // Draw grid lines with fade (priority order matters)
+        // ALL red lines = horizontal (east-west) = constant Y (radial offset)
+        // ALL blue lines = vertical (north-south) = constant X (arc length)
         if (onAxisY) {
-          // Station spine - thickest, always red
+          // Station spine (Y=0) - thickest, always red (east-west)
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMultiple20H) {
-          // 20m horizontal multiples
+          // 20m horizontal multiples (east-west) - red
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.9);
         } else if (onMultiple20V) {
-          // 20m vertical multiples
+          // 20m vertical multiples (north-south) - blue
           gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.9);
         } else if (onMajorH) {
-          // Major horizontal grid lines (5m)
+          // Major horizontal grid lines (5m, east-west) - red
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMajorV) {
-          // Major vertical grid lines (5m)
+          // Major vertical grid lines (5m, north-south) - blue
           gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.95);
         } else if (onMinorH || onMinorV) {
           // Minor grid lines (1m)

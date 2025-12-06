@@ -1648,7 +1648,9 @@ The procedural generation system has extensive test coverage for building genera
 
 ### Grid Overlay
 - ✅ **Updated**: Minor grid lines changed from white (0xffffff) back to medium gray (0x9c9c9c) to reduce visual contrast
-- ✅ **Maintained**: Major grid lines remain red (horizontal) and blue (vertical) at 5m intervals, with white (now gray) 1m minor grid inside
+- ✅ **Maintained**: All red grid lines run east-west (horizontal), all blue grid lines run north-south (vertical)
+- ✅ **Maintained**: Major grid lines at 5m intervals (red for horizontal/east-west, blue for vertical/north-south), with gray 1m minor grid inside
+- ✅ **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
 
 ### Building Boundary Validation
 - ✅ **Improved**: Buffer margin for building boundary validation reduced from 50cm to 10cm to allow buildings in narrower zones
