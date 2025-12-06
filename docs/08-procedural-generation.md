@@ -1656,6 +1656,9 @@ The procedural generation system has extensive test coverage for building genera
   - Grid calculations use chunk-local coordinates (0-1000m range) instead of absolute world coordinates
   - Grid remains world-anchored via chunk base world X position offset
   - Grid lines stay straight and aligned when teleporting to distant locations (e.g., X=22,000,000m)
+- ✅ **Fade-out**: Distance-based fade re-implemented (starts at 200m, fully faded at 250m)
+  - Fade uses world position for distance calculation while grid uses chunk-local coordinates for precision
+  - Grid smoothly fades out as camera moves away, creating clean circular fade pattern
 
 ### Building Boundary Validation
 - ✅ **Improved**: Buffer margin for building boundary validation reduced from 50cm to 10cm to allow buildings in narrower zones

@@ -559,6 +559,7 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 - **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
 - **Line Widths**: Major lines use 20cm width; minor lines use 10cm width (half of major)
 - Medium-thickness lines on every 20m multiple for better navigation
+- **Distance-based fade**: Grid fades out based on distance from camera (starts fading at 200m, fully faded at 250m)
 - Grid visibility controlled via `ChunkManager.setGridVisible()` method
 - Grid is rendered as part of the chunk platform material for optimal performance
 

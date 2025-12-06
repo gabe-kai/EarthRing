@@ -130,6 +130,21 @@ export class ChunkManager {
       varying float vChunkLocalZ;
       varying float vChunkBaseWorldX;
       
+      // Calculate distance from camera (for fade effect)
+      float distanceFromCamera() {
+        return distance(vWorldPosition, uCameraPosition);
+      }
+      
+      // Calculate grid fade factor (0.0 = fully faded, 1.0 = fully visible)
+      float getGridFadeFactor() {
+        float dist = distanceFromCamera();
+        if (dist > uGridFadeRadius) {
+          float fadeFactor = (dist - uGridFadeRadius) / (uGridMaxRadius - uGridFadeRadius);
+          return max(0.0, 1.0 - fadeFactor);
+        }
+        return 1.0;
+      }
+      
       // Helper function to handle mod with negative values correctly
       float safeMod(float x, float m) {
         return mod(mod(x, m) + m, m);
@@ -197,28 +212,29 @@ export class ChunkManager {
         bool onMultiple20V = distMultipleX < halfLineWidth * 1.5;  // Vertical 20m lines
         
         vec3 gridColor = baseColor;
+        float fadeFactor = getGridFadeFactor();
         
-        // Draw grid lines uniformly (no fade) - priority order matters
+        // Draw grid lines with fade (priority order matters)
         // ALL red lines = horizontal (east-west) = constant Y (radial offset)
         // ALL blue lines = vertical (north-south) = constant X (arc length)
         if (onAxisY) {
           // Station spine (Y=0) - thickest, always red (east-west)
-          gridColor = mix(baseColor, uGridColorMajorH, 0.95);
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMultiple20H) {
           // 20m horizontal multiples (east-west) - red
-          gridColor = mix(baseColor, uGridColorMajorH, 0.9);
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.9);
         } else if (onMultiple20V) {
           // 20m vertical multiples (north-south) - blue
-          gridColor = mix(baseColor, uGridColorMajorV, 0.9);
+          gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.9);
         } else if (onMajorH) {
           // Major horizontal grid lines (5m, east-west) - red
-          gridColor = mix(baseColor, uGridColorMajorH, 0.95);
+          gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMajorV) {
           // Major vertical grid lines (5m, north-south) - blue
-          gridColor = mix(baseColor, uGridColorMajorV, 0.95);
+          gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.95);
         } else if (onMinorH || onMinorV) {
           // Minor grid lines (1m) - thinner and more contrasty
-          gridColor = mix(baseColor, uGridColorMinor, 0.775);
+          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.775);
         }
         
         return gridColor;

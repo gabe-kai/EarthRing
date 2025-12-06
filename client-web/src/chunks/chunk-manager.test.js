@@ -172,6 +172,134 @@ describe('ChunkManager', () => {
     });
   });
 
+  describe('createRingFloorMesh chunk-local grid attributes', () => {
+    it('sets chunk-local grid attributes correctly', () => {
+      const chunkData = {
+        geometry: {
+          type: 'ring_floor',
+          vertices: [
+            [5000, -100, 0],    // Chunk 5, vertex at local X=0, Y=-100
+            [6000, -100, 0],    // Chunk 5, vertex at local X=1000, Y=-100
+            [5000, 100, 0],     // Chunk 5, vertex at local X=0, Y=100
+            [6000, 100, 0],     // Chunk 5, vertex at local X=1000, Y=100
+          ],
+          faces: [
+            [0, 1, 2],
+            [1, 3, 2],
+          ],
+          width: 400,
+          length: 1000,
+        },
+        chunk_index: 5, // Chunk 5 = base X = 5000
+      };
+
+      const mesh = chunkManager.createRingFloorMesh('0_5', chunkData);
+      
+      expect(mesh).not.toBeNull();
+      expect(mesh.geometry).toBeDefined();
+      
+      // Check that chunk-local attributes exist
+      const chunkLocalX = mesh.geometry.getAttribute('chunkLocalX');
+      const chunkLocalZ = mesh.geometry.getAttribute('chunkLocalZ');
+      const chunkBaseWorldX = mesh.geometry.getAttribute('chunkBaseWorldX');
+      
+      expect(chunkLocalX).toBeDefined();
+      expect(chunkLocalZ).toBeDefined();
+      expect(chunkBaseWorldX).toBeDefined();
+      
+      // Verify attribute values
+      // Vertex 0: absolute X=5000, chunk base=5000, so local X should be 0
+      expect(chunkLocalX.getX(0)).toBe(0);
+      // Vertex 0: Y=-100 in EarthRing coords (radial offset)
+      expect(chunkLocalZ.getX(0)).toBe(-100);
+      // All vertices should have same chunk base world X
+      expect(chunkBaseWorldX.getX(0)).toBe(5000);
+      expect(chunkBaseWorldX.getX(1)).toBe(5000);
+      
+      // Vertex 1: absolute X=6000, chunk base=5000, so local X should be 1000
+      expect(chunkLocalX.getX(1)).toBe(1000);
+      // Vertex 1: Y=-100 in EarthRing coords
+      expect(chunkLocalZ.getX(1)).toBe(-100);
+    });
+
+    it('calculates chunk-local X correctly for different chunk indices', () => {
+      const chunkData = {
+        geometry: {
+          type: 'ring_floor',
+          vertices: [
+            [12345000, 0, 0],   // Chunk 12345, vertex at absolute X=12345000
+            [12346000, 0, 0],   // Chunk 12345, vertex at absolute X=12346000
+          ],
+          faces: [[0, 1, 0]],
+          width: 400,
+          length: 1000,
+        },
+        chunk_index: 12345, // Chunk 12345 = base X = 12345000
+      };
+
+      const mesh = chunkManager.createRingFloorMesh('0_12345', chunkData);
+      
+      const chunkLocalX = mesh.geometry.getAttribute('chunkLocalX');
+      const chunkBaseWorldX = mesh.geometry.getAttribute('chunkBaseWorldX');
+      
+      // Vertex 0: absolute X=12345000, chunk base=12345000, so local X should be 0
+      expect(chunkLocalX.getX(0)).toBe(0);
+      // Vertex 1: absolute X=12346000, chunk base=12345000, so local X should be 1000
+      expect(chunkLocalX.getX(1)).toBe(1000);
+      // Chunk base should be 12345000
+      expect(chunkBaseWorldX.getX(0)).toBe(12345000);
+    });
+  });
+
+  describe('grid visibility', () => {
+    it('toggles grid visibility', () => {
+      expect(chunkManager.sharedPlatformMaterial).toBeDefined();
+      
+      // Grid should be visible by default
+      expect(chunkManager.sharedPlatformMaterial.uniforms.uShowGrid.value).toBe(true);
+      
+      // Hide grid
+      chunkManager.setGridVisible(false);
+      expect(chunkManager.sharedPlatformMaterial.uniforms.uShowGrid.value).toBe(false);
+      
+      // Show grid
+      chunkManager.setGridVisible(true);
+      expect(chunkManager.sharedPlatformMaterial.uniforms.uShowGrid.value).toBe(true);
+    });
+  });
+
+  describe('updateCameraPosition', () => {
+    it('updates camera position uniform for grid fade', () => {
+      expect(chunkManager.sharedPlatformMaterial).toBeDefined();
+      
+      const initialPos = chunkManager.sharedPlatformMaterial.uniforms.uCameraPosition.value.clone();
+      
+      // Move camera
+      mockCamera.position.set(5000, 30, 200);
+      chunkManager.updateCameraPosition();
+      
+      const updatedPos = chunkManager.sharedPlatformMaterial.uniforms.uCameraPosition.value;
+      expect(updatedPos.x).toBe(5000);
+      expect(updatedPos.y).toBe(30);
+      expect(updatedPos.z).toBe(200);
+      expect(updatedPos).not.toEqual(initialPos);
+    });
+
+    it('handles missing camera gracefully', () => {
+      chunkManager.sceneManager = null;
+      
+      // Should not throw
+      expect(() => chunkManager.updateCameraPosition()).not.toThrow();
+    });
+
+    it('handles missing material gracefully', () => {
+      chunkManager.sharedPlatformMaterial = null;
+      
+      // Should not throw
+      expect(() => chunkManager.updateCameraPosition()).not.toThrow();
+    });
+  });
+
   describe('extractZonesFromChunk', () => {
     let zoneManager;
 
