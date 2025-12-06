@@ -393,6 +393,7 @@ outerRing.forEach(([x, y]) => {
 - **Always** when rendering geometry at large distances (>1,000,000m from origin)
 - **Always** when building Three.js meshes with world coordinates
 - **Always** when precision is critical (zones, chunks, structures)
+- **Grid System**: The grid overlay uses a similar chunk-local coordinate approach for precision (see Grid Rendering in Client Architecture docs)
 
 **When NOT to Use**:
 - Camera position tracking (can use absolute coordinates)

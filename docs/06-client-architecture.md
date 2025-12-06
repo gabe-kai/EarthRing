@@ -558,10 +558,23 @@ The client implements server-driven streaming for efficient chunk and zone loadi
   - Minor lines (`0xb2b2b2`): Medium-light gray, half the thickness of major lines
 - **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
 - **Line Widths**: Major lines use 20cm width; minor lines use 10cm width (half of major)
-- Shader-driven fade based on distance from camera (starts at 200m, fully faded at 250m)
 - Medium-thickness lines on every 20m multiple for better navigation
 - Grid visibility controlled via `ChunkManager.setGridVisible()` method
 - Grid is rendered as part of the chunk platform material for optimal performance
+
+**Chunk-Local Grid System (Precision Fix)**:
+- **Problem**: At large distances (e.g., teleporting to X=22,000,000m), using absolute world coordinates for grid calculations causes floating-point precision loss, making grid lines appear skewed or misaligned
+- **Solution**: Chunk-local grid coordinates with world alignment
+  - Each chunk stores vertex attributes: `chunkLocalX` (0-1000m), `chunkLocalZ` (radial offset), and `chunkBaseWorldX` (chunk's base world X position)
+  - Grid calculations use chunk-local coordinates (small numbers, 0-1000m range) instead of large world coordinates
+  - Grid alignment is maintained by calculating grid offset from chunk's base world X: `gridOffset = chunkBaseWorldX mod spacing`
+  - Grid position within chunk: `gridPos = (chunkLocalX + gridOffset) mod spacing`
+  - This keeps all calculations in small number ranges while maintaining world-anchored grid alignment
+- **Benefits**: 
+  - Maintains precision at all distances - grid lines remain straight and aligned even when teleporting to distant locations
+  - World-anchored grid suitable for structure placement and pathfinding
+  - Each chunk renders identical grid pattern, just offset by its base world X position
+- **Implementation**: See `createRingFloorMesh()` in `ChunkManager` for attribute setup and fragment shader `drawGrid()` function for grid calculations
 
 **Zone Service** (`client-web/src/api/zone-service.js`):
 - Typed helpers for area queries, owner listing, and CRUD operations (auth-required)

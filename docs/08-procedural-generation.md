@@ -1652,6 +1652,10 @@ The procedural generation system has extensive test coverage for building genera
 - ✅ **Maintained**: All red grid lines (`0xff2d2d`) run east-west (horizontal), all blue grid lines (`0x0088ff`) run north-south (vertical)
 - ✅ **Maintained**: Major grid lines at 5m intervals (red for horizontal/east-west, blue for vertical/north-south), with gray 1m minor grid inside
 - ✅ **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
+- ✅ **Precision Fix**: Chunk-local grid system implemented to prevent precision loss at large distances
+  - Grid calculations use chunk-local coordinates (0-1000m range) instead of absolute world coordinates
+  - Grid remains world-anchored via chunk base world X position offset
+  - Grid lines stay straight and aligned when teleporting to distant locations (e.g., X=22,000,000m)
 
 ### Building Boundary Validation
 - ✅ **Improved**: Buffer margin for building boundary validation reduced from 50cm to 10cm to allow buildings in narrower zones
