@@ -565,16 +565,20 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 
 **Chunk-Local Grid System (Precision Fix)**:
 - **Problem**: At large distances (e.g., teleporting to X=22,000,000m), using absolute world coordinates for grid calculations causes floating-point precision loss, making grid lines appear skewed or misaligned
-- **Solution**: Chunk-local grid coordinates with world alignment
+- **Solution**: Chunk-local grid coordinates with chunk-normalized alignment
   - Each chunk stores vertex attributes: `chunkLocalX` (0-1000m), `chunkLocalZ` (radial offset), and `chunkBaseWorldX` (chunk's base world X position)
   - Grid calculations use chunk-local coordinates (small numbers, 0-1000m range) instead of large world coordinates
-  - Grid alignment is maintained by calculating grid offset from chunk's base world X: `gridOffset = chunkBaseWorldX mod spacing`
-  - Grid position within chunk: `gridPos = (chunkLocalX + gridOffset) mod spacing`
-  - This keeps all calculations in small number ranges while maintaining world-anchored grid alignment
+  - Grid is normalized within each chunk so that `chunkLocalX = 0` (west edge) always starts on a major grid line
+  - Grid pattern flows eastward from the west edge as `chunkLocalX` increases
+  - This keeps all calculations in small number ranges while maintaining consistent grid appearance
+- **Grid Alignment**:
+  - Each chunk's grid starts on a major line at the west edge (`chunkLocalX = 0`)
+  - Since chunks are 1000m long and major lines are every 5m, chunk boundaries naturally align with major lines (1000 is a multiple of 5)
+  - Grid flows eastward within each chunk with consistent 5m major and 1m minor spacing
 - **Benefits**: 
   - Maintains precision at all distances - grid lines remain straight and aligned even when teleporting to distant locations
-  - World-anchored grid suitable for structure placement and pathfinding
-  - Each chunk renders identical grid pattern, just offset by its base world X position
+  - Consistent grid appearance - each chunk's grid pattern starts at the west edge
+  - Simple, predictable grid layout for structure placement and pathfinding
 - **Implementation**: See `createRingFloorMesh()` in `ChunkManager` for attribute setup and fragment shader `drawGrid()` function for grid calculations
 
 **Zone Service** (`client-web/src/api/zone-service.js`):

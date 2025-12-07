@@ -1654,7 +1654,8 @@ The procedural generation system has extensive test coverage for building genera
 - ✅ **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
 - ✅ **Precision Fix**: Chunk-local grid system implemented to prevent precision loss at large distances
   - Grid calculations use chunk-local coordinates (0-1000m range) instead of absolute world coordinates
-  - Grid remains world-anchored via chunk base world X position offset
+  - Grid is normalized within each chunk so the west edge (chunkLocalX = 0) always starts on a major line
+  - Grid pattern flows eastward from the west edge with consistent spacing
   - Grid lines stay straight and aligned when teleporting to distant locations (e.g., X=22,000,000m)
 - ✅ **Fade-out**: Distance-based fade re-implemented (starts at 200m, fully faded at 250m)
   - Fade uses world position for distance calculation while grid uses chunk-local coordinates for precision

@@ -249,6 +249,44 @@ describe('ChunkManager', () => {
       // Chunk base should be 12345000
       expect(chunkBaseWorldX.getX(0)).toBe(12345000);
     });
+
+    it('ensures grid attributes are set for chunk-normalized grid alignment', () => {
+      // Grid alignment: Each chunk's grid starts on a major line at chunkLocalX = 0 (west edge)
+      // This test verifies that chunk-local attributes are present to support this alignment
+      const chunkData = {
+        geometry: {
+          type: 'ring_floor',
+          vertices: [
+            [10000, 0, 0],
+            [11000, 0, 0],
+            [10000, 50, 0],
+            [11000, 50, 0],
+          ],
+          faces: [[0, 1, 2], [1, 3, 2]],
+          width: 400,
+          length: 1000,
+        },
+        chunk_index: 10, // Chunk 10 = base X = 10000
+      };
+
+      const mesh = chunkManager.createRingFloorMesh('0_10', chunkData);
+      
+      const chunkLocalX = mesh.geometry.getAttribute('chunkLocalX');
+      const chunkLocalZ = mesh.geometry.getAttribute('chunkLocalZ');
+      const chunkBaseWorldX = mesh.geometry.getAttribute('chunkBaseWorldX');
+      
+      // Verify attributes exist
+      expect(chunkLocalX).toBeDefined();
+      expect(chunkLocalZ).toBeDefined();
+      expect(chunkBaseWorldX).toBeDefined();
+      
+      // Verify chunkLocalX values are in 0-1000m range (chunk-local)
+      expect(chunkLocalX.getX(0)).toBe(0);  // West edge
+      expect(chunkLocalX.getX(1)).toBe(1000); // East edge
+      
+      // Verify chunkBaseWorldX is stored correctly for potential future use
+      expect(chunkBaseWorldX.getX(0)).toBe(10000);
+    });
   });
 
   describe('grid visibility', () => {

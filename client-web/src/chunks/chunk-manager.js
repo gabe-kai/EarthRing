@@ -161,22 +161,17 @@ export class ChunkManager {
         // to avoid floating-point precision issues at large world coordinates.
         //
         // Strategy: Calculate grid position using chunk-local coordinates (small numbers)
-        // and align with world grid using the chunk's base world X position
+        // Grid is normalized within each chunk so chunkLocalX = 0 (west edge) always starts on a major line
         
         float chunkLocalX = vChunkLocalX;  // Chunk-local X: 0-1000m (ring position within chunk)
         float chunkLocalZ = vChunkLocalZ;  // Chunk-local Z: radial offset (width) -200m to +200m
         
-        // Calculate how the chunk's base world X aligns with the grid
-        // This offset tells us where grid lines fall within this chunk
-        float gridOffsetMajorX = safeMod(vChunkBaseWorldX, uGridMajorSpacing);
-        float gridOffsetMinorX = safeMod(vChunkBaseWorldX, uGridMinorSpacing);
-        float gridOffset20X = safeMod(vChunkBaseWorldX, 20.0);
-        
-        // Calculate grid position within the chunk by adding local position to offset
-        // This gives us the position relative to the nearest grid line (in small number range)
-        float majorXMod = safeMod(chunkLocalX + gridOffsetMajorX, uGridMajorSpacing);
-        float minorXMod = safeMod(chunkLocalX + gridOffsetMinorX, uGridMinorSpacing);
-        float multipleXMod = safeMod(chunkLocalX + gridOffset20X, 20.0);
+        // Grid alignment: Use chunkLocalX directly to ensure the grid pattern always starts
+        // on a major line at the west edge (chunkLocalX = 0) and flows eastward
+        // Since chunks are 1000m and major lines are every 5m, chunk boundaries naturally align
+        float majorXMod = safeMod(chunkLocalX, uGridMajorSpacing);
+        float minorXMod = safeMod(chunkLocalX, uGridMinorSpacing);
+        float multipleXMod = safeMod(chunkLocalX, 20.0);
         
         // For Z-axis (radial offset), grid is uniform - no offset needed
         float majorYMod = safeMod(chunkLocalZ, uGridMajorSpacing);
