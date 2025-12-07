@@ -552,10 +552,34 @@ The client implements server-driven streaming for efficient chunk and zone loadi
 **Grid Rendering** (Platform Shader Material in `ChunkManager`):
 - Grid is rendered procedurally in the platform shader fragment shader
 - 5m major grid lines with 1m minor subdivisions
-- Shader-driven fade based on distance from camera
+- **Grid Line Colors**: 
+  - Red lines (`0xff2d2d`): Run east-west (horizontal)
+  - Blue lines (`0x0088ff`): Run north-south (vertical) - bright blue for better contrast against zones
+  - Minor lines (`0xb2b2b2`): Medium-light gray, half the thickness of major lines
+- **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
+- **Line Widths**: Major lines use 20cm width; minor lines use 10cm width (half of major)
 - Medium-thickness lines on every 20m multiple for better navigation
+- **Distance-based fade**: Grid fades out based on distance from camera (starts fading at 200m, fully faded at 250m)
 - Grid visibility controlled via `ChunkManager.setGridVisible()` method
 - Grid is rendered as part of the chunk platform material for optimal performance
+
+**Chunk-Local Grid System (Precision Fix)**:
+- **Problem**: At large distances (e.g., teleporting to X=22,000,000m), using absolute world coordinates for grid calculations causes floating-point precision loss, making grid lines appear skewed or misaligned
+- **Solution**: Chunk-local grid coordinates with chunk-normalized alignment
+  - Each chunk stores vertex attributes: `chunkLocalX` (0-1000m), `chunkLocalZ` (radial offset), and `chunkBaseWorldX` (chunk's base world X position)
+  - Grid calculations use chunk-local coordinates (small numbers, 0-1000m range) instead of large world coordinates
+  - Grid is normalized within each chunk so that `chunkLocalX = 0` (west edge) always starts on a major grid line
+  - Grid pattern flows eastward from the west edge as `chunkLocalX` increases
+  - This keeps all calculations in small number ranges while maintaining consistent grid appearance
+- **Grid Alignment**:
+  - Each chunk's grid starts on a major line at the west edge (`chunkLocalX = 0`)
+  - Since chunks are 1000m long and major lines are every 5m, chunk boundaries naturally align with major lines (1000 is a multiple of 5)
+  - Grid flows eastward within each chunk with consistent 5m major and 1m minor spacing
+- **Benefits**: 
+  - Maintains precision at all distances - grid lines remain straight and aligned even when teleporting to distant locations
+  - Consistent grid appearance - each chunk's grid pattern starts at the west edge
+  - Simple, predictable grid layout for structure placement and pathfinding
+- **Implementation**: See `createRingFloorMesh()` in `ChunkManager` for attribute setup and fragment shader `drawGrid()` function for grid calculations
 
 **Zone Service** (`client-web/src/api/zone-service.js`):
 - Typed helpers for area queries, owner listing, and CRUD operations (auth-required)

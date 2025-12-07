@@ -70,13 +70,25 @@ export class ChunkManager {
    */
   createSharedPlatformMaterial() {
     const vertexShader = `
+      attribute float chunkLocalX;
+      attribute float chunkLocalZ;
+      attribute float chunkBaseWorldX;
+      
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
+      varying float vChunkLocalX;
+      varying float vChunkLocalZ;
+      varying float vChunkBaseWorldX;
       
       void main() {
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
         vWorldPosition = worldPosition.xyz;
         vWorldNormal = normalize(normalMatrix * normal);
+        
+        // Pass chunk-local coordinates for grid calculations
+        vChunkLocalX = chunkLocalX;
+        vChunkLocalZ = chunkLocalZ;
+        vChunkBaseWorldX = chunkBaseWorldX;
         
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
@@ -114,6 +126,9 @@ export class ChunkManager {
       
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
+      varying float vChunkLocalX;
+      varying float vChunkLocalZ;
+      varying float vChunkBaseWorldX;
       
       // Calculate distance from camera (for fade effect)
       float distanceFromCamera() {
@@ -141,27 +156,32 @@ export class ChunkManager {
           return baseColor;
         }
         
-        // Convert world position to local grid coordinates
-        // After toThreeJS conversion:
-        //   EarthRing X (ring position/arc length) -> Three.js X
-        //   EarthRing Y (radial offset/width) -> Three.js Z
-        //   EarthRing Z (floor) -> Three.js Y
-        // For grid rendering on the platform surface:
-        //   gridX = ring position (arc length) = vWorldPosition.x
-        //   gridY = radial offset (width) = vWorldPosition.z (NOT .y!)
-        float gridX = vWorldPosition.x;  // Ring position (arc length)
-        float gridY = vWorldPosition.z;  // Radial offset (width) - Z axis, not Y!
+        // Chunk-local grid calculation for precision
+        // Each chunk is 1km long (0-1000m), so we work in small coordinate ranges
+        // to avoid floating-point precision issues at large world coordinates.
+        //
+        // Strategy: Calculate grid position using chunk-local coordinates (small numbers)
+        // Grid is normalized within each chunk so chunkLocalX = 0 (west edge) always starts on a major line
         
-        // Calculate distance from grid line using proper mod
-        // Mod ensures we get position within one spacing interval [0, spacing)
-        float majorXMod = safeMod(gridX, uGridMajorSpacing);
-        float majorYMod = safeMod(gridY, uGridMajorSpacing);
-        float minorXMod = safeMod(gridX, uGridMinorSpacing);
-        float minorYMod = safeMod(gridY, uGridMinorSpacing);
+        float chunkLocalX = vChunkLocalX;  // Chunk-local X: 0-1000m (ring position within chunk)
+        float chunkLocalZ = vChunkLocalZ;  // Chunk-local Z: radial offset (width) -200m to +200m
+        
+        // Grid alignment: Use chunkLocalX directly to ensure the grid pattern always starts
+        // on a major line at the west edge (chunkLocalX = 0) and flows eastward
+        // Since chunks are 1000m and major lines are every 5m, chunk boundaries naturally align
+        float majorXMod = safeMod(chunkLocalX, uGridMajorSpacing);
+        float minorXMod = safeMod(chunkLocalX, uGridMinorSpacing);
+        float multipleXMod = safeMod(chunkLocalX, 20.0);
+        
+        // For Z-axis (radial offset), grid is uniform - no offset needed
+        float majorYMod = safeMod(chunkLocalZ, uGridMajorSpacing);
+        float minorYMod = safeMod(chunkLocalZ, uGridMinorSpacing);
+        float multipleYMod = safeMod(chunkLocalZ, 20.0);
         
         // Check if we're near a grid line
         // Need to check both near 0 and near spacing value (wrapping)
         float halfLineWidth = uGridLineWidth * 0.5;
+        float halfMinorLineWidth = halfLineWidth * 0.5; // Minor lines are half as thick
         
         // Distance from nearest grid line (handles wrapping)
         float distMajorX = min(majorXMod, uGridMajorSpacing - majorXMod);
@@ -170,44 +190,46 @@ export class ChunkManager {
         float distMinorY = min(minorYMod, uGridMinorSpacing - minorYMod);
         
         // Check if on grid lines
-        bool onMajorH = distMajorX < halfLineWidth;
-        bool onMajorV = distMajorY < halfLineWidth;
-        bool onMinorH = distMinorX < halfLineWidth && !onMajorH;
-        bool onMinorV = distMinorY < halfLineWidth && !onMajorV;
+        // Horizontal lines (east-west): constant Y (radial offset), varying X (arc length)
+        // Vertical lines (north-south): constant X (arc length), varying Y (radial offset)
+        bool onMajorH = distMajorY < halfLineWidth;  // Horizontal: constant Y = red
+        bool onMajorV = distMajorX < halfLineWidth;  // Vertical: constant X = blue
+        bool onMinorH = distMinorY < halfMinorLineWidth && !onMajorH;
+        bool onMinorV = distMinorX < halfMinorLineWidth && !onMajorV;
         
         // Special case: Y=0 axis (station spine) - always red, thicker
-        bool onAxisY = abs(gridY) < halfLineWidth * 2.0;
+        bool onAxisY = abs(chunkLocalZ) < halfLineWidth * 2.0;
         
-        // Check for multiples of 20m (thicker lines)
-        float multipleXMod = safeMod(gridX, 20.0);
-        float multipleYMod = safeMod(gridY, 20.0);
+        // Distance from 20m grid lines
         float distMultipleX = min(multipleXMod, 20.0 - multipleXMod);
         float distMultipleY = min(multipleYMod, 20.0 - multipleYMod);
-        bool onMultiple20H = distMultipleX < halfLineWidth * 1.5 && !onAxisY;
-        bool onMultiple20V = distMultipleY < halfLineWidth * 1.5 && !onAxisY;
+        bool onMultiple20H = distMultipleY < halfLineWidth * 1.5 && !onAxisY;  // Horizontal 20m lines
+        bool onMultiple20V = distMultipleX < halfLineWidth * 1.5;  // Vertical 20m lines
         
         vec3 gridColor = baseColor;
         float fadeFactor = getGridFadeFactor();
         
         // Draw grid lines with fade (priority order matters)
+        // ALL red lines = horizontal (east-west) = constant Y (radial offset)
+        // ALL blue lines = vertical (north-south) = constant X (arc length)
         if (onAxisY) {
-          // Station spine - thickest, always red
+          // Station spine (Y=0) - thickest, always red (east-west)
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMultiple20H) {
-          // 20m horizontal multiples
+          // 20m horizontal multiples (east-west) - red
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.9);
         } else if (onMultiple20V) {
-          // 20m vertical multiples
+          // 20m vertical multiples (north-south) - blue
           gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.9);
         } else if (onMajorH) {
-          // Major horizontal grid lines (5m)
+          // Major horizontal grid lines (5m, east-west) - red
           gridColor = mix(baseColor, uGridColorMajorH, fadeFactor * 0.95);
         } else if (onMajorV) {
-          // Major vertical grid lines (5m)
+          // Major vertical grid lines (5m, north-south) - blue
           gridColor = mix(baseColor, uGridColorMajorV, fadeFactor * 0.95);
         } else if (onMinorH || onMinorV) {
-          // Minor grid lines (1m)
-          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.7);
+          // Minor grid lines (1m) - thinner and more contrasty
+          gridColor = mix(baseColor, uGridColorMinor, fadeFactor * 0.775);
         }
         
         return gridColor;
@@ -365,8 +387,8 @@ export class ChunkManager {
         uGridMajorSpacing: { value: 5.0 },
         uGridMinorSpacing: { value: 1.0 },
         uGridColorMajorH: { value: new THREE.Color(0xff2d2d) }, // Red
-        uGridColorMajorV: { value: new THREE.Color(0x2d7bff) }, // Blue
-        uGridColorMinor: { value: new THREE.Color(0x9c9c9c) },  // Gray
+        uGridColorMajorV: { value: new THREE.Color(0x0088ff) }, // Blue (brighter for better contrast)
+        uGridColorMinor: { value: new THREE.Color(0xb2b2b2) },  // Medium-light gray (halfway between old and bright)
         uGridLineWidth: { value: 0.2 }, // 20cm line width (increased for visibility)
         uGridFadeRadius: { value: 200.0 }, // Start fading at 200m
         uGridMaxRadius: { value: 250.0 },  // Fully faded at 250m
@@ -1753,6 +1775,10 @@ export class ChunkManager {
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
     
+    // Store chunk-local coordinates for grid calculations (precision-safe)
+    const chunkLocalXCoords = [];
+    const chunkLocalZCoords = [];
+    
     geometry.vertices.forEach(vertex => {
       // Shift vertex by the chunk offset so this chunk sits closest to the camera.
       const earthringX = vertex[0] + chunkOffset;
@@ -1770,6 +1796,15 @@ export class ChunkManager {
       // The polygon offset in the material should handle z-fighting
       
       positions.push(threeJSPos.x, threeJSPos.y, threeJSPos.z);
+      
+      // Store chunk-local EarthRing coordinates for grid calculations
+      // vertex[0] from server is absolute ring position, so we need to subtract chunk base to get local
+      // chunkLocalX = position within chunk (0-1000m range)
+      // vertex[1] is the Y coordinate (radial offset/width, -200m to +200m range in EarthRing coords)
+      // But after toThreeJS conversion, Y becomes Z, so we store vertex[1] as chunkLocalZ
+      const chunkLocalX = vertex[0] - chunkBaseX;  // Convert absolute to chunk-local (0-1000m)
+      chunkLocalXCoords.push(chunkLocalX);
+      chunkLocalZCoords.push(vertex[1]);  // Y in EarthRing = radial offset = Z in Three.js for grid
       
       // Track bounds for debugging
       minX = Math.min(minX, threeJSPos.x);
@@ -1790,6 +1825,21 @@ export class ChunkManager {
     // Set geometry attributes
     threeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     threeGeometry.setIndex(indices);
+    
+    // Add chunk-local EarthRing coordinates for grid calculations (precision-safe)
+    // These are in the chunk's local coordinate space (0-1000m for X, -200m to +200m for Z)
+    // Ensure arrays match vertex count
+    if (chunkLocalXCoords.length !== geometry.vertices.length || chunkLocalZCoords.length !== geometry.vertices.length) {
+      console.error(`[Chunks] Attribute array length mismatch for ${chunkID}: vertices=${geometry.vertices.length}, localX=${chunkLocalXCoords.length}, localZ=${chunkLocalZCoords.length}`);
+    }
+    
+    threeGeometry.setAttribute('chunkLocalX', new THREE.Float32BufferAttribute(chunkLocalXCoords, 1));
+    threeGeometry.setAttribute('chunkLocalZ', new THREE.Float32BufferAttribute(chunkLocalZCoords, 1));
+    
+    // Store chunk base world X as a custom attribute (same for all vertices in this chunk)
+    // This tells us where this chunk starts in world space (before wrapping offset)
+    const chunkBaseXArray = new Array(geometry.vertices.length).fill(chunkBaseX);
+    threeGeometry.setAttribute('chunkBaseWorldX', new THREE.Float32BufferAttribute(chunkBaseXArray, 1));
     
     // Compute vertex normals automatically (Three.js will handle this correctly)
     threeGeometry.computeVertexNormals();

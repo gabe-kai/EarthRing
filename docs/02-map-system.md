@@ -702,6 +702,7 @@ vertices.forEach(vertex => {
 - ✅ **Always** when rendering Three.js meshes at large distances (>1,000,000m)
 - ✅ **Always** for zones, chunks, and structures
 - ✅ **Always** when precision is critical
+- ✅ **Grid System**: The grid overlay uses a similar chunk-local coordinate approach (see Grid Rendering in Client Architecture docs)
 
 **When NOT to Use**:
 - ❌ Camera position tracking (can use absolute coordinates)

@@ -1647,8 +1647,19 @@ The procedural generation system has extensive test coverage for building genera
 - ✅ **Enhanced**: Wall height calculations - `totalWallHeight` now correctly includes foundation height (foundation + building height) for proper positioning
 
 ### Grid Overlay
-- ✅ **Updated**: Minor grid lines changed from white (0xffffff) back to medium gray (0x9c9c9c) to reduce visual contrast
-- ✅ **Maintained**: Major grid lines remain red (horizontal) and blue (vertical) at 5m intervals, with white (now gray) 1m minor grid inside
+- ✅ **Updated**: Blue grid lines changed to brighter blue (`0x0088ff`) for better contrast against zones
+- ✅ **Updated**: Minor grid lines use medium-light gray (`0xb2b2b2`) and are half the thickness of major lines for subtle visibility
+- ✅ **Maintained**: All red grid lines (`0xff2d2d`) run east-west (horizontal), all blue grid lines (`0x0088ff`) run north-south (vertical)
+- ✅ **Maintained**: Major grid lines at 5m intervals (red for horizontal/east-west, blue for vertical/north-south), with gray 1m minor grid inside
+- ✅ **Y=0 Centerline**: Thick red line at Y=0 (station spine) running east-west
+- ✅ **Precision Fix**: Chunk-local grid system implemented to prevent precision loss at large distances
+  - Grid calculations use chunk-local coordinates (0-1000m range) instead of absolute world coordinates
+  - Grid is normalized within each chunk so the west edge (chunkLocalX = 0) always starts on a major line
+  - Grid pattern flows eastward from the west edge with consistent spacing
+  - Grid lines stay straight and aligned when teleporting to distant locations (e.g., X=22,000,000m)
+- ✅ **Fade-out**: Distance-based fade re-implemented (starts at 200m, fully faded at 250m)
+  - Fade uses world position for distance calculation while grid uses chunk-local coordinates for precision
+  - Grid smoothly fades out as camera moves away, creating clean circular fade pattern
 
 ### Building Boundary Validation
 - ✅ **Improved**: Buffer margin for building boundary validation reduced from 50cm to 10cm to allow buildings in narrower zones
