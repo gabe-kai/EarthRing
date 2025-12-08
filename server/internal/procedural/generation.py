@@ -3,20 +3,12 @@ Chunk generation functions.
 Phase 2: Basic ring floor geometry generation with station flares and building generation.
 """
 
+from typing import Optional
+
 from . import seeds
 from . import stations
+from . import structure_generator
 import math
-import random
-
-# Optional imports for Phase 2 building generation
-try:
-    from . import grid
-    from . import buildings
-    import shapely.geometry as sg
-    BUILDING_GENERATION_AVAILABLE = True
-except ImportError:
-    # Building generation not available (e.g., missing shapely)
-    BUILDING_GENERATION_AVAILABLE = False
 
 # Constants
 CHUNK_LENGTH = 1000.0  # 1 km chunk length along ring
@@ -31,7 +23,9 @@ FLOOR_HEIGHT = 20.0  # 20 meters per floor level
 #   4: Phase 2 - Added building variability (discrete floor heights, building subtypes, varied footprints)
 #   5: Phase 2 - Fixed building heights to be 5, 10, 15, or 20m (within single 20m level)
 #   6: Phase 2 - Changed to 4m floor system (1-5 floors) with new window types (full-height, standard, ceiling)
-CURRENT_GEOMETRY_VERSION = 7
+#   7: Phase 2 - Added building generation (grid-based city generation with buildings)
+#   8: Decommissioned legacy procedural structure generation (structures disabled)
+CURRENT_GEOMETRY_VERSION = 8
 
 
 def get_chunk_width(floor: int, chunk_index: int, chunk_seed: int) -> float:
@@ -1026,19 +1020,12 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Combine all zones
     all_zones = [restricted_zone] + industrial_zones + commercial_zones + mixed_use_zones + agricultural_zones
 
-    # Phase 2: Generate buildings and structures for zones (if available)
-    if BUILDING_GENERATION_AVAILABLE:
-        try:
-            all_structures = _generate_structures_for_zones(
-                all_zones, floor, chunk_index, chunk_seed, hub_name
-            )
-        except Exception as e:
-            # If building generation fails, return empty structures but still return zones
-            # Log only significant errors (not expected exceptions)
-            if "ImportError" not in str(type(e).__name__):
-                print(f"Warning: Building generation failed: {e}")
-            all_structures = []
-    else:
+    try:
+        all_structures = structure_generator.generate_structures_for_zones(
+            all_zones, floor, chunk_index, chunk_seed, hub_name
+        )
+    except Exception as e:
+        print(f"Warning: structure generation failed: {e}")
         all_structures = []
 
     return {
@@ -1065,325 +1052,4 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
             },
         },
     }
-
-
-def _generate_structures_for_zones(
-    zones: list, floor: int, chunk_index: int, chunk_seed: int, hub_name: Optional[str] = None
-) -> list:
-    """
-    Generate buildings and structures for zones in a chunk.
-    
-    Phase 2 MVP: Generates buildings in system zones (industrial, commercial, agricultural).
-    Skips restricted zones.
-    
-    Args:
-        zones: List of zone dictionaries (GeoJSON format)
-        floor: Floor number
-        chunk_index: Chunk index (for structure ID generation)
-        chunk_seed: Chunk seed for deterministic generation
-    
-    Returns:
-        List of structure dictionaries (buildings, parks, etc.)
-    """
-    structures = []
-    
-    # Track placed buildings across all zones to prevent overlaps
-    placed_buildings = []  # List of (x, y, width, depth) tuples
-    
-    for zone in zones:
-        zone_type = zone.get("properties", {}).get("zone_type", "").lower()
-        
-        # Skip restricted zones (no buildings allowed)
-        if zone_type == "restricted":
-            continue
-        
-        # Generate buildings in industrial, commercial, mixed-use, agricultural, and park zones
-        if zone_type not in ["industrial", "commercial", "mixed_use", "mixed-use", "agricultural", "park"]:
-            continue
-        
-        # Extract zone polygon coordinates
-        zone_geometry = zone.get("geometry", {})
-        if zone_geometry.get("type") != "Polygon":
-            continue
-        
-        zone_coordinates = zone_geometry.get("coordinates", [])
-        if not zone_coordinates or not zone_coordinates[0]:
-            continue
-        
-        # Get zone importance (default to 0.5 for system zones)
-        zone_importance = 0.5
-        if "properties" in zone and "properties" in zone["properties"]:
-            zone_props = zone["properties"].get("properties", {})
-            zone_importance = zone_props.get("importance", 0.5)
-        
-        # Generate grid cells for this zone
-        try:
-            grid_cells = grid.generate_city_grid(
-                zone_coordinates,
-                zone_type,
-                zone_importance,
-                chunk_seed,
-            )
-            
-            # Generate buildings for building-type cells
-            # Create Shapely polygon for zone boundary validation
-            zone_polygon_shapely = sg.Polygon(zone_coordinates[0])
-            
-            # For agricultural zones, implement clustering: house + barn + small industrial
-            # ALL building cells in agricultural zones get agricultural building types
-            if zone_type == "agricultural":
-                # Collect all building cells
-                building_cells = [cell for cell in grid_cells if cell.get("type") == "building"]
-                
-                if building_cells:
-                    # Group cells into clusters based on proximity (within 100m)
-                    clusters = []
-                    cluster_radius = 100.0  # 100m cluster radius
-                    used_cells = set()
-                    
-                    for cell in building_cells:
-                        if id(cell) in used_cells:
-                            continue
-                        
-                        # Start a new cluster with this cell
-                        cluster = [cell]
-                        used_cells.add(id(cell))
-                        cell_pos = sg.Point(cell["position"][0], cell["position"][1])
-                        
-                        # Find nearby cells to add to this cluster
-                        for other_cell in building_cells:
-                            if id(other_cell) in used_cells:
-                                continue
-                            other_pos = sg.Point(other_cell["position"][0], other_cell["position"][1])
-                            distance = cell_pos.distance(other_pos)
-                            
-                            if distance <= cluster_radius:
-                                cluster.append(other_cell)
-                                used_cells.add(id(other_cell))
-                        
-                        clusters.append(cluster)
-                    
-                    # For each cluster, assign building types: 1 house, 1 barn, 1-2 small industrial
-                    # Clustered cells get assigned types within each cluster
-                    for cluster_idx, cluster in enumerate(clusters):
-                        cluster_seed = hash((chunk_seed, len(clusters), cluster_idx)) % (2**31)
-                        cluster_rng = random.Random(cluster_seed)
-                        
-                        # Shuffle cluster cells for random assignment
-                        cluster_rng.shuffle(cluster)
-                        
-                        # Assign building types: first is house, second is barn, rest are small industrial
-                        for i, cell in enumerate(cluster):
-                            if i == 0:
-                                # First cell: house
-                                building_type_override = "house"
-                            elif i == 1:
-                                # Second cell: barn
-                                building_type_override = "barn"
-                            else:
-                                # Remaining: small industrial (warehouse subtype)
-                                building_type_override = "small_industrial"
-                            
-                            # Store override for later use
-                            cell["_agri_building_type"] = building_type_override
-                    
-                    # For cells NOT in clusters (isolated cells), assign random agricultural building types
-                    # Use a deterministic seed based on cell position for consistency
-                    for cell in building_cells:
-                        if "_agri_building_type" not in cell:
-                            # Isolated cell - assign random agricultural type (house, barn, or warehouse)
-                            cell_seed = hash((chunk_seed, cell["position"][0], cell["position"][1])) % (2**31)
-                            cell_rng = random.Random(cell_seed)
-                            
-                            # Weighted random: 40% house, 30% barn, 30% small industrial (warehouse)
-                            rand_val = cell_rng.random()
-                            if rand_val < 0.4:
-                                building_type_override = "house"
-                            elif rand_val < 0.7:
-                                building_type_override = "barn"
-                            else:
-                                building_type_override = "small_industrial"
-                            
-                            cell["_agri_building_type"] = building_type_override
-            
-            # Process all building cells (including agricultural clusters)
-            for cell in grid_cells:
-                if cell.get("type") != "building":
-                    continue
-                
-                # Generate building seed
-                cell_x = int(cell["position"][0] / grid.GRID_CELL_SIZE)
-                cell_y = int(cell["position"][1] / grid.GRID_CELL_SIZE)
-                building_seed = buildings.get_building_seed(
-                    chunk_seed, cell_x, cell_y
-                )
-                
-                # For agricultural zones, use subtype override if clustered
-                building_subtype_override = None
-                if zone_type == "agricultural" and "_agri_building_type" in cell:
-                    agri_type = cell["_agri_building_type"]
-                    if agri_type == "small_industrial":
-                        building_subtype_override = "warehouse"  # Use warehouse for small industrial
-                    else:
-                        building_subtype_override = agri_type  # house or barn
-                
-                # Generate building with optional subtype override
-                building = buildings.generate_building(
-                    tuple(cell["position"]),
-                    zone_type,
-                    zone_importance,
-                    building_seed,
-                    floor,
-                    hub_name,
-                    building_subtype_override,
-                )
-                
-                # Validate building footprint is completely within zone
-                # Use multiple validation methods to ensure robustness
-                building_width = building["dimensions"]["width"]
-                building_depth = building["dimensions"]["depth"]
-                half_width = building_width / 2.0
-                half_depth = building_depth / 2.0
-                
-                building_x = building["position"][0]
-                building_y = building["position"][1]
-                
-                # Create building rectangle (footprint)
-                building_rect = sg.box(
-                    building_x - half_width,
-                    building_y - half_depth,
-                    building_x + half_width,
-                    building_y + half_depth
-                )
-                
-                # Method 1: Check that the entire building rectangle is within the zone polygon
-                # Use contains() to ensure the building is completely inside (not just touching)
-                building_fully_contained = zone_polygon_shapely.contains(building_rect)
-                
-                if not building_fully_contained:
-                    # Building would extend outside zone boundary - skip it
-                    continue
-                
-                # Method 2: Check all 4 corners are within the zone
-                # This catches edge cases where contains() might have precision issues
-                corners = [
-                    sg.Point(building_x - half_width, building_y - half_depth),  # Bottom-left
-                    sg.Point(building_x + half_width, building_y - half_depth),  # Bottom-right
-                    sg.Point(building_x + half_width, building_y + half_depth),  # Top-right
-                    sg.Point(building_x - half_width, building_y + half_depth),  # Top-left
-                ]
-                
-                all_corners_within = all(zone_polygon_shapely.contains(corner) for corner in corners)
-                
-                if not all_corners_within:
-                    # At least one corner is outside - skip it
-                    continue
-                
-                # Method 3: Check that building doesn't intersect zone boundary
-                # This ensures the building is fully interior (not touching the edge)
-                # Use a small buffer to check if building is well within zone
-                # Reduced buffer from 50cm to 10cm to allow buildings in narrower zones (e.g., agricultural zones)
-                buffer_margin = 0.1  # 10cm buffer to ensure building is well within zone
-                building_rect_buffered = sg.box(
-                    building_x - half_width + buffer_margin,
-                    building_y - half_depth + buffer_margin,
-                    building_x + half_width - buffer_margin,
-                    building_y + half_depth - buffer_margin
-                )
-                
-                # Buffered building should also be fully contained
-                # But only skip if the zone is large enough - for narrow zones, we'll allow buildings that pass Method 1 and 2
-                zone_area = zone_polygon_shapely.area
-                min_zone_area_for_buffer_check = 100.0  # Only apply buffer check for zones larger than 100 m²
-                if zone_area > min_zone_area_for_buffer_check:
-                    if not zone_polygon_shapely.contains(building_rect_buffered):
-                        # Building is too close to zone edge - skip it (only for larger zones)
-                        continue
-                
-                # Check building spacing against already placed buildings
-                # Rules: Buildings can touch (walls can touch), but if they don't touch,
-                # there must be at least a 5m gap (alleys), 10m gap (small streets), or 20m gap (wide streets)
-                building_rect = sg.box(
-                    building_x - half_width,
-                    building_y - half_depth,
-                    building_x + half_width,
-                    building_y + half_depth
-                )
-                
-                violates_spacing = False
-                for placed_x, placed_y, placed_width, placed_depth in placed_buildings:
-                    placed_half_width = placed_width / 2.0
-                    placed_half_depth = placed_depth / 2.0
-                    placed_rect = sg.box(
-                        placed_x - placed_half_width,
-                        placed_y - placed_half_depth,
-                        placed_x + placed_half_width,
-                        placed_y + placed_half_depth
-                    )
-                    
-                    # Check if buildings are at the exact same position (duplicate)
-                    if abs(building_x - placed_x) < 0.01 and abs(building_y - placed_y) < 0.01:
-                        # Exact duplicate - reject
-                        violates_spacing = True
-                        break
-                    
-                    # Check if buildings overlap (interiors intersect)
-                    if building_rect.intersects(placed_rect):
-                        # Check if they only touch (boundaries touch but interiors don't overlap)
-                        # or if they actually overlap
-                        if building_rect.overlaps(placed_rect):
-                            # Buildings overlap (interiors intersect) - reject
-                            violates_spacing = True
-                            break
-                        # If they only touch (touches() returns True), that's OK
-                    
-                    # Check minimum gap if buildings don't touch or intersect
-                    if not building_rect.touches(placed_rect) and not building_rect.intersects(placed_rect):
-                        # Buildings don't touch - calculate minimum distance
-                        distance = building_rect.distance(placed_rect)
-                        
-                        # Minimum gap must be at least 5m (alleys)
-                        # We allow 5m, 10m, or 20m gaps, but reject gaps smaller than 5m
-                        if distance > 0 and distance < 5.0:
-                            # Gap is too small (not a proper alley/street) - reject
-                            violates_spacing = True
-                            break
-                
-                if violates_spacing:
-                    # Building violates spacing rules - skip it
-                    continue
-                
-                # Building passed all checks - add it to placed buildings
-                placed_buildings.append((building_x, building_y, building_width, building_depth))
-                
-                # Convert building to structure format expected by client
-                # Client expects: { id, structure_type, position: {x, y}, floor, ... }
-                # structure_type must be "building" (not zone type) for client to recognize it
-                structure_id = f"proc_{floor}_{chunk_index}_{cell_x}_{cell_y}"
-                structure = {
-                    "id": structure_id,
-                    "type": "building",
-                    "structure_type": "building",  # Always "building" for client recognition
-                    "building_subtype": building.get("building_subtype"),  # Include building subtype for variety
-                    "position": {
-                        "x": building["position"][0],
-                        "y": building["position"][1],
-                    },
-                    "floor": floor,
-                    "dimensions": building["dimensions"],
-                    "windows": building["windows"],
-                    "doors": building.get("doors", {}),  # Include doors dictionary
-                    "garage_doors": building.get("garage_doors", []),  # Include garage doors list
-                    "properties": building.get("properties", {}),  # Include all properties, including colors
-                    "is_procedural": True,
-                    "procedural_seed": building_seed,
-                }
-                structures.append(structure)
-        except Exception as e:
-            # Log error but continue with other zones
-            # In production, use proper logging
-            print(f"Error generating structures for zone {zone_type}: {e}")
-            continue
-    
-    return structures
 

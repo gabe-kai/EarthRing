@@ -30,7 +30,8 @@ import (
 //	            commercial (5-story office towers, floor-to-ceiling windows, doors on all sides), residential
 //	            (apartments/campuses/houses with varied door counts), agricultural clusters (house+barn+industrial),
 //	            park buildings (small scattered structures)
-const CurrentGeometryVersion = 7
+//	8: Decommissioned legacy procedural structure generation (structures disabled)
+const CurrentGeometryVersion = 8
 
 // ChunkHandlers handles chunk-related HTTP requests.
 type ChunkHandlers struct {

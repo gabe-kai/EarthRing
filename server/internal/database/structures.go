@@ -514,6 +514,47 @@ func (s *StructureStorage) DeleteAllProceduralStructures() (int64, error) {
 	return rowsAffected, nil
 }
 
+// DeleteAllStructures deletes every structure and optionally resets the id sequence.
+func (s *StructureStorage) DeleteAllStructures(resetSequence bool) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin delete transaction: %w", err)
+	}
+
+	deleteResult, err := tx.Exec(`DELETE FROM structures`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("failed to delete structures: %w", err)
+	}
+
+	deletedCount, err := deleteResult.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("failed to get deleted structure count: %w", err)
+	}
+
+	if resetSequence {
+		var seqName sql.NullString
+		if err := tx.QueryRow(`SELECT pg_get_serial_sequence('structures', 'id')`).Scan(&seqName); err != nil {
+			_ = tx.Rollback()
+			return 0, fmt.Errorf("failed to look up structures id sequence: %w", err)
+		}
+
+		if seqName.Valid && seqName.String != "" {
+			if _, err := tx.Exec(`ALTER SEQUENCE ` + seqName.String + ` RESTART WITH 1`); err != nil {
+				_ = tx.Rollback()
+				return 0, fmt.Errorf("failed to reset structures id sequence: %w", err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit structure deletion: %w", err)
+	}
+
+	return deletedCount, nil
+}
+
 // ListStructuresByArea retrieves structures within a bounding box.
 func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, floor int) ([]*Structure, error) {
 	query := `

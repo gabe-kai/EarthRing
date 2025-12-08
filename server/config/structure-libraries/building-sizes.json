@@ -1,0 +1,28 @@
+{
+  "version": "0.1.0",
+  "size_classes": {
+    "medium": {
+      "width": [25.0, 40.0],
+      "depth": [20.0, 35.0],
+      "height": [8.0, 14.0]
+    },
+    "large": {
+      "width": [40.0, 70.0],
+      "depth": [30.0, 60.0],
+      "height": [10.0, 18.0]
+    },
+    "xl": {
+      "width": [60.0, 90.0],
+      "depth": [40.0, 80.0],
+      "height": [12.0, 20.0]
+    }
+  },
+  "zone_distributions": {
+    "industrial": [
+      { "size_class": "medium", "weight": 0.25 },
+      { "size_class": "large", "weight": 0.50 },
+      { "size_class": "xl", "weight": 0.25 }
+    ]
+  },
+  "hub_overrides": {}
+}

@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { toThreeJS, wrapRingPosition, normalizeRelativeToCamera, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
+import { updateInfoBox } from '../ui/info-box.js';
 
 /**
  * StructureManager coordinates structure data and renders structures as world-positioned meshes.
@@ -16,6 +17,8 @@ export class StructureManager {
     this.cameraController = cameraController;
     this.sceneManager = sceneManager;
     this.scene = sceneManager.getScene();
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
 
     this.structuresVisible = true;
     this.structureMeshes = new Map(); // Map<structureID, THREE.Group>
@@ -40,6 +43,7 @@ export class StructureManager {
     this.geometryCache = new Map(); // Map<geometryKey, Geometry>
     
     this.setupListeners();
+    this.setupStructureClickHandler();
   }
 
   /**
@@ -152,6 +156,86 @@ export class StructureManager {
     });
   }
 
+  setupStructureClickHandler() {
+    const tryAttach = () => {
+      const renderer = this.sceneManager?.getRenderer?.();
+      if (!renderer || !renderer.domElement) {
+        // Renderer not ready yet; retry shortly
+        setTimeout(tryAttach, 250);
+        return;
+      }
+      const canvas = renderer.domElement;
+      // Avoid double-binding
+      if (canvas._structureClickHandlerAttached) return;
+      canvas._structureClickHandlerAttached = true;
+      canvas.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return; // left click only
+        this.handleStructureClick(event, renderer);
+      });
+    };
+    tryAttach();
+  }
+
+  handleStructureClick(event, renderer) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.sceneManager.getCamera());
+
+    const meshes = Array.from(this.structureMeshes.values());
+    const intersects = this.raycaster.intersectObjects(meshes, true);
+    if (!intersects.length) return;
+
+    let obj = intersects[0].object;
+    while (obj && !obj.userData?.structureId) {
+      obj = obj.parent;
+    }
+    if (!obj || !obj.userData?.structureId) return;
+
+    const structureId = String(obj.userData.structureId);
+    let structure = this.gameState.getStructure(structureId);
+    if (!structure) {
+      structure = obj.userData.structure;
+      if (!structure) return;
+    }
+
+    const info = this.buildStructureInfo(structure);
+    updateInfoBox(info, { title: 'Structure', tooltip: 'Selected structure', source: 'structure' });
+  }
+
+  setStructureIdRecursive(obj, id, structure) {
+    if (!obj || typeof obj !== 'object') return;
+    obj.userData = obj.userData || {};
+    // Force-set so any existing userData.structureId is replaced by the canonical one
+    obj.userData.structureId = id;
+    if (structure) {
+      obj.userData.structure = structure;
+    }
+    if (obj.children && obj.children.length) {
+      obj.children.forEach(child => this.setStructureIdRecursive(child, id, structure));
+    }
+  }
+
+  buildStructureInfo(structure) {
+    const doors = structure.doors || structure.model_data?.doors || {};
+    const garageDoors = structure.garage_doors || structure.model_data?.garage_doors || [];
+    const windows = structure.windows || structure.model_data?.windows || [];
+    const dims = structure.dimensions || {};
+    return {
+      id: structure.id,
+      type: structure.structure_type || structure.type || 'unknown',
+      building_class: structure.building_class || structure.model_data?.class || 'n/a',
+      category: structure.category || 'n/a',
+      subcategory: structure.subcategory || 'n/a',
+      floor: structure.floor,
+      position: `x:${structure.position?.x?.toFixed?.(1) ?? '?'}, y:${structure.position?.y?.toFixed?.(1) ?? '?'}`,
+      dimensions: `w:${dims.width ?? '?'}, d:${dims.depth ?? '?'}, h:${dims.height ?? '?'}`,
+      doors: JSON.stringify(doors),
+      garage_doors: JSON.stringify(garageDoors),
+      windows: JSON.stringify(windows),
+    };
+  }
+
   /**
    * Handle structures streamed from chunk data
    * @param {Array} structures - Array of structure objects
@@ -255,7 +339,7 @@ export class StructureManager {
     // Create structure mesh group
     const structureGroup = new THREE.Group();
     structureGroup.renderOrder = 10; // Render above zones
-    structureGroup.userData.structureID = structure.id;
+    structureGroup.userData.structureId = structure.id;
     structureGroup.userData.structureType = structureType;
     structureGroup.userData.structure = structure;
     structureGroup.userData.lastCameraXUsed = cameraXWrapped;
@@ -309,6 +393,7 @@ export class StructureManager {
       threeJSPosWorld.y,
       threeJSPosWorld.z
     );
+    structureGroup.userData.structureId = structure.id;
 
     // Apply rotation
     if (structure.rotation !== undefined) {
@@ -343,6 +428,9 @@ export class StructureManager {
       mesh.receiveShadow = true;
       structureGroup.add(mesh);
     }
+
+    // Ensure every child of the group carries the structureId and structure for reliable picking/fallback
+    this.setStructureIdRecursive(structureGroup, structure.id, structure);
 
     // Add to scene
     this.scene.add(structureGroup);
@@ -665,8 +753,13 @@ export class StructureManager {
         if (Array.isArray(doorInfo)) {
           // Multiple doors on this facade (e.g., regular door + utility doors)
           doorInfo.forEach(door => {
+            // Map industrial_main to 'utility' so the shader pairing logic picks it up
+            const type =
+              door.type === 'industrial_main'
+                ? 'utility'
+                : (door.type || 'main');
             doorArray.push({
-              type: door.type || 'main',
+              type,
               x: door.x || 0,
               y: door.y || 0,
               width: door.width || 0.9,
@@ -675,8 +768,12 @@ export class StructureManager {
           });
         } else {
           // Single door on this facade
+          const type =
+            doorInfo.type === 'industrial_main'
+              ? 'utility'
+              : (doorInfo.type || 'main');
           doorArray.push({
-            type: doorInfo.type || 'main',
+            type,
             x: doorInfo.x || 0,
             y: doorInfo.y || 0,
             width: doorInfo.width || 0.9,

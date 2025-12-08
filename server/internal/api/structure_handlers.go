@@ -349,6 +349,47 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 	})
 }
 
+// DeleteAllStructures handles DELETE /api/structures/all
+// Admin-only endpoint that deletes all structures (procedural and player), resets ids, and triggers regeneration.
+func (h *StructureHandlers) DeleteAllStructures(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Check admin role
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
+	if authRole != "admin" {
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	// Delete all structures and reset the id sequence
+	count, err := h.storage.DeleteAllStructures(true)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete structures: %v", err))
+		return
+	}
+
+	// Also delete all chunks to force regeneration with empty structures
+	chunkStorage := database.NewChunkStorage(h.db)
+	chunksDeleted, err := chunkStorage.DeleteAllChunks()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete chunks: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":                "All structures deleted, sequence reset, and chunks reset",
+		"structures_deleted":     count,
+		"chunks_deleted":         chunksDeleted,
+		"sequence_reset":         true,
+		"regeneration_triggered": true,
+	})
+}
+
 // ListStructuresByArea handles GET /api/structures/area?x_min={x_min}&x_max={x_max}&y_min={y_min}&y_max={y_max}&floor={floor}
 func (h *StructureHandlers) ListStructuresByArea(w http.ResponseWriter, r *http.Request) {
 	minXStr := r.URL.Query().Get("x_min")

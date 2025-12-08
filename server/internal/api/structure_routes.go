@@ -30,6 +30,8 @@ func SetupStructureRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 			handlers.GetStructure(w, r)
 		case r.Method == http.MethodPut && path != "":
 			handlers.UpdateStructure(w, r)
+		case r.Method == http.MethodDelete && path == "all":
+			handlers.DeleteAllStructures(w, r)
 		case r.Method == http.MethodDelete && path == "all/procedural":
 			handlers.DeleteAllProceduralStructures(w, r)
 		case r.Method == http.MethodDelete && path != "":

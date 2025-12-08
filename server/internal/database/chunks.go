@@ -477,6 +477,39 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				if buildingSubtype, ok := structureMap["building_subtype"].(string); ok {
 					modelDataMap["building_subtype"] = buildingSubtype
 				}
+				// Include building_class, category, subcategory if present (new structure library fields)
+				if buildingClass, ok := structureMap["building_class"].(string); ok {
+					modelDataMap["class"] = buildingClass
+				}
+				if category, ok := structureMap["category"].(string); ok {
+					modelDataMap["category"] = category
+				}
+				if subcategory, ok := structureMap["subcategory"].(string); ok {
+					modelDataMap["subcategory"] = subcategory
+				}
+				// Include color_palette, shader_patterns, decorative_elements from model_data if present
+				if modelDataVal, exists := structureMap["model_data"]; exists {
+					if modelDataObj, ok := modelDataVal.(map[string]interface{}); ok {
+						if colorPalette, ok := modelDataObj["color_palette"].(map[string]interface{}); ok {
+							modelDataMap["color_palette"] = colorPalette
+						}
+						if shaderPatterns, ok := modelDataObj["shader_patterns"].([]interface{}); ok {
+							modelDataMap["shader_patterns"] = shaderPatterns
+						}
+						if decorativeElements, ok := modelDataObj["decorative_elements"].([]interface{}); ok {
+							modelDataMap["decorative_elements"] = decorativeElements
+						}
+						if shape, ok := modelDataObj["shape"].(string); ok {
+							modelDataMap["shape"] = shape
+						}
+						if sizeClass, ok := modelDataObj["size_class"].(string); ok {
+							modelDataMap["size_class"] = sizeClass
+						}
+						if height, ok := modelDataObj["height"].(float64); ok {
+							modelDataMap["height"] = height
+						}
+					}
+				}
 				if len(modelDataMap) > 0 {
 					if modelBytes, err := json.Marshal(modelDataMap); err == nil {
 						modelDataJSON = modelBytes

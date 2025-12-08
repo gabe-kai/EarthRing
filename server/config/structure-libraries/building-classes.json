@@ -1,0 +1,180 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "building_classes": {
+      "standard_warehouse_bar": {
+        "name": "Standard Warehouse Bar",
+        "category": "industrial",
+        "subcategory": "warehouse",
+        "allowed_zones": ["industrial"],
+        "base_shape": "bar",
+        "size_class": "large",
+        "is_exterior": false,
+        "height_range": [8.0, 16.0],
+        "decorative_elements": ["loading_dock", "vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "cross_dock_facility": {
+        "name": "Cross-Dock Facility",
+        "category": "industrial",
+        "subcategory": "logistics",
+        "allowed_zones": ["industrial"],
+        "base_shape": "bar",
+        "size_class": "xl",
+        "is_exterior": false,
+        "height_range": [10.0, 18.0],
+        "decorative_elements": ["loading_dock", "vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel", "industrial_strip"]
+      },
+      "vertical_logistics_block": {
+        "name": "Vertical Logistics Block",
+        "category": "industrial",
+        "subcategory": "logistics",
+        "allowed_zones": ["industrial"],
+        "base_shape": "rectangle",
+        "size_class": "xl",
+        "is_exterior": true,
+        "height_range": [14.0, 20.0],
+        "decorative_elements": ["loading_dock", "vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "energy_plant_block": {
+        "name": "Energy Plant Block",
+        "category": "industrial",
+        "subcategory": "plant",
+        "allowed_zones": ["industrial"],
+        "base_shape": "rectangle",
+        "size_class": "xl",
+        "is_exterior": true,
+        "height_range": [12.0, 20.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "water_recycling_plant": {
+        "name": "Water / Recycling Plant",
+        "category": "industrial",
+        "subcategory": "plant",
+        "allowed_zones": ["industrial"],
+        "base_shape": "rectangle",
+        "size_class": "large",
+        "is_exterior": false,
+        "height_range": [10.0, 18.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "data_fabrication_block": {
+        "name": "Data / Fabrication Block",
+        "category": "industrial",
+        "subcategory": "plant",
+        "allowed_zones": ["industrial"],
+        "base_shape": "rectangle",
+        "size_class": "large",
+        "is_exterior": false,
+        "height_range": [10.0, 18.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "lift_yard_platform": {
+        "name": "Lift Yard Platform",
+        "category": "industrial",
+        "subcategory": "yard_platform",
+        "allowed_zones": ["industrial"],
+        "base_shape": "plate",
+        "size_class": "xl",
+        "is_exterior": false,
+        "height_range": [6.0, 12.0],
+        "decorative_elements": ["loading_dock"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_strip"]
+      },
+      "container_stack_yard": {
+        "name": "Container Stack Yard",
+        "category": "industrial",
+        "subcategory": "yard_platform",
+        "allowed_zones": ["industrial"],
+        "base_shape": "plate",
+        "size_class": "xl",
+        "is_exterior": false,
+        "height_range": [6.0, 12.0],
+        "decorative_elements": ["loading_dock"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_strip"]
+      },
+      "maintenance_deck": {
+        "name": "Maintenance Deck",
+        "category": "industrial",
+        "subcategory": "yard_platform",
+        "allowed_zones": ["industrial"],
+        "base_shape": "plate",
+        "size_class": "large",
+        "is_exterior": false,
+        "height_range": [6.0, 12.0],
+        "decorative_elements": ["loading_dock"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "small_bay_workshop_row": {
+        "name": "Small-Bay Workshop Row",
+        "category": "industrial",
+        "subcategory": "light_industrial",
+        "allowed_zones": ["industrial"],
+        "base_shape": "bar",
+        "size_class": "medium",
+        "is_exterior": false,
+        "height_range": [8.0, 14.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "maker_lab_block": {
+        "name": "Maker / Lab Block",
+        "category": "industrial",
+        "subcategory": "light_industrial",
+        "allowed_zones": ["industrial"],
+        "base_shape": "rectangle",
+        "size_class": "medium",
+        "is_exterior": false,
+        "height_range": [8.0, 14.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      },
+      "hybrid_office_industrial_bar": {
+        "name": "Hybrid Office-Industrial Bar",
+        "category": "industrial",
+        "subcategory": "light_industrial",
+        "allowed_zones": ["industrial"],
+        "base_shape": "bar",
+        "size_class": "large",
+        "is_exterior": false,
+        "height_range": [10.0, 16.0],
+        "decorative_elements": ["vent_stack"],
+        "color_palette_zone": "Industrial",
+        "shader_patterns": ["industrial_panel"]
+      }
+    },
+    "zone_distributions": {
+      "industrial": [
+        { "class": "standard_warehouse_bar", "weight": 0.18 },
+        { "class": "cross_dock_facility", "weight": 0.12 },
+        { "class": "vertical_logistics_block", "weight": 0.10 },
+        { "class": "energy_plant_block", "weight": 0.08 },
+        { "class": "water_recycling_plant", "weight": 0.08 },
+        { "class": "data_fabrication_block", "weight": 0.08 },
+        { "class": "lift_yard_platform", "weight": 0.08 },
+        { "class": "container_stack_yard", "weight": 0.08 },
+        { "class": "maintenance_deck", "weight": 0.05 },
+        { "class": "small_bay_workshop_row", "weight": 0.05 },
+        { "class": "maker_lab_block", "weight": 0.05 },
+        { "class": "hybrid_office_industrial_bar", "weight": 0.05 }
+      ]
+    }
+  },
+  "hub_overrides": {}
+}
