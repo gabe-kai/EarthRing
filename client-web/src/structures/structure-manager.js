@@ -220,6 +220,7 @@ export class StructureManager {
     const doors = structure.doors || structure.model_data?.doors || {};
     const garageDoors = structure.garage_doors || structure.model_data?.garage_doors || [];
     const windows = structure.windows || structure.model_data?.windows || [];
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
     const dims = structure.dimensions || {};
     return {
       id: structure.id,
@@ -233,6 +234,7 @@ export class StructureManager {
       doors: JSON.stringify(doors),
       garage_doors: JSON.stringify(garageDoors),
       windows: JSON.stringify(windows),
+      decorations: JSON.stringify(decorations),
     };
   }
 

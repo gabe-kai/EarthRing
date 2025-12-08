@@ -161,6 +161,58 @@ def _make_windows(width: float, depth: float, height: float) -> List[Dict[str, A
     return windows
 
 
+def _make_decorations(
+    width: float,
+    depth: float,
+    height: float,
+    class_def: Dict[str, Any],
+    garage_doors: List[Dict[str, Any]],
+    rng: random.Random,
+) -> List[Dict[str, Any]]:
+    """
+    Create simple decoration hints based on class decorative elements.
+    These are lightweight data-only markers (placement/rendering can be handled by client later).
+    """
+    decorations: List[Dict[str, Any]] = []
+    elements = class_def.get("decorative_elements", []) or []
+
+    # Foundation reference
+    foundation_height = min(0.5, height * 0.1)
+    roof_z = height / 2.0 - 0.5  # slightly below top
+    base_z = -height / 2.0 + foundation_height / 2.0
+
+    if "vent_stack" in elements:
+        stack_count = rng.randint(1, 3)
+        for _ in range(stack_count):
+            decorations.append(
+                {
+                    "type": "vent_stack",
+                    "position": [
+                        rng.uniform(-width * 0.3, width * 0.3),
+                        rng.uniform(-depth * 0.3, depth * 0.3),
+                        roof_z,
+                    ],
+                    "size": [1.0, 1.0, 1.2],  # w, d, h
+                }
+            )
+
+    if "loading_dock" in elements and garage_doors:
+        for gd in garage_doors:
+            if gd.get("facade") != "front":
+                continue
+            # Place dock aligned with garage door on front facade
+            decorations.append(
+                {
+                    "type": "loading_dock",
+                    "facade": "front",
+                    "position": [gd.get("x", 0.0), 0.0, base_z],
+                    "size": [gd.get("width", 3.0) + 0.5, 2.0, 1.0],  # small platform
+                }
+            )
+
+    return decorations
+
+
 def _filter_windows_by_openings(
     windows: List[Dict[str, Any]],
     doors: Dict[str, Any],
@@ -381,6 +433,7 @@ def generate_structures_for_zones(
 
         if polygon is None:
             rotation = 0.0 if centroid_y <= 0 else 180.0
+            decorations = _make_decorations(width, depth, height, class_def, model_garage_doors, rng)
             structures.append(
                 {
                     "id": structure_id,
@@ -402,6 +455,7 @@ def generate_structures_for_zones(
                     "doors": model_doors,
                     "garage_doors": model_garage_doors,
                     "windows": windows,
+                    "decorations": decorations,
                     "model_data": {
                         "class": class_name,
                         "shape": class_def.get("base_shape"),
@@ -413,6 +467,7 @@ def generate_structures_for_zones(
                         "doors": model_doors,
                         "garage_doors": model_garage_doors,
                         "windows": windows,
+                        "decorations": decorations,
                     },
                     "is_procedural": True,
                     "procedural_seed": rng_seed,
@@ -541,6 +596,7 @@ def generate_structures_for_zones(
             windows_after = len(windows)
             if windows_before != windows_after:
                 print(f"[StructureGen] Filtered {windows_before} -> {windows_after} windows for {class_name} (removed {windows_before - windows_after} overlapping)")
+            decorations = _make_decorations(width, depth, height, class_def, model_garage_doors, rng)
 
             structure_id = f"proc_lib_{floor}_{chunk_index}_{idx}_{len(placed)}"
 
@@ -565,6 +621,7 @@ def generate_structures_for_zones(
                     "doors": model_doors,
                     "garage_doors": model_garage_doors,
                     "windows": windows,
+                    "decorations": decorations,
                     "model_data": {
                         "class": class_name,
                         "shape": class_def.get("base_shape"),
@@ -576,6 +633,7 @@ def generate_structures_for_zones(
                         "doors": model_doors,
                         "garage_doors": model_garage_doors,
                         "windows": windows,
+                        "decorations": decorations,
                     },
                     "is_procedural": True,
                     "procedural_seed": rng_seed,
