@@ -11,7 +11,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [8.0, 16.0],
-        "decorative_elements": ["loading_dock", "vent_stack"],
+        "decorative_elements": ["loading_dock", "vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -24,7 +24,7 @@
         "size_class": "xl",
         "is_exterior": false,
         "height_range": [10.0, 18.0],
-        "decorative_elements": ["loading_dock", "vent_stack"],
+        "decorative_elements": ["loading_dock", "vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel", "industrial_strip"]
       },
@@ -37,7 +37,7 @@
         "size_class": "xl",
         "is_exterior": true,
         "height_range": [14.0, 20.0],
-        "decorative_elements": ["loading_dock", "vent_stack"],
+        "decorative_elements": ["loading_dock", "vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -50,7 +50,7 @@
         "size_class": "xl",
         "is_exterior": true,
         "height_range": [12.0, 20.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "roof_hvac", "utility_band", "cooling_tower", "reactor_turbine_hall"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -63,7 +63,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [10.0, 18.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "roof_hvac", "utility_band", "cooling_tower"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -76,7 +76,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [10.0, 18.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "roof_hvac", "utility_band"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -89,7 +89,7 @@
         "size_class": "xl",
         "is_exterior": false,
         "height_range": [6.0, 12.0],
-        "decorative_elements": ["loading_dock"],
+        "decorative_elements": ["loading_dock", "utility_band"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_strip"]
       },
@@ -102,7 +102,7 @@
         "size_class": "xl",
         "is_exterior": false,
         "height_range": [6.0, 12.0],
-        "decorative_elements": ["loading_dock"],
+        "decorative_elements": ["loading_dock", "utility_band"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_strip"]
       },
@@ -115,7 +115,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [6.0, 12.0],
-        "decorative_elements": ["loading_dock"],
+        "decorative_elements": ["loading_dock", "utility_band"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -128,7 +128,7 @@
         "size_class": "medium",
         "is_exterior": false,
         "height_range": [8.0, 14.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -141,7 +141,7 @@
         "size_class": "medium",
         "is_exterior": false,
         "height_range": [8.0, 14.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -154,7 +154,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [10.0, 16.0],
-        "decorative_elements": ["vent_stack"],
+        "decorative_elements": ["vent_stack", "utility_band", "roof_hvac"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       }

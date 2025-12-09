@@ -1020,11 +1020,11 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
     # Combine all zones
     all_zones = [restricted_zone] + industrial_zones + commercial_zones + mixed_use_zones + agricultural_zones
 
-        try:
+    try:
         all_structures = structure_generator.generate_structures_for_zones(
-                all_zones, floor, chunk_index, chunk_seed, hub_name
-            )
-        except Exception as e:
+            all_zones, floor, chunk_index, chunk_seed, hub_name
+        )
+    except Exception as e:
         print(f"Warning: structure generation failed: {e}")
         all_structures = []
 

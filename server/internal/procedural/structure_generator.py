@@ -178,8 +178,13 @@ def _make_decorations(
 
     # Vertical reference: client builds walls from ground (y=0) up to total height
     foundation_height = min(0.5, height * 0.1)
-    roof_z = max(foundation_height, height - 0.5)  # near the top
+    roof_z = height  # top of the roof; caller can add half-size if needed
     base_z = foundation_height * 0.5               # slightly above ground/foundation
+    building_half_width = width / 2.0
+    building_half_depth = depth / 2.0
+    # Floor metrics (match window logic)
+    floor_height = 4.0
+    floor_count = max(1, int(round((height - foundation_height) / floor_height)))
 
     if "vent_stack" in elements:
         stack_count = rng.randint(1, 3)
@@ -229,6 +234,98 @@ def _make_decorations(
                     "size": [platform_w, platform_d, platform_h],
                 }
             )
+
+    if "roof_hvac" in elements:
+        hvac_count = rng.randint(1, 3)
+        for _ in range(hvac_count):
+            decorations.append(
+                {
+                    "type": "roof_hvac",
+                    "position": [
+                        rng.uniform(-building_half_width * 0.5, building_half_width * 0.5),
+                        rng.uniform(-building_half_depth * 0.5, building_half_depth * 0.5),
+                        roof_z + 0.6,  # center above roof so it protrudes upward
+                    ],
+                    "size": [2.0, 2.0, 1.0],
+                }
+            )
+
+    if "utility_band" in elements:
+        # Place bands per floor (near top of each 4m band), all facades
+        # Skip ground floor to avoid overlapping truck/utility doors
+        band_heights: List[float] = []
+        for k in range(1, floor_count):  # start at 2nd band
+            bh = foundation_height + k * floor_height + 0.9
+            if bh < height - 0.5:
+                band_heights.append(bh)
+        facades = ["front", "back", "left", "right"]
+        for bh in band_heights:
+            for facade in facades:
+                # Width/depth per facade
+                if facade in {"front", "back"}:
+                    size = [width * 0.9, 0.2, 0.25]
+                    pos = [0.0, 0.0, bh]
+                else:
+                    size = [depth * 0.9, 0.2, 0.25]
+                    pos = [0.0, 0.0, bh]
+                decorations.append(
+                    {
+                        "type": "utility_band",
+                        "facade": facade,
+                        "position": pos,  # x relative, y depth axis, z height from ground
+                        "size": size,
+                    }
+                )
+
+    if "cooling_tower" in elements:
+        tower_count = rng.randint(1, 3)
+        # Deterministic spacing to avoid overlap
+        towerspan = width * 0.6
+        tower_diameter = 8.0
+        min_spacing = 10.0  # add buffer beyond diameter
+        max_range = max(0.1, towerspan * 0.5 - (tower_diameter * 0.5) - 0.2)
+
+        if tower_count == 1:
+            positions_x = [0.0]
+        else:
+            # Base spacing attempt
+            spacing = min_spacing
+            total_half = spacing * (tower_count - 1) * 0.5
+            if total_half > max_range:
+                # Fit inside available span
+                spacing = (max_range * 2.0) / (tower_count - 1)
+            positions_x = [
+                -spacing * (tower_count - 1) * 0.5 + i * spacing for i in range(tower_count)
+            ]
+
+        for px in positions_x:
+            decorations.append(
+                {
+                    "type": "cooling_tower",
+                    "position": [
+                        px,
+                        -(building_half_depth + 6.0),  # back close to parent
+                        0.0,
+                    ],
+                    "size": [tower_diameter, tower_diameter, 12.0],
+                }
+            )
+
+    if "reactor_turbine_hall" in elements:
+        hall_height = height * 0.6
+        hall_width = 12.0
+        hall_depth = depth * 0.6
+        # Place flush against right facade (x is east-west), sitting on ground
+        hall_pos_x = building_half_width + (hall_width * 0.5) + 0.1  # small gap to avoid z-fighting
+        hall_pos_y = 0.0  # depth axis (front/back) centered
+        hall_pos_z = 0.0  # vertical: base on ground
+        decorations.append(
+            {
+                "type": "reactor_turbine_hall",
+                "position": [hall_pos_x, hall_pos_y, hall_pos_z],
+                "size": [hall_width, hall_depth, hall_height],
+            }
+        )
 
     return decorations
 
@@ -536,7 +633,21 @@ def generate_structures_for_zones(
 
             half_w = width / 2.0
             half_d = depth / 2.0
-            footprint = sg.box(cand_x - half_w, cand_y - half_d, cand_x + half_w, cand_y + half_d)
+
+            # Expand footprint to reserve space for large exterior decorations
+            back_margin = 0.0
+            right_margin = 0.0
+            if "cooling_tower" in class_def.get("decorative_elements", []):
+                back_margin = 12.0  # keep towers close but reserve space behind
+            if "reactor_turbine_hall" in class_def.get("decorative_elements", []):
+                right_margin = 14.0  # reserve space on the right side for hall
+
+            footprint = sg.box(
+                cand_x - half_w - 0.0,
+                cand_y - half_d - back_margin,
+                cand_x + half_w + right_margin,
+                cand_y + half_d + 0.0,
+            )
 
             # Require full containment with a small margin to avoid edge clipping
             if not polygon.contains(footprint.buffer(0.1)):

@@ -3353,6 +3353,12 @@ The system uses 8 JSON configuration files, each handling a specific aspect of s
         "probability": 0.3,
         "use_cases": ["industrial"]
       },
+      // Implementation (current build):
+      // - Cooling towers are ground-based, behind the parent building (y negative),
+      //   size 8m x 8m x 12m, tapered with a stripe near the top, spaced deterministically
+      //   (>=10m) to prevent overlaps.
+      // - Reactor turbine hall is attached to the right facade at ground, Quonset-style half-cylinder roof.
+      // - Loading docks and roof HVAC are instanced per building to minimize draw calls; utility bands are shader-driven.
       
       "piping": {
         "type": "geometry",

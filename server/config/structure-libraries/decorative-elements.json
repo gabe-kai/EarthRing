@@ -11,6 +11,26 @@
         "category": "industrial",
         "placement": "roof",
         "size": [1.0, 1.0, 2.0]
+      },
+      "utility_band": {
+        "category": "industrial",
+        "placement": "facade",
+        "size": [4.0, 0.2, 0.3]
+      },
+      "roof_hvac": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [2.0, 2.0, 1.0]
+      },
+      "cooling_tower": {
+        "category": "industrial",
+        "placement": "exterior",
+        "size": [8.0, 8.0, 12.0]
+      },
+      "reactor_turbine_hall": {
+        "category": "industrial",
+        "placement": "exterior",
+        "size": [12.0, 6.0, 8.0]
       }
     }
   },

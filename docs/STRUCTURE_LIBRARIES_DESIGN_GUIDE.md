@@ -259,6 +259,13 @@ See [Building Classes Reference](#building-classes-reference) for complete list.
 - **Park & Recreation**: playground_equipment, picnic_table, pergola
 - **Infrastructure**: fence, retaining_wall, drainage_grate, parking_meter, transit_shelter
 
+**Current implementation notes (industrial)**
+- `vent_stack`: roof cylinders; individual meshes per stack.
+- `loading_dock`: instanced boxes, top at ~1m, aligned to truck bays.
+- `roof_hvac`: instanced boxes placed on roof.
+- `cooling_tower`: ground-based tapered cylinders (8m dia, 12m tall) behind building with deterministic spacing to prevent overlap.
+- `reactor_turbine_hall`: attached to right facade at ground; Quonset half-cylinder roof.
+
 **Merging Strategy**: See [Decorative Elements Merging](#decorative-elements-merging)
 
 ### 7. Lot Shapes (`lot-shapes.json`)

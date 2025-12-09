@@ -1,8 +1,3 @@
-/**
- * Structure Manager
- * Handles structure rendering, placement, and management in Three.js
- */
-
 import * as THREE from 'three';
 import { toThreeJS, wrapRingPosition, normalizeRelativeToCamera, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
@@ -249,33 +244,36 @@ export class StructureManager {
     const { width, depth, height } = dimensions;
     const defaultMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.1 });
 
+    const dockInstances = [];
+    const hvacInstances = [];
+
     decorations.forEach((dec) => {
       const type = dec.type || 'decoration';
+      if (type === 'utility_band') return; // shader-driven
+
       const pos = dec.position || [0, 0, 0]; // [x, depthAxis, vertical]
       const size = dec.size || [1, 1, 1];    // [w, d, h]
 
       // Map generator coords to Three.js (x -> x, y(depth) -> z, z(vertical) -> y)
-      const px = pos[0] || 0;
+      let px = pos[0] || 0;
       let pz = pos[1] || 0;
       let py = pos[2] || 0;
       const sx = size[0] || 1;
       const sz = size[1] || 1;
       const sy = size[2] || 1;
 
-      let mesh;
       if (type === 'vent_stack') {
         const radius = Math.min(sx, sz) * 0.35;
         const stackHeight = sy;
-        // Place center above the roof so the stack protrudes upward
         py = (height || 0) + stackHeight * 0.5 + 0.05;
         const geom = new THREE.CylinderGeometry(radius, radius * 0.9, stackHeight, 10);
         const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 });
-        mesh = new THREE.Mesh(geom, mat);
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.position.set(px, py, pz);
+        structureGroup.add(mesh);
       } else if (type === 'loading_dock') {
-        const geom = new THREE.BoxGeometry(sx, sy, sz);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 });
-        mesh = new THREE.Mesh(geom, mat);
-        // Place outside the front/back wall; assume facade is front if provided
         const facade = dec.facade || 'front';
         const zOffset = sz * 0.5 + 0.05;
         if (facade === 'front') {
@@ -283,21 +281,144 @@ export class StructureManager {
         } else if (facade === 'back') {
           pz = -(depth || 0) * 0.5 - zOffset;
         }
-        // Position so the top is at roughly 1m (door base height)
-        py = sy * 0.5;
+        py = sy * 0.5; // top at ~1m
+        dockInstances.push({ px, py, pz, sx, sy, sz });
+      } else if (type === 'roof_hvac') {
+        hvacInstances.push({ px, py, pz, sx, sy, sz });
+      } else if (type === 'cooling_tower') {
+        const radiusBottom = Math.min(sx, sz) * 0.4;
+        const radiusTop = radiusBottom * 0.8;
+        const towerHeight = sy;
+        const geom = new THREE.CylinderGeometry(radiusTop, radiusBottom, towerHeight, 32, 1, false);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6, metalness: 0.15 });
+        const tower = new THREE.Mesh(geom, mat);
+
+        const stripeH = Math.min(0.8, towerHeight * 0.15);
+        const stripeGeom = new THREE.CylinderGeometry(radiusTop * 1.05, radiusTop * 1.05, stripeH, 32, 1, false);
+        const stripeMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.2 });
+        const stripe = new THREE.Mesh(stripeGeom, stripeMat);
+        stripe.position.y = (towerHeight * 0.5) - (stripeH * 0.5) - 0.2;
+
+        const group = new THREE.Group();
+        group.add(tower);
+        group.add(stripe);
+        group.castShadow = false;
+        group.receiveShadow = false;
+        group.position.set(px, py, pz);
+        structureGroup.add(group);
+      } else if (type === 'reactor_turbine_hall') {
+        const baseH = sy * 0.6;
+        const roofH = sy * 0.4;
+        const group = new THREE.Group();
+
+        const baseGeom = new THREE.BoxGeometry(sx, baseH, sz);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.65, metalness: 0.2 });
+        const base = new THREE.Mesh(baseGeom, baseMat);
+        base.position.y = baseH * 0.5;
+        group.add(base);
+
+        const radius = sx * 0.5;
+        const roofShape = new THREE.Shape();
+        roofShape.moveTo(-radius, 0);
+        roofShape.absarc(0, 0, radius, Math.PI, 0, false);
+        const roofGeom = new THREE.ExtrudeGeometry(roofShape, {
+          depth: sz,
+          bevelEnabled: false,
+          curveSegments: 24,
+          steps: 1,
+        });
+        roofGeom.translate(0, 0, -sz * 0.5);
+
+        const roofMat = new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 0.6, metalness: 0.2 });
+        const roof = new THREE.Mesh(roofGeom, roofMat);
+        roof.rotation.x = Math.PI; // arc up
+        roof.position.y = baseH;
+        group.add(roof);
+
+        group.castShadow = false;
+        group.receiveShadow = false;
+        group.position.set(px, py, pz);
+        structureGroup.add(group);
       } else {
         const geom = new THREE.BoxGeometry(sx, sy, sz);
-        mesh = new THREE.Mesh(geom, defaultMaterial);
+        const mesh = new THREE.Mesh(geom, defaultMaterial);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.position.set(px, py, pz);
+        structureGroup.add(mesh);
       }
-
-      if (!mesh) return;
-
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-
-      mesh.position.set(px, py, pz);
-      structureGroup.add(mesh);
     });
+
+    // Instanced loading docks
+    if (dockInstances.length > 0) {
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 });
+      const inst = new THREE.InstancedMesh(geom, mat, dockInstances.length);
+      const m = new THREE.Matrix4();
+      dockInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced roof HVAC boxes
+    if (hvacInstances.length > 0) {
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.2 });
+      const inst = new THREE.InstancedMesh(geom, mat, hvacInstances.length);
+      const m = new THREE.Matrix4();
+      hvacInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+  }
+
+  buildBandRects(structure, decorations, facade, wallWidth, wallDepth, foundationHeight, buildingHeight) {
+    const MAX_BANDS = 8;
+    const totalWallHeight = foundationHeight + buildingHeight;
+    const wallCenterY = totalWallHeight / 2;
+    const decs = decorations.filter(
+      (d) => d && d.type === 'utility_band' && (d.facade || 'front') === facade
+    );
+    const rects = [];
+    decs.slice(0, MAX_BANDS).forEach((d) => {
+      const pos = d.position || [0, 0, 0]; // [x, depth, z]
+      const size = d.size || [0, 0, 0];    // [w, d, h]
+      let dx = 0;
+      let dw = 0;
+      if (facade === 'front' || facade === 'back') {
+        dx = (pos[0] || 0) / wallWidth;
+        dw = (size[0] || 0) / wallWidth;
+      } else {
+        // left/right: use depth axis for width
+        dx = (pos[1] || 0) / wallWidth;
+        dw = (size[0] || 0) / wallWidth;
+      }
+      const dy = ((pos[2] || 0) - wallCenterY) / totalWallHeight;
+      const dh = (size[2] || 0) / totalWallHeight;
+      rects.push(new THREE.Vector4(dx, dy, dw, dh));
+    });
+    while (rects.length < MAX_BANDS) {
+      rects.push(new THREE.Vector4(0, 0, 0, 0));
+    }
+    return { bandRects: rects, bandCount: Math.min(decs.length, MAX_BANDS) };
   }
 
   /**
@@ -690,6 +811,7 @@ export class StructureManager {
   createDetailedBuilding(structureGroup, structure, dimensions) {
     const { width, depth, height } = dimensions;
     const buildingSubtype = structure.building_subtype || 'default';
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
     
     // Extract windows from structure - check multiple possible locations
     let windows = [];
@@ -869,7 +991,12 @@ export class StructureManager {
     // Collect wall geometry definitions for merging
     const wallDefinitions = [];
     
-    // Front wall (positive Y) - with shader-based windows, doors, and trim
+    const frontBands = this.buildBandRects(structure, decorations, 'front', width, depth, foundationHeight, buildingHeight);
+    const backBands = this.buildBandRects(structure, decorations, 'back', width, depth, foundationHeight, buildingHeight);
+    const leftBands = this.buildBandRects(structure, decorations, 'left', depth, width, foundationHeight, buildingHeight);
+    const rightBands = this.buildBandRects(structure, decorations, 'right', depth, width, foundationHeight, buildingHeight);
+
+    // Front wall (positive Y) - with shader-based windows, doors, bands, and trim
     const frontDoor = getDoorInfoForFacade('front');
     wallDefinitions.push(this.createWallGeometryDefinition(
       width, 
@@ -886,7 +1013,9 @@ export class StructureManager {
       'front',
       colors,
       frontDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      frontBands.bandRects,
+      frontBands.bandCount
     ));
     
     // Back wall (negative Y) - with shader-based windows and trim
@@ -906,7 +1035,9 @@ export class StructureManager {
       'back',
       colors,
       backDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      backBands.bandRects,
+      backBands.bandCount
     ));
     
     // Left wall (negative X) - with shader-based rendering (includes trim)
@@ -926,7 +1057,9 @@ export class StructureManager {
       'left',
       colors,
       leftDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      leftBands.bandRects,
+      leftBands.bandCount
     ));
     
     // Right wall (positive X) - with shader-based rendering (includes trim)
@@ -946,7 +1079,9 @@ export class StructureManager {
       'right',
       colors,
       rightDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      rightBands.bandRects,
+      rightBands.bandCount
     ));
     
     // Merge all wall geometries
@@ -1057,7 +1192,7 @@ export class StructureManager {
    * @param {number} cornerTrimWidth - Corner trim width
    * @returns {Object} Object with {geometry, material, facade}
    */
-  createWallGeometryDefinition(width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
+  createWallGeometryDefinition(width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02, bandRects = [], bandCount = 0) {
     // Convert windows to shader-compatible format
     // Limit to 50 windows per wall for shader uniforms
     const MAX_WINDOWS = 50;
@@ -1147,6 +1282,8 @@ export class StructureManager {
       totalWallHeight, // Pass total wall height (includes foundation)
       doorRects,
       doorCount,
+      bandRects,
+      bandCount,
       buildingSubtype,
       colors,
       cornerTrimWidthNormalized,
@@ -1209,7 +1346,7 @@ export class StructureManager {
    * @param {string} buildingSubtype - Building subtype for material variation
    * @returns {THREE.ShaderMaterial} Shader material with window, door, trim, and foundation rendering
    */
-  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, doorRects = [], doorCount = 0, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05) {
+  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, doorRects = [], doorCount = 0, bandRects = [], bandCount = 0, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05) {
     // Helper function to convert hex color to RGB vec3
     const hexToRgb = (hex) => {
       if (!hex || typeof hex === 'number') return null;
@@ -1251,6 +1388,8 @@ export class StructureManager {
       uniform float textureWidth;
       uniform int doorCount;
       uniform vec4 doorRects[6]; // x,y,w,h normalized
+      uniform int bandCount;
+      uniform vec4 bandRects[8]; // x,y,w,h normalized
       
       varying vec2 vUv;
       
@@ -1358,6 +1497,31 @@ export class StructureManager {
         
         return vec4(0.0); // Not a door
       }
+
+      // Check if point is in any band area (utility bands)
+      vec4 checkBand(vec2 uv) {
+        if (bandCount <= 0) return vec4(0.0);
+        vec2 normalizedPos = (uv - 0.5);
+        for (int i = 0; i < 8; i++) {
+          if (i >= bandCount) break;
+          vec4 br = bandRects[i];
+          float bx = br.x;
+          float by = br.y;
+          float bw = br.z;
+          float bh = br.w;
+          if (bw <= 0.0 || bh <= 0.0) continue;
+
+          vec2 bandMin = vec2(bx - bw * 0.5, by - bh * 0.5);
+          vec2 bandMax = vec2(bx + bw * 0.5, by + bh * 0.5);
+
+          if (normalizedPos.x >= bandMin.x && normalizedPos.x <= bandMax.x &&
+              normalizedPos.y >= bandMin.y && normalizedPos.y <= bandMax.y) {
+            // Use trim color for bands
+            return vec4(trimColorUniform, 1.0);
+          }
+        }
+        return vec4(0.0);
+      }
       
       // Check for corner trim (vertical edges)
       vec3 checkCornerTrim(vec2 uv) {
@@ -1421,11 +1585,18 @@ export class StructureManager {
               color = doorResult.rgb;
               alpha = doorResult.a;
             } else {
-              // Check for corner trim
-              vec3 trimResult = checkCornerTrim(vUv);
-              if (trimResult.r > 0.0 || trimResult.g > 0.0 || trimResult.b > 0.0) {
-                // Blend trim with base color for subtle effect
-                color = mix(baseColor, trimResult, 0.3);
+              // Check for bands
+              vec4 bandResult = checkBand(vUv);
+              if (bandResult.a > 0.0) {
+                color = bandResult.rgb;
+                alpha = bandResult.a;
+              } else {
+                // Check for corner trim
+                vec3 trimResult = checkCornerTrim(vUv);
+                if (trimResult.r > 0.0 || trimResult.g > 0.0 || trimResult.b > 0.0) {
+                  // Blend trim with base color for subtle effect
+                  color = mix(baseColor, trimResult, 0.3);
+                }
               }
             }
           }
@@ -1476,6 +1647,8 @@ export class StructureManager {
         textureWidth: { value: textureWidth },
         doorCount: { value: doorCount },
         doorRects: { value: doorRects },
+        bandCount: { value: bandCount },
+        bandRects: { value: bandRects },
         frameColorUniform: { value: new THREE.Vector3(frameColorValue.r, frameColorValue.g, frameColorValue.b) },
         glassColorUniform: { value: new THREE.Vector3(glassColorValue.r, glassColorValue.g, glassColorValue.b) },
         doorColorUniform: { value: new THREE.Vector3(doorColorValue.r, doorColorValue.g, doorColorValue.b) },
