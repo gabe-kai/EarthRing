@@ -3582,47 +3582,6 @@ The system uses 8 JSON configuration files, each handling a specific aspect of s
         "use_cases": ["residential", "commercial", "industrial"]
       },
       
-      "satellite_dish": {
-        "type": "geometry",
-        "placement": "roof",
-        "geometry": {
-          "type": "composite",
-          "components": [
-            {
-              "type": "cylinder",
-              "radius": 0.4,
-              "height": 0.05,
-              "offset": {"y": 0.025}
-            },
-            {
-              "type": "cylinder",
-              "radius": 0.05,
-              "height": 0.3,
-              "offset": {"y": -0.15}
-            }
-          ]
-        },
-        "offset": {"y": "building_height / 2 + 0.15"},
-        "count": {"min": 1, "max": 2},
-        "probability": 0.3,
-        "use_cases": ["residential", "commercial"]
-      },
-      
-      "antenna": {
-        "type": "geometry",
-        "placement": "roof",
-        "geometry": {
-          "type": "cylinder",
-          "radius": 0.02,
-          "height": 2.0
-        },
-        "offset": {"y": "building_height / 2 + 1.0"},
-        "count": {"min": 1, "max": 3},
-        "spacing": {"min": 2.0, "max": 4.0},
-        "probability": 0.2,
-        "use_cases": ["commercial", "industrial"]
-      },
-      
       // ============================================
       // EXTERIOR FURNISHINGS & FIXTURES
       // ============================================

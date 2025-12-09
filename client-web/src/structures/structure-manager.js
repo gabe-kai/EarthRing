@@ -246,6 +246,8 @@ export class StructureManager {
 
     const dockInstances = [];
     const hvacInstances = [];
+    const solarInstances = [];
+    const solarBaseInstances = [];
 
     decorations.forEach((dec) => {
       const type = dec.type || 'decoration';
@@ -268,6 +270,99 @@ export class StructureManager {
         py = (height || 0) + stackHeight * 0.5 + 0.05;
         const geom = new THREE.CylinderGeometry(radius, radius * 0.9, stackHeight, 10);
         const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.position.set(px, py, pz);
+        structureGroup.add(mesh);
+      } else if (type === 'skylight') {
+        // Rendered in roof shader; skip mesh
+        return;
+      } else if (type === 'solar_panel') {
+        const baseH = 0.3; // taller pedestal
+        const panelOffset = baseH + sy * 0.5 + 0.01; // lift by base plus half panel thickness
+        solarInstances.push({ px, py: py + panelOffset, pz, sx, sy, sz });
+        // Simple base under each panel
+        solarBaseInstances.push({
+          px,
+          py: py + baseH * 0.5, // base sits on roof
+          pz,
+          sx: sx * 0.6,
+          sy: baseH,
+          sz: sz * 0.6,
+        });
+      } else if (type === 'green_roof') {
+        // Rendered in roof shader; skip mesh
+        return;
+      } else if (type === 'roof_access') {
+        const geom = new THREE.BoxGeometry(sx, sy, sz);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.65, metalness: 0.15 });
+        const group = new THREE.Group();
+        const hut = new THREE.Mesh(geom, mat);
+        hut.castShadow = false;
+        hut.receiveShadow = false;
+        group.add(hut);
+
+        // Simple door on front face (+z)
+        const doorW = Math.min(0.9, sx * 0.6);
+        const doorH = Math.min(2.0, sy * 0.9);
+        const doorD = 0.08;
+        const doorGeom = new THREE.BoxGeometry(doorW, doorH, doorD);
+        const doorMat = new THREE.MeshStandardMaterial({ color: 0x3a2b1a, roughness: 0.6, metalness: 0.1 });
+        const door = new THREE.Mesh(doorGeom, doorMat);
+        door.position.set(0, -sy * 0.5 + doorH * 0.5 + 0.02, sz * 0.5 + doorD * 0.5);
+        door.castShadow = false;
+        door.receiveShadow = false;
+        group.add(door);
+
+        group.position.set(px, py, pz);
+        structureGroup.add(group);
+      } else if (type === 'roof_railing') {
+        const railW = sx;
+        const railH = sy; // sy is height from generator
+        const railD = sz;
+        const t = 0.05; // thickness
+        const group = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.6, metalness: 0.2 });
+        const barGeomH = new THREE.BoxGeometry(railW, railH, t);
+        const barGeomV = new THREE.BoxGeometry(t, railH, railD);
+
+        const front = new THREE.Mesh(barGeomH, mat);
+        front.position.set(0, 0, railD * 0.5);
+        const back = new THREE.Mesh(barGeomH, mat);
+        back.position.set(0, 0, -railD * 0.5);
+        const left = new THREE.Mesh(barGeomV, mat);
+        left.position.set(-railW * 0.5, 0, 0);
+        const right = new THREE.Mesh(barGeomV, mat);
+        right.position.set(railW * 0.5, 0, 0);
+
+        [front, back, left, right].forEach((m) => {
+          m.castShadow = false;
+          m.receiveShadow = false;
+          group.add(m);
+        });
+
+        // Position so base sits on roof
+        group.position.set(px, py, pz);
+        structureGroup.add(group);
+      } else if (type === 'piping') {
+        const facade = dec.facade || 'front';
+        const radius = Math.min(sx, sz) * 0.5;
+        const pipeHeight = sy;
+        const depthOffset = radius + 0.05;
+        if (facade === 'front') {
+          pz = (depth || 0) * 0.5 + depthOffset;
+        } else if (facade === 'back') {
+          pz = -(depth || 0) * 0.5 - depthOffset;
+        } else if (facade === 'left') {
+          pz = dec.position?.[1] || 0; // keep along depth axis
+          px = -(width || 0) * 0.5 - depthOffset;
+        } else if (facade === 'right') {
+          pz = dec.position?.[1] || 0;
+          px = (width || 0) * 0.5 + depthOffset;
+        }
+        const geom = new THREE.CylinderGeometry(radius, radius, pipeHeight, 12);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.15, metalness: 0.85 });
         const mesh = new THREE.Mesh(geom, mat);
         mesh.castShadow = false;
         mesh.receiveShadow = false;
@@ -376,6 +471,45 @@ export class StructureManager {
       const inst = new THREE.InstancedMesh(geom, mat, hvacInstances.length);
       const m = new THREE.Matrix4();
       hvacInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced solar panels
+    if (solarInstances.length > 0) {
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x1a1f2e, roughness: 0.35, metalness: 0.8 });
+      const inst = new THREE.InstancedMesh(geom, mat, solarInstances.length);
+      const m = new THREE.Matrix4();
+      const tiltQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 10, 0, 0, 'YXZ')); // gentle tilt toward +Z
+      solarInstances.forEach((d, i) => {
+        const pos = new THREE.Vector3(d.px, d.py, d.pz);
+        const scale = new THREE.Vector3(d.sx, d.sy, d.sz);
+        m.compose(pos, tiltQuat, scale);
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced solar bases (pedestals)
+    if (solarBaseInstances.length > 0) {
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x2f3135, roughness: 0.5, metalness: 0.5 });
+      const inst = new THREE.InstancedMesh(geom, mat, solarBaseInstances.length);
+      const m = new THREE.Matrix4();
+      solarBaseInstances.forEach((d, i) => {
         m.compose(
           new THREE.Vector3(d.px, d.py, d.pz),
           new THREE.Quaternion(),
@@ -1126,19 +1260,94 @@ export class StructureManager {
     mergedWallMesh.receiveShadow = false;
     structureGroup.add(mergedWallMesh);
     
-    // Roof - use color from palette if available
+    // Roof with skylight overlay in shader (single draw, no skylight meshes)
     const roofColorHex = colors?.roofs?.hex ? colors.roofs.hex : '#4a4a4a';
     const roofColor = typeof roofColorHex === 'string' ? parseInt(roofColorHex.replace('#', ''), 16) : roofColorHex;
-    const roofMaterialKey = `roof_${roofColor}`;
-    const roofMaterial = this.getCachedMaterial(roofMaterialKey, () =>
-      new THREE.MeshStandardMaterial({
-        color: roofColor,
-        roughness: 0.8,
-        metalness: 0.2,
-        opacity: 1.0,
-        transparent: false,
-      })
-    );
+    // Roof material; skylights will lower opacity to window-like transparency
+    const roofMaterial = new THREE.MeshStandardMaterial({
+      color: roofColor,
+      roughness: 0.8,
+      metalness: 0.2,
+      opacity: 1.0,
+      transparent: true,
+    });
+
+    const skylights = decorations.filter((d) => d && d.type === 'skylight').slice(0, 16);
+    const greenRoof = decorations.find((d) => d && d.type === 'green_roof');
+    const skylightUniforms = skylights.map((d) => {
+      const pos = d.position || [0, 0, 0];
+      const size = d.size || [0, 0, 0];
+      // Normalize to roof face (x->width, y->depth)
+      const u = (pos[0] / (width + wallThickness * 2)) + 0.5;
+      const v = (pos[1] / (depth + wallThickness * 2)) + 0.5;
+      const su = (size[0] || 0) / (width + wallThickness * 2);
+      const sv = (size[1] || 0) / (depth + wallThickness * 2);
+      return new THREE.Vector4(u, v, su, sv);
+    });
+    while (skylightUniforms.length < 16) skylightUniforms.push(new THREE.Vector4(0, 0, 0, 0));
+
+    roofMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.skylightCount = { value: skylights.length };
+      shader.uniforms.skylightRects = { value: skylightUniforms };
+      shader.uniforms.roofSize = { value: new THREE.Vector2(width + wallThickness * 2, depth + wallThickness * 2) };
+      shader.uniforms.greenRect = {
+        value: greenRoof
+          ? new THREE.Vector4(
+              (greenRoof.position?.[0] || 0) / (width + wallThickness * 2) + 0.5,
+              (greenRoof.position?.[1] || 0) / (depth + wallThickness * 2) + 0.5,
+              (greenRoof.size?.[0] || width * 0.8) / (width + wallThickness * 2),
+              (greenRoof.size?.[1] || depth * 0.8) / (depth + wallThickness * 2)
+            )
+          : new THREE.Vector4(0, 0, 0, 0),
+      };
+      shader.uniforms.hasGreen = { value: !!greenRoof };
+
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n varying vec3 vPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n vPos = position;');
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `
+          #include <common>
+          varying vec3 vPos;
+          uniform int skylightCount;
+          uniform vec4 skylightRects[16]; // uv center (u,v), size (wu, hv)
+          uniform vec2 roofSize;
+          uniform vec4 greenRect; // uv center (u,v), size (wu, hv)
+          uniform bool hasGreen;
+          `
+        )
+        .replace(
+          'vec4 diffuseColor = vec4( diffuse, opacity );',
+          `
+          vec2 roofUV = (vPos.xz / roofSize) + 0.5;
+          float skylightMask = 0.0;
+          for (int i = 0; i < 16; i++) {
+            if (i >= skylightCount) break;
+            vec4 rect = skylightRects[i];
+            vec2 halfSize = rect.zw * 0.5;
+            vec2 d = abs(roofUV - rect.xy) - halfSize;
+            float inside = step(0.0, -max(d.x, d.y));
+            skylightMask = max(skylightMask, inside);
+          }
+          float greenMask = 0.0;
+          if (hasGreen) {
+            vec2 gHalf = greenRect.zw * 0.5;
+            vec2 gd = abs(roofUV - greenRect.xy) - gHalf;
+            greenMask = step(0.0, -max(gd.x, gd.y));
+          }
+          vec3 skylightTint = mix(diffuse, vec3(0.9, 0.95, 1.0), 0.4);
+          vec3 greenTint = mix(diffuse, vec3(0.23, 0.37, 0.25), 0.5);
+          vec3 finalDiffuse = mix(diffuse, greenTint, greenMask);
+          finalDiffuse = mix(finalDiffuse, skylightTint, skylightMask);
+          float finalAlpha = mix(opacity, 0.35, skylightMask); // skylights translucent like windows
+          vec4 diffuseColor = vec4( finalDiffuse, finalAlpha );
+          `
+        );
+    };
+
     const roofGeometry = new THREE.BoxGeometry(width + wallThickness * 2, 0.1, depth + wallThickness * 2);
     const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
     // Roof positioned at top of total wall height (foundation + building)

@@ -254,7 +254,7 @@ See [Building Classes Reference](#building-classes-reference) for complete list.
 - **Residential Special Features**: fire_escape, mailbox
 - **Agricultural Elements**: irrigation_system, grow_light
 - **Park Elements**: bench, street_light
-- **Rooftop Utilities**: hvac_unit, satellite_dish, antenna
+- **Rooftop Utilities**: hvac_unit
 - **Exterior Furnishings**: bike_rack, trash_bin, planter_box, window_box, security_camera
 - **Park & Recreation**: playground_equipment, picnic_table, pergola
 - **Infrastructure**: fence, retaining_wall, drainage_grate, parking_meter, transit_shelter

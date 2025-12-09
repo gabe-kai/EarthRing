@@ -63,7 +63,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [10.0, 18.0],
-        "decorative_elements": ["vent_stack", "roof_hvac", "utility_band", "cooling_tower"],
+      "decorative_elements": ["vent_stack", "roof_hvac", "utility_band", "cooling_tower", "piping", "skylight", "solar_panel"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -128,7 +128,7 @@
         "size_class": "medium",
         "is_exterior": false,
         "height_range": [8.0, 14.0],
-        "decorative_elements": ["vent_stack", "utility_band", "roof_hvac"],
+      "decorative_elements": ["vent_stack", "utility_band", "roof_hvac", "solar_panel"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       },
@@ -154,7 +154,7 @@
         "size_class": "large",
         "is_exterior": false,
         "height_range": [10.0, 16.0],
-        "decorative_elements": ["vent_stack", "utility_band", "roof_hvac"],
+      "decorative_elements": ["vent_stack", "utility_band", "roof_hvac", "green_roof", "solar_panel"],
         "color_palette_zone": "Industrial",
         "shader_patterns": ["industrial_panel"]
       }

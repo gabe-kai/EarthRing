@@ -168,6 +168,7 @@ def _make_decorations(
     class_def: Dict[str, Any],
     garage_doors: List[Dict[str, Any]],
     rng: random.Random,
+    windows: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
     Create simple decoration hints based on class decorative elements.
@@ -182,22 +183,236 @@ def _make_decorations(
     base_z = foundation_height * 0.5               # slightly above ground/foundation
     building_half_width = width / 2.0
     building_half_depth = depth / 2.0
+    has_green_roof = False
+    vent_rects: List[Dict[str, float]] = []
     # Floor metrics (match window logic)
     floor_height = 4.0
     floor_count = max(1, int(round((height - foundation_height) / floor_height)))
 
     if "vent_stack" in elements:
         stack_count = rng.randint(1, 3)
+        vent_w = 1.0
+        vent_d = 1.0
         for _ in range(stack_count):
+            placed = False
+            for _ in range(8):
+                vx = rng.uniform(-width * 0.3, width * 0.3)
+                vz = rng.uniform(-depth * 0.3, depth * 0.3)
+                # keep vents from overlapping each other (simple AABB)
+                if all(
+                    abs(vx - vr["x"]) > (vent_w * 0.5 + vr["w"] * 0.5 + 0.2)
+                    or abs(vz - vr["z"]) > (vent_d * 0.5 + vr["d"] * 0.5 + 0.2)
+                    for vr in vent_rects
+                ):
+                    vent_rects.append({"x": vx, "z": vz, "w": vent_w, "d": vent_d})
+                    decorations.append(
+                        {
+                            "type": "vent_stack",
+                            "position": [vx, vz, roof_z],
+                            "size": [vent_w, vent_d, 1.2],  # w, d, h
+                        }
+                    )
+                    placed = True
+                    break
+            if not placed:
+                # fallback: place anyway
+                vx = rng.uniform(-width * 0.3, width * 0.3)
+                vz = rng.uniform(-depth * 0.3, depth * 0.3)
+                vent_rects.append({"x": vx, "z": vz, "w": vent_w, "d": vent_d})
+                decorations.append(
+                    {"type": "vent_stack", "position": [vx, vz, roof_z], "size": [vent_w, vent_d, 1.2]}
+                )
+
+    if "green_roof" in elements:
+        has_green_roof = True
+        gr_w = width * 0.8
+        gr_d = depth * 0.8
+        gr_h = 0.3
+        decorations.append(
+            {
+                "type": "green_roof",
+                "position": [0.0, 0.0, roof_z + gr_h * 0.5],
+                "size": [gr_w, gr_d, gr_h],
+            }
+        )
+        # Rooftop access hut
+        hut_w = 3.0
+        hut_d = 2.5
+        hut_h = 2.4
+        decorations.append(
+            {
+                "type": "roof_access",
+                "position": [-width * 0.25, 0.0, roof_z + hut_h * 0.5],
+                "size": [hut_w, hut_d, hut_h],
+            }
+        )
+        # Rooftop railing inset slightly from roof edge
+        rail_h = 1.1
+        decorations.append(
+            {
+                "type": "roof_railing",
+                "position": [0.0, 0.0, roof_z + rail_h * 0.5],
+                "size": [width - 0.4, depth - 0.4, rail_h],
+            }
+        )
+
+    skylight_rects: List[Dict[str, float]] = []
+    if "skylight" in elements and not has_green_roof:
+        sky_count = rng.randint(2, 5)
+        rows = max(1, int(round(sky_count ** 0.5)))
+        cols = max(rows, int((sky_count + rows - 1) // rows))
+        usable_w = width * 0.7
+        usable_d = depth * 0.7
+        margin_x = usable_w / max(1, cols + 1)
+        margin_z = usable_d / max(1, rows + 1)
+        size_x = min(1.8, usable_w / max(3, cols * 2))
+        size_z = min(1.8, usable_d / max(3, rows * 2))
+        placed = 0
+        for r in range(rows):
+            for c in range(cols):
+                if placed >= sky_count:
+                    break
+                cx = (c + 1) * margin_x - usable_w * 0.5
+                cz = (r + 1) * margin_z - usable_d * 0.5
+                skylight_rects.append({"x": cx, "z": cz, "w": size_x, "d": size_z})
+                decorations.append(
+                    {
+                        "type": "skylight",
+                        "position": [cx, cz, roof_z + 0.1],
+                        "size": [size_x, size_z, 0.25],
+                    }
+                )
+                placed += 1
+
+    def _overlaps_skylight(x: float, z: float, w: float, d: float, pad: float = 0.5) -> bool:
+        for rect in skylight_rects:
+            rw = rect["w"] * 0.5 + pad
+            rd = rect["d"] * 0.5 + pad
+            if abs(x - rect["x"]) <= (rw + w * 0.5) and abs(z - rect["z"]) <= (rd + d * 0.5):
+                return True
+        return False
+
+    solar_rects: List[Dict[str, float]] = []
+    hvac_rects: List[Dict[str, float]] = []
+
+    def _overlaps_roof(
+        x: float,
+        z: float,
+        w: float,
+        d: float,
+        pad: float = 0.5,
+        include_solar: bool = False,
+        include_vents: bool = False,
+        include_hvac: bool = False,
+    ) -> bool:
+        if _overlaps_skylight(x, z, w, d, pad):
+            return True
+        if include_solar:
+            for rect in solar_rects:
+                rw = rect["w"] * 0.5 + pad
+                rd = rect["d"] * 0.5 + pad
+                if abs(x - rect["x"]) <= (rw + w * 0.5) and abs(z - rect["z"]) <= (rd + d * 0.5):
+                    return True
+        if include_vents:
+            for rect in vent_rects:
+                rw = rect["w"] * 0.5 + pad
+                rd = rect["d"] * 0.5 + pad
+                if abs(x - rect["x"]) <= (rw + w * 0.5) and abs(z - rect["z"]) <= (rd + d * 0.5):
+                    return True
+        if include_hvac:
+            for rect in hvac_rects:
+                rw = rect["w"] * 0.5 + pad
+                rd = rect["d"] * 0.5 + pad
+                if abs(x - rect["x"]) <= (rw + w * 0.5) and abs(z - rect["z"]) <= (rd + d * 0.5):
+                    return True
+        return False
+
+    if "solar_panel" in elements and not has_green_roof:
+        panel_count = rng.randint(4, 12)
+        rows = max(1, int(round(panel_count ** 0.5)))
+        cols = max(rows, int((panel_count + rows - 1) // rows))
+        solar_w = 3.0
+        solar_d = 1.6
+        solar_h = 0.15
+        usable_w = width * 0.7
+        usable_d = depth * 0.7
+        spacing_x = max(solar_w * 1.2, usable_w / max(1, cols + 1))
+        spacing_z = max(solar_d * 1.2, usable_d / max(1, rows + 1))
+        start_x = -spacing_x * (cols - 1) * 0.5
+        start_z = -spacing_z * (rows - 1) * 0.5
+
+        placed = 0
+        for r in range(rows):
+            for c in range(cols):
+                if placed >= panel_count:
+                    break
+                px = start_x + c * spacing_x
+                pz = start_z + r * spacing_z
+                if not _overlaps_roof(px, pz, solar_w, solar_d, pad=0.4, include_solar=True, include_vents=True, include_hvac=True):
+                    solar_rects.append({"x": px, "z": pz, "w": solar_w, "d": solar_d})
+                    decorations.append(
+                        {
+                            "type": "solar_panel",
+                            "position": [px, pz, roof_z + 0.05],
+                            "size": [solar_w, solar_d, solar_h],
+                        }
+                    )
+                    placed += 1
+
+    if "piping" in elements:
+        pipe_count = rng.randint(2, 5)
+        facades = ["front", "back", "left", "right"]
+        pipe_height = max(3.0, (height - foundation_height) * 0.8)
+        z_center = base_z + pipe_height * 0.5
+        # build window spans per facade for overlap avoidance
+        win_by_facade: Dict[str, List[Tuple[float, float]]] = {}
+        for w in windows:
+            fac = w.get("facade", "front")
+            pos = w.get("position", [0.0, 0.0, 0.0])
+            size = w.get("size", [0.0, 0.0])
+            win_by_facade.setdefault(fac, []).append((float(pos[0]), float(size[0])))
+
+        for _ in range(pipe_count):
+            facade = rng.choice(facades)
+            if facade in {"front", "back"}:
+                span = width * 0.4
+                px = None
+                for _ in range(12):
+                    cand_x = rng.uniform(-span, span)
+                    # avoid windows horizontally
+                    overlap = False
+                    for wx, ww in win_by_facade.get(facade, []):
+                        if abs(cand_x - wx) <= (0.125 + ww * 0.5 + 0.3):  # pipe radius ~0.125 plus margin
+                            overlap = True
+                            break
+                    if not overlap:
+                        px = cand_x
+                        break
+                if px is None:
+                    px = rng.uniform(-span, span)
+                pz = 0.0  # depth offset applied client-side based on facade
+            else:
+                span = depth * 0.4
+                pz = None
+                for _ in range(12):
+                    cand_z = rng.uniform(-span, span)
+                    overlap = False
+                    for wx, ww in win_by_facade.get(facade, []):
+                        if abs(cand_z - wx) <= (0.125 + ww * 0.5 + 0.3):
+                            overlap = True
+                            break
+                    if not overlap:
+                        pz = cand_z
+                        break
+                if pz is None:
+                    pz = rng.uniform(-span, span)
+                px = 0.0
             decorations.append(
                 {
-                    "type": "vent_stack",
-                    "position": [
-                        rng.uniform(-width * 0.3, width * 0.3),
-                        rng.uniform(-depth * 0.3, depth * 0.3),
-                        roof_z,
-                    ],
-                    "size": [1.0, 1.0, 1.2],  # w, d, h
+                    "type": "piping",
+                    "facade": facade,
+                    "position": [px, pz, z_center],
+                    "size": [0.25, 0.25, pipe_height],
                 }
             )
 
@@ -235,20 +450,26 @@ def _make_decorations(
                 }
             )
 
-    if "roof_hvac" in elements:
+    if "roof_hvac" in elements and not has_green_roof:
         hvac_count = rng.randint(1, 3)
         for _ in range(hvac_count):
-            decorations.append(
-                {
-                    "type": "roof_hvac",
-                    "position": [
-                        rng.uniform(-building_half_width * 0.5, building_half_width * 0.5),
-                        rng.uniform(-building_half_depth * 0.5, building_half_depth * 0.5),
-                        roof_z + 0.6,  # center above roof so it protrudes upward
-                    ],
-                    "size": [2.0, 2.0, 1.0],
-                }
-            )
+            for _ in range(8):
+                px = rng.uniform(-building_half_width * 0.5, building_half_width * 0.5)
+                pz = rng.uniform(-building_half_depth * 0.5, building_half_depth * 0.5)
+                if not _overlaps_roof(px, pz, 2.0, 2.0, pad=0.5, include_solar=True, include_vents=True, include_hvac=True):
+                    hvac_rects.append({"x": px, "z": pz, "w": 2.0, "d": 2.0})
+                    decorations.append(
+                        {
+                            "type": "roof_hvac",
+                            "position": [
+                                px,
+                                pz,
+                                roof_z + 0.6,  # center above roof so it protrudes upward
+                            ],
+                            "size": [2.0, 2.0, 1.0],
+                        }
+                    )
+                    break
 
     if "utility_band" in elements:
         # Place bands per floor (near top of each 4m band), all facades
@@ -732,7 +953,7 @@ def generate_structures_for_zones(
             windows_after = len(windows)
             if windows_before != windows_after:
                 print(f"[StructureGen] Filtered {windows_before} -> {windows_after} windows for {class_name} (removed {windows_before - windows_after} overlapping)")
-            decorations = _make_decorations(width, depth, height, class_def, model_garage_doors, rng)
+            decorations = _make_decorations(width, depth, height, class_def, model_garage_doors, rng, windows)
 
             structure_id = f"proc_lib_{floor}_{chunk_index}_{idx}_{len(placed)}"
 
