@@ -176,10 +176,10 @@ def _make_decorations(
     decorations: List[Dict[str, Any]] = []
     elements = class_def.get("decorative_elements", []) or []
 
-    # Foundation reference
+    # Vertical reference: client builds walls from ground (y=0) up to total height
     foundation_height = min(0.5, height * 0.1)
-    roof_z = height / 2.0 - 0.5  # slightly below top
-    base_z = -height / 2.0 + foundation_height / 2.0
+    roof_z = max(foundation_height, height - 0.5)  # near the top
+    base_z = foundation_height * 0.5               # slightly above ground/foundation
 
     if "vent_stack" in elements:
         stack_count = rng.randint(1, 3)
@@ -200,13 +200,33 @@ def _make_decorations(
         for gd in garage_doors:
             if gd.get("facade") != "front":
                 continue
-            # Place dock aligned with garage door on front facade
+            # Determine utility door X (paired with this bay) if present in front doors
+            util_x: Optional[float] = None
+            # We will find a matching utility door later when model_doors are built; for now, use truck bay center
+            # Caller will pass paired utility X via a supplied field on the garage door if available
+            util_x = gd.get("paired_utility_x")
+            if util_x is None:
+                # Fallback: place dock centered on truck bay
+                util_x = gd.get("x", 0.0)
+
+            truck_x = gd.get("x", 0.0)
+            truck_w = gd.get("width", 3.0)
+            util_w = 1.2
+            gap = 0.6
+            # Compute span covering truck bay and utility door with a small margin
+            left = min(truck_x - truck_w / 2.0, util_x - util_w / 2.0) - 0.2
+            right = max(truck_x + truck_w / 2.0, util_x + util_w / 2.0) + 0.2
+            platform_w = max(2.5, right - left)
+            platform_x = (left + right) / 2.0
+            platform_d = 2.5
+            platform_h = 1.0  # 1m tall, top aligns with door bottom at ~1m
+
             decorations.append(
                 {
                     "type": "loading_dock",
                     "facade": "front",
-                    "position": [gd.get("x", 0.0), 0.0, base_z],
-                    "size": [gd.get("width", 3.0) + 0.5, 2.0, 1.0],  # small platform
+                    "position": [platform_x, 0.0, platform_h * 0.5],  # center at half height
+                    "size": [platform_w, platform_d, platform_h],
                 }
             )
 
@@ -376,14 +396,16 @@ def generate_structures_for_zones(
         if has_truck_bay:
             truck_w = 3.0
             util_w = 1.2
-            bay_spacing = truck_w + 1.2
-            max_bays = max(1, min(3, int(width // bay_spacing)))
+            bay_clearance = 2.5  # more spacing between bays
+            bay_spacing = truck_w + bay_clearance
+            max_bays = max(1, min(3, int((width - 2.0) // bay_spacing)))
             bay_count = max_bays
             total_span = (bay_count - 1) * bay_spacing
             start_x = -total_span / 2.0
             front_doors: List[Dict[str, Any]] = []
             for i in range(bay_count):
                 cx = start_x + i * bay_spacing
+                # Truck bay door
                 model_garage_doors.append(
                     {
                         "facade": "front",
@@ -394,6 +416,7 @@ def generate_structures_for_zones(
                         "y": truck_door_y,
                     }
                 )
+                # Utility door beside bay
                 util_offset = truck_w / 2.0 + util_w / 2.0 + 0.6
                 util_x = cx + util_offset
                 if util_x + util_w / 2.0 > width / 2.0:
@@ -407,8 +430,9 @@ def generate_structures_for_zones(
                         "y": main_door_y,
                     }
                 )
+                # Store pairing for dock placement
+                model_garage_doors[-1]["paired_utility_x"] = util_x
             model_doors["front"] = front_doors
-            print(f"[StructureGen] Created {bay_count} truck bay(s) with {len(front_doors)} utility door(s) for {class_name} (single-building path)")
         else:
             max_offset = max(0.0, (width / 2.0) - 1.0)
             door_x = rng.uniform(-max_offset * 0.4, max_offset * 0.4) if max_offset > 0 else 0.0
@@ -544,8 +568,9 @@ def generate_structures_for_zones(
             if has_truck_bay:
                 truck_w = 3.0
                 util_w = 1.2
-                bay_spacing = truck_w + 1.2
-                max_bays = max(1, min(3, int(width // bay_spacing)))
+                bay_clearance = 2.5
+                bay_spacing = truck_w + bay_clearance
+                max_bays = max(1, min(3, int((width - 2.0) // bay_spacing)))
                 bay_count = max_bays
                 total_span = (bay_count - 1) * bay_spacing
                 start_x = -total_span / 2.0
@@ -575,8 +600,8 @@ def generate_structures_for_zones(
                             "y": main_door_y,
                         }
                     )
+                    model_garage_doors[-1]["paired_utility_x"] = util_x
                 model_doors["front"] = front_doors
-                print(f"[StructureGen] Created {bay_count} truck bay(s) with {len(front_doors)} utility door(s) for {class_name} (multi-building path)")
             else:
                 max_offset = max(0.0, (width / 2.0) - 1.0)
                 door_x = rng.uniform(-max_offset * 0.4, max_offset * 0.4) if max_offset > 0 else 0.0

@@ -918,6 +918,40 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 										structureFeature["garage_doors"] = garageDoors
 									}
 								}
+								// Decorations (render hints)
+								if decorationsVal, exists := modelDataMap["decorations"]; exists {
+									if decorations, ok := decorationsVal.([]interface{}); ok {
+										structureFeature["decorations"] = decorations
+									}
+								}
+								// Library metadata
+								if className, ok := modelDataMap["class"].(string); ok {
+									structureFeature["building_class"] = className
+								}
+								if category, ok := modelDataMap["category"].(string); ok {
+									structureFeature["category"] = category
+								}
+								if subcategory, ok := modelDataMap["subcategory"].(string); ok {
+									structureFeature["subcategory"] = subcategory
+								}
+								if shape, ok := modelDataMap["shape"].(string); ok {
+									structureFeature["shape"] = shape
+								}
+								if sizeClass, ok := modelDataMap["size_class"].(string); ok {
+									structureFeature["size_class"] = sizeClass
+								}
+								if height, ok := modelDataMap["height"].(float64); ok {
+									structureFeature["height"] = height
+								}
+								if colorPalette, ok := modelDataMap["color_palette"].(map[string]interface{}); ok {
+									structureFeature["color_palette"] = colorPalette
+								}
+								if shaderPatterns, ok := modelDataMap["shader_patterns"].([]interface{}); ok {
+									structureFeature["shader_patterns"] = shaderPatterns
+								}
+								if decorativeElements, ok := modelDataMap["decorative_elements"].([]interface{}); ok {
+									structureFeature["decorative_elements"] = decorativeElements
+								}
 								// Building subtype may also be stored in model_data (fallback)
 								if _, hasSubtype := structureFeature["building_subtype"]; !hasSubtype {
 									if subtype, ok := modelDataMap["building_subtype"].(string); ok {

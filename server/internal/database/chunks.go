@@ -453,6 +453,10 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				if windows, ok := structureMap["windows"].([]interface{}); ok {
 					modelDataMap["windows"] = windows
 				}
+				// Include decorations if present (list)
+				if decorations, ok := structureMap["decorations"].([]interface{}); ok {
+					modelDataMap["decorations"] = decorations
+				}
 				// Include doors (dictionary mapping facade to door info)
 				// Check if doors key exists, even if empty
 				if doorsVal, exists := structureMap["doors"]; exists {
@@ -498,6 +502,9 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 						}
 						if decorativeElements, ok := modelDataObj["decorative_elements"].([]interface{}); ok {
 							modelDataMap["decorative_elements"] = decorativeElements
+						}
+						if decorations, ok := modelDataObj["decorations"].([]interface{}); ok {
+							modelDataMap["decorations"] = decorations
 						}
 						if shape, ok := modelDataObj["shape"].(string); ok {
 							modelDataMap["shape"] = shape

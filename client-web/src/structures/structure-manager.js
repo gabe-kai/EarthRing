@@ -239,6 +239,68 @@ export class StructureManager {
   }
 
   /**
+   * Add simple decoration meshes to the structure group.
+   * Decorations are data-only hints: we render low-poly placeholders.
+   */
+  addDecorations(structureGroup, structure, dimensions) {
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
+    if (!decorations || decorations.length === 0) return;
+
+    const { width, depth, height } = dimensions;
+    const defaultMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.1 });
+
+    decorations.forEach((dec) => {
+      const type = dec.type || 'decoration';
+      const pos = dec.position || [0, 0, 0]; // [x, depthAxis, vertical]
+      const size = dec.size || [1, 1, 1];    // [w, d, h]
+
+      // Map generator coords to Three.js (x -> x, y(depth) -> z, z(vertical) -> y)
+      const px = pos[0] || 0;
+      let pz = pos[1] || 0;
+      let py = pos[2] || 0;
+      const sx = size[0] || 1;
+      const sz = size[1] || 1;
+      const sy = size[2] || 1;
+
+      let mesh;
+      if (type === 'vent_stack') {
+        const radius = Math.min(sx, sz) * 0.35;
+        const stackHeight = sy;
+        // Place center above the roof so the stack protrudes upward
+        py = (height || 0) + stackHeight * 0.5 + 0.05;
+        const geom = new THREE.CylinderGeometry(radius, radius * 0.9, stackHeight, 10);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 });
+        mesh = new THREE.Mesh(geom, mat);
+      } else if (type === 'loading_dock') {
+        const geom = new THREE.BoxGeometry(sx, sy, sz);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 });
+        mesh = new THREE.Mesh(geom, mat);
+        // Place outside the front/back wall; assume facade is front if provided
+        const facade = dec.facade || 'front';
+        const zOffset = sz * 0.5 + 0.05;
+        if (facade === 'front') {
+          pz = (depth || 0) * 0.5 + zOffset;
+        } else if (facade === 'back') {
+          pz = -(depth || 0) * 0.5 - zOffset;
+        }
+        // Position so the top is at roughly 1m (door base height)
+        py = sy * 0.5;
+      } else {
+        const geom = new THREE.BoxGeometry(sx, sy, sz);
+        mesh = new THREE.Mesh(geom, defaultMaterial);
+      }
+
+      if (!mesh) return;
+
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+
+      mesh.position.set(px, py, pz);
+      structureGroup.add(mesh);
+    });
+  }
+
+  /**
    * Handle structures streamed from chunk data
    * @param {Array} structures - Array of structure objects
    * @param {string} chunkID - Chunk ID these structures belong to
@@ -430,6 +492,9 @@ export class StructureManager {
       mesh.receiveShadow = true;
       structureGroup.add(mesh);
     }
+
+    // Render decoration hints (vent stacks, loading docks) if present
+    this.addDecorations(structureGroup, structure, dimensions);
 
     // Ensure every child of the group carries the structureId and structure for reliable picking/fallback
     this.setStructureIdRecursive(structureGroup, structure.id, structure);
@@ -1037,120 +1102,37 @@ export class StructureManager {
       windowData[idx + 3] = normalizedHeight;
     });
     
-    // Door data: use door info from structure if available
-    // doorInfo is now an array of doors (can include regular doors and multiple garage doors)
-    let hasDoor = false;
-    let doorNormalizedX = -999.0;
-    let doorNormalizedY = 0.0;
-    let doorNormalizedWidth = 0.0;
-    let doorNormalizedHeight = 0.0;
-    let isGarageDoor = false;
-    
-    // Support for second door (for truck bay + standard door pairs)
-    let hasDoor2 = false;
-    let door2NormalizedX = -999.0;
-    let door2NormalizedY = 0.0;
-    let door2NormalizedWidth = 0.0;
-    let door2NormalizedHeight = 0.0;
-    let isGarageDoor2 = false;
-    
-    if (doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
-      // Find truck bay door and standard door if both exist (warehouse case)
-      const truckBayDoor = doorInfo.find(d => d.type === 'truck_bay');
-      const standardDoor = doorInfo.find(d => d.type === 'standard' || d.type === 'utility');
-      
-      if (truckBayDoor && standardDoor) {
-        // Warehouse case: render both truck bay (as door1) and standard door (as door2)
-        // Door 1: Truck bay
-        const doorYWorld1 = wallCenterY + truckBayDoor.y;
-        doorNormalizedX = truckBayDoor.x / width;
-        doorNormalizedY = (doorYWorld1 - wallCenterY) / totalWallHeight;
-        doorNormalizedWidth = truckBayDoor.width / width;
-        doorNormalizedHeight = truckBayDoor.height / totalWallHeight;
-        isGarageDoor = true;
-        hasDoor = true;
-        
-        // Door 2: Standard door
-        const doorYWorld2 = wallCenterY + standardDoor.y;
-        door2NormalizedX = standardDoor.x / width;
-        door2NormalizedY = (doorYWorld2 - wallCenterY) / totalWallHeight;
-        door2NormalizedWidth = standardDoor.width / width;
-        door2NormalizedHeight = standardDoor.height / totalWallHeight;
-        isGarageDoor2 = false;
-        hasDoor2 = true;
-        
-        // Ensure door2 bottom doesn't overlap foundation
+    // Door data: pack up to MAX_DOORS for shader (front facade only for now)
+    const MAX_DOORS = 6;
+    const doorRects = [];
+    let doorCount = 0;
+    if (facade === 'front' && doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
+      doorInfo.slice(0, MAX_DOORS).forEach((d) => {
+        if (
+          typeof d.x === 'number' &&
+          typeof d.y === 'number' &&
+          typeof d.width === 'number' &&
+          typeof d.height === 'number'
+        ) {
+          const doorYWorld = wallCenterY + d.y;
+          let dx = d.x / width;
+          let dy = (doorYWorld - wallCenterY) / totalWallHeight;
+          let dw = d.width / width;
+          let dh = d.height / totalWallHeight;
+          // Ensure bottoms not below foundation
         const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-        const door2BottomNormalized = door2NormalizedY - door2NormalizedHeight / 2;
-        if (door2BottomNormalized < foundationTopNormalized) {
-          door2NormalizedY = foundationTopNormalized + door2NormalizedHeight / 2;
-        }
-        
-        // Also ensure door1 (truck bay) bottom doesn't overlap foundation
-        const door1BottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
-        if (door1BottomNormalized < foundationTopNormalized) {
-          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
-        }
-      } else {
-        // Single door case: use the appropriate door
-        let doorToUse;
-        if (truckBayDoor) {
-          doorToUse = truckBayDoor;
-        } else if (standardDoor) {
-          doorToUse = standardDoor;
-        } else {
-          // Fallback: prefer garage doors, or just use the first door
-          doorToUse = doorInfo.find(d => d.type === 'garage') || doorInfo[0];
-        }
-        
-        if (!doorToUse || typeof doorToUse.x !== 'number' || typeof doorToUse.y !== 'number' || 
-            typeof doorToUse.width !== 'number' || typeof doorToUse.height !== 'number') {
-          console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorToUse);
-        } else {
-          hasDoor = true;
-          isGarageDoor = doorToUse.type === 'garage' || doorToUse.type === 'truck_bay';
-          // Normalize door position and size to wall coordinates
-          doorNormalizedX = doorToUse.x / width;  // Normalize to -0.5 to 0.5 range
-          const doorYWorld = wallCenterY + doorToUse.y;
-          doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;  // Normalize to wall coordinates
-          doorNormalizedWidth = doorToUse.width / width;
-          doorNormalizedHeight = doorToUse.height / totalWallHeight;
-          
-          // Ensure door bottom doesn't overlap foundation
-          const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-          const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
+          const doorBottomNormalized = dy - dh / 2;
           if (doorBottomNormalized < foundationTopNormalized) {
-            // Shift door up so bottom aligns with foundation top
-            doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
+            dy = foundationTopNormalized + dh / 2;
           }
+          doorRects.push(new THREE.Vector4(dx, dy, dw, dh));
+          doorCount++;
         }
-      }
-    } else if (doorInfo && !Array.isArray(doorInfo)) {
-      // Legacy support: single door object (backwards compatibility)
-      if (typeof doorInfo.x !== 'number' || typeof doorInfo.y !== 'number' || 
-          typeof doorInfo.width !== 'number' || typeof doorInfo.height !== 'number') {
-        console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorInfo);
-      } else {
-        hasDoor = true;
-        isGarageDoor = doorInfo.type === 'garage' || doorInfo.type === 'truck_bay';
-        doorNormalizedX = doorInfo.x / width;
-        // Convert door Y from building-center relative to wall-relative
-        // doorInfo.y is relative to true building center (at wallCenterY), so just add it directly
-        const doorYWorld = wallCenterY + doorInfo.y;
-        doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;
-        doorNormalizedWidth = doorInfo.width / width;
-        doorNormalizedHeight = doorInfo.height / totalWallHeight;
-        
-        // Ensure door bottom doesn't overlap foundation
-        // Foundation top in normalized coordinates: -0.5 + foundationHeightNormalized
-        // Door bottom in normalized coordinates: doorNormalizedY - doorNormalizedHeight / 2
-        const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-        const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
-        if (doorBottomNormalized < foundationTopNormalized) {
-          // Shift door up so bottom aligns with foundation top
-          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
-        }
-      }
+      });
+    }
+    // Pad to MAX_DOORS with zero vectors for stable uniform array length
+    while (doorRects.length < MAX_DOORS) {
+      doorRects.push(new THREE.Vector4(0, 0, 0, 0));
     }
     
     // Create shader material with window, door, trim, and foundation rendering
@@ -1163,22 +1145,12 @@ export class StructureManager {
       windowCount, 
       width, 
       totalWallHeight, // Pass total wall height (includes foundation)
-      hasDoor,
-      doorNormalizedX,
-      doorNormalizedY,
-      doorNormalizedWidth,
-      doorNormalizedHeight,
-      isGarageDoor,
+      doorRects,
+      doorCount,
       buildingSubtype,
       colors,
       cornerTrimWidthNormalized,
-      foundationHeightNormalized,
-      hasDoor2,
-      door2NormalizedX,
-      door2NormalizedY,
-      door2NormalizedWidth,
-      door2NormalizedHeight,
-      isGarageDoor2
+      foundationHeightNormalized
     );
     
     // Create wall geometry
@@ -1232,15 +1204,12 @@ export class StructureManager {
    * @param {number} windowCount - Number of windows
    * @param {number} wallWidth - Wall width in meters
    * @param {number} wallHeight - Wall height in meters
-   * @param {boolean} hasDoor - Whether this wall has a door (front facade only)
-   * @param {number} doorX - Door center X in normalized coordinates (-0.5 to 0.5)
-   * @param {number} doorY - Door center Y in normalized coordinates (-0.5 to 0.5)
-   * @param {number} doorWidth - Door width in normalized coordinates (0 to 1)
-   * @param {number} doorHeight - Door height in normalized coordinates (0 to 1)
+   * @param {Array<THREE.Vector4>} doorRects - Packed doors (x,y,w,h normalized), front facade
+   * @param {number} doorCount - Number of packed doors
    * @param {string} buildingSubtype - Building subtype for material variation
    * @returns {THREE.ShaderMaterial} Shader material with window, door, trim, and foundation rendering
    */
-  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, isGarageDoor = false, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05, hasDoor2 = false, door2X = 0, door2Y = 0, door2Width = 0, door2Height = 0, isGarageDoor2 = false) {
+  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, doorRects = [], doorCount = 0, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05) {
     // Helper function to convert hex color to RGB vec3
     const hexToRgb = (hex) => {
       if (!hex || typeof hex === 'number') return null;
@@ -1280,18 +1249,8 @@ export class StructureManager {
       uniform float windowCount;
       uniform sampler2D windowDataTexture;
       uniform float textureWidth;
-      uniform bool hasDoor;
-      uniform bool isGarageDoor;
-      uniform float doorX;
-      uniform float doorY;
-      uniform float doorWidth;
-      uniform float doorHeight;
-      uniform bool hasDoor2;
-      uniform bool isGarageDoor2;
-      uniform float door2X;
-      uniform float door2Y;
-      uniform float door2Width;
-      uniform float door2Height;
+      uniform int doorCount;
+      uniform vec4 doorRects[6]; // x,y,w,h normalized
       
       varying vec2 vUv;
       
@@ -1361,75 +1320,38 @@ export class StructureManager {
         return vec4(0.0); // Not a window
       }
       
-      // Check if point is in door area
+      // Check if point is in any door area (supports multiple doors)
       vec4 checkDoor(vec2 uv) {
-        if (!hasDoor || doorWidth <= 0.0 || doorHeight <= 0.0) {
-          return vec4(0.0);
-        }
+        if (doorCount <= 0) return vec4(0.0);
         
         vec2 normalizedPos = (uv - 0.5);
-        
-        // Door bounds
-        vec2 doorMin = vec2(doorX - doorWidth * 0.5, doorY - doorHeight * 0.5);
-        vec2 doorMax = vec2(doorX + doorWidth * 0.5, doorY + doorHeight * 0.5);
+        for (int i = 0; i < 6; i++) {
+          if (i >= doorCount) break;
+          vec4 dr = doorRects[i];
+          float dx = dr.x;
+          float dy = dr.y;
+          float dw = dr.z;
+          float dh = dr.w;
+          if (dw <= 0.0 || dh <= 0.0) continue;
+          
+          vec2 doorMin = vec2(dx - dw * 0.5, dy - dh * 0.5);
+          vec2 doorMax = vec2(dx + dw * 0.5, dy + dh * 0.5);
         
         if (normalizedPos.x >= doorMin.x && normalizedPos.x <= doorMax.x &&
             normalizedPos.y >= doorMin.y && normalizedPos.y <= doorMax.y) {
           
-          // Calculate distance from door edge
           vec2 distFromEdge = min(normalizedPos - doorMin, doorMax - normalizedPos);
-          float distX = distFromEdge.x / doorWidth;
-          float distY = distFromEdge.y / doorHeight;
+            float distX = distFromEdge.x / dw;
+            float distY = distFromEdge.y / dh;
           float minDist = min(distX, distY);
           
-          // Check if in frame area
-          if (minDist < frameThickness) {
+            float doorFrameThickness = frameThickness * 1.2;
+        
+            if (minDist < doorFrameThickness) {
             return vec4(frameColorUniform, 1.0); // Door frame
           } else {
-            // Garage doors are darker/more metallic than regular doors
-            if (isGarageDoor) {
-              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
-              return vec4(garageColor, 1.0); // Garage door surface
-            } else {
-              return vec4(doorColorUniform, 1.0); // Regular door surface
-            }
-          }
-        }
-        
-        return vec4(0.0); // Not a door
-      }
-      
-      // Check if point is in second door area
-      vec4 checkDoor2(vec2 uv) {
-        if (!hasDoor2 || door2Width <= 0.0 || door2Height <= 0.0) {
-          return vec4(0.0);
-        }
-        
-        vec2 normalizedPos = (uv - 0.5);
-        
-        // Door bounds
-        vec2 doorMin = vec2(door2X - door2Width * 0.5, door2Y - door2Height * 0.5);
-        vec2 doorMax = vec2(door2X + door2Width * 0.5, door2Y + door2Height * 0.5);
-        
-        if (normalizedPos.x >= doorMin.x && normalizedPos.x <= doorMax.x &&
-            normalizedPos.y >= doorMin.y && normalizedPos.y <= doorMax.y) {
-          
-          // Calculate distance from door edge
-          vec2 distFromEdge = min(normalizedPos - doorMin, doorMax - normalizedPos);
-          float distX = distFromEdge.x / door2Width;
-          float distY = distFromEdge.y / door2Height;
-          float minDist = min(distX, distY);
-          
-          // Check if in frame area
-          if (minDist < frameThickness) {
-            return vec4(frameColorUniform, 1.0); // Door frame
-          } else {
-            // Garage doors are darker/more metallic than regular doors
-            if (isGarageDoor2) {
-              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
-              return vec4(garageColor, 1.0); // Garage door surface
-            } else {
-              return vec4(doorColorUniform, 1.0); // Regular door surface
+              vec3 doorPanelColor = doorColorUniform * 0.9;
+              return vec4(doorPanelColor, 1.0); // Door panel
             }
           }
         }
@@ -1494,12 +1416,7 @@ export class StructureManager {
             }
           } else {
             // Check for doors (only if not a window)
-            // Check first door, then second door if first doesn't match
             vec4 doorResult = checkDoor(vUv);
-            if (doorResult.a == 0.0 && hasDoor2) {
-              // If first door didn't match, check second door
-              doorResult = checkDoor2(vUv);
-            }
             if (doorResult.a > 0.0) {
               color = doorResult.rgb;
               alpha = doorResult.a;
@@ -1557,18 +1474,8 @@ export class StructureManager {
         windowCount: { value: windowCount },
         windowDataTexture: { value: windowDataTexture },
         textureWidth: { value: textureWidth },
-        hasDoor: { value: hasDoor },
-        isGarageDoor: { value: isGarageDoor },
-        doorX: { value: doorX },
-        doorY: { value: doorY },
-        doorWidth: { value: doorWidth },
-        doorHeight: { value: doorHeight },
-        hasDoor2: { value: hasDoor2 },
-        isGarageDoor2: { value: isGarageDoor2 },
-        door2X: { value: door2X },
-        door2Y: { value: door2Y },
-        door2Width: { value: door2Width },
-        door2Height: { value: door2Height },
+        doorCount: { value: doorCount },
+        doorRects: { value: doorRects },
         frameColorUniform: { value: new THREE.Vector3(frameColorValue.r, frameColorValue.g, frameColorValue.b) },
         glassColorUniform: { value: new THREE.Vector3(glassColorValue.r, glassColorValue.g, glassColorValue.b) },
         doorColorUniform: { value: new THREE.Vector3(doorColorValue.r, doorColorValue.g, doorColorValue.b) },

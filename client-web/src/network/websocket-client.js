@@ -263,7 +263,7 @@ class WebSocketClient {
         handlers.forEach(handler => handler(message.data, message));
       }
     } catch (error) {
-      console.error('Failed to parse WebSocket message:', error);
+      console.error('Failed to parse WebSocket message:', error, { raw: typeof data === 'string' ? data.slice(0, 500) : data });
     }
   }
 
