@@ -768,8 +768,6 @@ def generate_structures_for_zones(
         windows_before = len(windows)
         windows = _filter_windows_by_openings(windows, model_doors, model_garage_doors, width, depth)
         windows_after = len(windows)
-        if windows_before != windows_after:
-            print(f"[StructureGen] Filtered {windows_before} -> {windows_after} windows for {class_name} (removed {windows_before - windows_after} overlapping)")
 
         # If shapely is unavailable, drop a single building at centroid
 
@@ -951,8 +949,6 @@ def generate_structures_for_zones(
             windows_before = len(windows)
             windows = _filter_windows_by_openings(windows, model_doors, model_garage_doors, width, depth)
             windows_after = len(windows)
-            if windows_before != windows_after:
-                print(f"[StructureGen] Filtered {windows_before} -> {windows_after} windows for {class_name} (removed {windows_before - windows_after} overlapping)")
             decorations = _make_decorations(width, depth, height, class_def, model_garage_doors, rng, windows)
 
             structure_id = f"proc_lib_{floor}_{chunk_index}_{idx}_{len(placed)}"

@@ -274,14 +274,12 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Extract zone properties
 				props, ok := zoneMap["properties"].(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: zone properties not found or invalid, skipping")
 					continue
 				}
 
 				// Extract geometry
 				geometry, ok := zoneMap["geometry"].(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: zone geometry not found or invalid, skipping")
 					continue
 				}
 
@@ -523,9 +521,27 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					}
 				}
 
-				// For procedural structures, we don't need to link them to zones
-				// They're deterministic and guaranteed to be within their zones
-				var zoneID *int64 // nil for procedural structures
+				// Match structure to zone by position using PostGIS
+				// Find which zone contains this structure's position
+				var zoneID *int64
+				if len(zoneIDs) > 0 && structFloor == floor {
+					matchZoneQuery := `
+						SELECT id FROM zones
+						WHERE id = ANY($1)
+						  AND floor = $2
+						  AND ST_Contains(geometry, ST_SetSRID(ST_MakePoint($3, $4), 0))
+						LIMIT 1
+					`
+					var matchedZoneID int64
+					err := tx.QueryRow(matchZoneQuery, pq.Array(zoneIDs), structFloor, posX, posY).Scan(&matchedZoneID)
+					if err == nil {
+						zoneID = &matchedZoneID
+					} else if err != sql.ErrNoRows {
+						// Log non-expected errors but don't fail structure creation
+						log.Printf("[StoreChunk] Warning: Failed to match structure to zone at (%.1f, %.1f): %v", posX, posY, err)
+					}
+					// If no match found (sql.ErrNoRows), zoneID remains nil (structure not in any zone)
+				}
 
 				// Insert structure directly into database within transaction
 				// Bypass validation for procedural structures (they're deterministic and guaranteed valid)
@@ -572,7 +588,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				savepointName := fmt.Sprintf("sp_structure_%d", len(structureIDs))
 				_, spErr := tx.Exec(fmt.Sprintf("SAVEPOINT %s", savepointName))
 				if spErr != nil {
-					log.Printf("[StoreChunk] Warning: failed to create savepoint for structure: %v", spErr)
 					continue
 				}
 
@@ -604,7 +619,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Release the savepoint on success
 				_, releaseErr := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName))
 				if releaseErr != nil {
-					log.Printf("[StoreChunk] Warning: failed to release savepoint: %v", releaseErr)
 				}
 
 				structureIDs = append(structureIDs, structID)

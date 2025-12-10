@@ -679,7 +679,6 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 			// Chunk exists in database - check if version is current
 			if storedMetadata.Version < CurrentGeometryVersion {
 				// Chunk is outdated - regenerate it
-				log.Printf("Chunk %s has outdated version %d (current: %d), regenerating...", chunkID, storedMetadata.Version, CurrentGeometryVersion)
 				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
 				if err != nil {
 					log.Printf("Failed to regenerate outdated chunk %s: %v", chunkID, err)
@@ -712,6 +711,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 									},
 									"geometry": json.RawMessage(zone.Geometry),
 								}
+								// Add area explicitly (always include, even if 0)
+								if zone.Area >= 0 {
+									zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+								} else {
+									zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+								}
 								if len(zone.Properties) > 0 {
 									zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 								}
@@ -742,6 +747,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 									"is_system_zone": zone.IsSystemZone,
 								},
 								"geometry": json.RawMessage(zone.Geometry),
+							}
+							// Add area explicitly (always include, even if 0)
+							if zone.Area >= 0 {
+								zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+							} else {
+								zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
 							}
 							if len(zone.Properties) > 0 {
 								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
@@ -821,6 +832,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								},
 								"geometry": json.RawMessage(zone.Geometry),
 							}
+							// Add area explicitly (always include, even if 0)
+							if zone.Area >= 0 {
+								zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+							} else {
+								zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+							}
 							// Add properties and metadata if present
 							if len(zone.Properties) > 0 {
 								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
@@ -854,6 +871,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								"is_system_zone": zone.IsSystemZone,
 							},
 							"geometry": json.RawMessage(zone.Geometry),
+						}
+						// Add area explicitly (always include, even if 0)
+						if zone.Area >= 0 {
+							zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+						} else {
+							zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
 						}
 						// Add properties and metadata if present
 						if len(zone.Properties) > 0 {
@@ -984,9 +1007,13 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							structureFeature["procedural_seed"] = *structure.ProceduralSeed
 						}
 
+						// Add zone_id if present
+						if structure.ZoneID != nil {
+							structureFeature["zone_id"] = *structure.ZoneID
+						}
+
 						structures = append(structures, structureFeature)
 					}
-					log.Printf("[Chunks] Loaded %d structures for chunk %s from database", len(structures), chunkID)
 				}
 
 				metadata := ChunkMetadata{
@@ -1010,11 +1037,8 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 
 		// Compress geometry if present
 		if chunk.Geometry != nil {
-			if compressedGeom, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
+			if _, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
 				// Already compressed
-				compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)",
-					chunkID, compressedGeom.Size, compressionRatio)
 			} else {
 				// Compress the geometry
 				var chunkGeometry *procedural.ChunkGeometry
@@ -1023,24 +1047,15 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					chunkGeometry = geom
 				case map[string]interface{}:
 					// Skip compression for map types (database-loaded geometry)
-					log.Printf("Chunk %s geometry is map type, skipping compression", chunkID)
 				default:
-					log.Printf("Chunk %s geometry has unknown type, skipping compression", chunkID)
+					// Skip compression for unknown types
 				}
 
 				if chunkGeometry != nil {
-					uncompressedSize := compression.EstimateUncompressedSize(chunkGeometry)
 					compressedGeometry, err := compressChunkGeometry(chunk.Geometry)
 					if err != nil {
 						log.Printf("Failed to compress geometry for chunk %s: %v", chunkID, err)
 					} else {
-						if compressedGeom, ok := compressedGeometry.(*compression.CompressedGeometry); ok {
-							compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)",
-								chunkID, compressedGeom.UncompressedSize, compressedGeom.Size, compressionRatio, uncompressedSize)
-						} else {
-							log.Printf("✓ Compressed chunk %s geometry (estimated uncompressed: %d bytes)", chunkID, uncompressedSize)
-						}
 						chunk.Geometry = compressedGeometry
 					}
 				}
@@ -1187,9 +1202,6 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		return
 	}
 
-	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, arc_length=%.0f, theta=%.6f, r=%.2f, z=%.2f, active_floor=%d",
-		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ArcLength, req.Pose.Theta, req.Pose.R, req.Pose.Z, req.Pose.ActiveFloor)
-
 	// Update pose and get chunk deltas
 	op := h.profiler.Start("stream_update_pose")
 	chunkDelta, err := h.streamManager.UpdatePose(conn.userID, req.SubscriptionID, req.Pose)
@@ -1263,7 +1275,6 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 
 	select {
 	case conn.send <- bytes:
-		log.Printf("[Stream] Sent stream_pose_ack for subscription %s", req.SubscriptionID)
 	default:
 		log.Printf("Failed to send stream_pose_ack: channel full")
 	}
@@ -1296,7 +1307,6 @@ func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pos
 		} else {
 			// Convert RingPolar to RingArc for query
 			// This is a fallback - should use RingArc directly when available
-			log.Printf("[Stream] Warning: Using RingPolar coordinates, should use RingArc directly")
 			// For now, fall back to legacy coordinates
 			if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
 				log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)

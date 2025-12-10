@@ -1152,7 +1152,7 @@ export class ChunkManager {
       const floor = this.getFloorFromChunkID(chunkID);
       
       // Handle different zone formats
-      let zoneID, name, zoneType, zoneFloor, isSystemZone, geometry, properties, metadata;
+      let zoneID, name, zoneType, zoneFloor, isSystemZone, geometry, properties, metadata, area;
       
       if (zoneFeature && zoneFeature.type === 'Feature' && zoneFeature.properties) {
         // GeoJSON Feature format
@@ -1161,6 +1161,8 @@ export class ChunkManager {
         zoneType = zoneFeature.properties.zone_type;
         zoneFloor = zoneFeature.properties.floor !== undefined ? zoneFeature.properties.floor : floor;
         isSystemZone = zoneFeature.properties.is_system_zone || false;
+        // Area is in properties at the top level (not in properties.properties)
+        area = zoneFeature.properties.area !== undefined ? zoneFeature.properties.area : null;
         geometry = zoneFeature.geometry;
         properties = zoneFeature.properties.properties;
         metadata = zoneFeature.properties.metadata;
@@ -1171,6 +1173,8 @@ export class ChunkManager {
         zoneType = zoneFeature.zone_type || zoneFeature.zoneType;
         zoneFloor = zoneFeature.floor !== undefined ? zoneFeature.floor : floor;
         isSystemZone = zoneFeature.is_system_zone || zoneFeature.isSystemZone || false;
+        // Area might be at top level or in properties
+        area = zoneFeature.area !== undefined ? zoneFeature.area : (zoneFeature.properties?.area !== undefined ? zoneFeature.properties.area : null);
         geometry = zoneFeature.geometry;
         properties = zoneFeature.properties;
         metadata = zoneFeature.metadata;
@@ -1232,7 +1236,7 @@ export class ChunkManager {
         return null;
       }
       
-      return {
+      const zoneObj = {
         id: zoneID,
         name: name || `Zone (${chunkID})`,
         zone_type: zoneType || 'restricted',
@@ -1242,6 +1246,13 @@ export class ChunkManager {
         properties: properties,
         metadata: metadata,
       };
+      
+      // Only include area if it's defined and valid
+      if (area !== undefined && area !== null && !isNaN(area) && area > 0) {
+        zoneObj.area = area;
+      }
+      
+      return zoneObj;
     }).filter(zone => zone !== null); // Filter out null zones
     
     if (zones.length === 0) {

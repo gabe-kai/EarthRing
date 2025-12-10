@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { toThreeJS, wrapRingPosition, normalizeRelativeToCamera, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
-import { updateInfoBox } from '../ui/info-box.js';
+import { updateInfoBox, createInfoBox } from '../ui/info-box.js';
 
 /**
  * StructureManager coordinates structure data and renders structures as world-positioned meshes.
@@ -194,8 +194,7 @@ export class StructureManager {
       if (!structure) return;
     }
 
-    const info = this.buildStructureInfo(structure);
-    updateInfoBox(info, { title: 'Structure', tooltip: 'Selected structure', source: 'structure' });
+    this.showStructureInfo(structure);
   }
 
   setStructureIdRecursive(obj, id, structure) {
@@ -231,6 +230,286 @@ export class StructureManager {
       windows: JSON.stringify(windows),
       decorations: JSON.stringify(decorations),
     };
+  }
+
+  showStructureInfo(structure) {
+    try {
+      const category = structure.category || structure.model_data?.category || 'n/a';
+      const type = structure.structure_type || structure.type || 'unknown';
+      const buildingClass = structure.building_class || structure.model_data?.class || 'n/a';
+      const subcategory = structure.subcategory || structure.model_data?.subcategory || 'n/a';
+      const structureId = String(structure.id || 'unknown');
+      const zoneId = structure.zone_id ? String(structure.zone_id) : 'N/A';
+      const floor = structure.floor ?? 0;
+      const pos = structure.position || {};
+      const dims = structure.dimensions || {};
+      const decorations = structure.decorations || structure.model_data?.decorations || [];
+      
+      // Parse properties if it's a string, otherwise use as-is
+      let properties = structure.properties || {};
+      if (typeof properties === 'string') {
+        try {
+          properties = JSON.parse(properties);
+        } catch (e) {
+          console.error('[StructureManager] Failed to parse properties as JSON:', e);
+          properties = {};
+        }
+      }
+      const name = (typeof properties === 'object' && properties && properties.name) ? String(properties.name) : '';
+      
+      // Build title: "{Type} - {Category}" with first letters capitalized
+      const capitalizeFirst = (str) => {
+        if (!str || str === 'n/a') return str;
+        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+      };
+      const title = `${capitalizeFirst(type)} - ${capitalizeFirst(category)}`;
+      
+      // Build HTML content
+      let html = '';
+      
+      // Name field (editable)
+      html += `
+        <div class="info-item info-item-editable">
+          <div class="info-item-label">Name:</div>
+          <div class="info-item-value-editable" contenteditable="true" data-field="name" data-structure-id="${structureId}">${this.escapeHtml(name || '(unnamed)')}</div>
+        </div>
+      `;
+      
+      // Subcategory - building class
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Class:</div>
+          <div class="info-item-value">${this.escapeHtml(subcategory)} - ${this.escapeHtml(buildingClass)}</div>
+        </div>
+      `;
+      
+      // Structure & Zone ID
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Structure & Zone ID:</div>
+          <div class="info-item-value">${this.escapeHtml(structureId)} in ${this.escapeHtml(zoneId)}</div>
+        </div>
+      `;
+      
+      // Floor
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Floor:</div>
+          <div class="info-item-value">${floor}</div>
+        </div>
+      `;
+      
+      // Position
+      const posX = (pos.x != null) ? pos.x.toFixed(1) : '?';
+      const posY = (pos.y != null) ? pos.y.toFixed(1) : '?';
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Position:</div>
+          <div class="info-item-value">x: ${posX}, y: ${posY}</div>
+        </div>
+      `;
+      
+      // Dimensions
+      const dimW = (dims.width != null) ? dims.width.toFixed(1) : '?';
+      const dimD = (dims.depth != null) ? dims.depth.toFixed(1) : '?';
+      const dimH = (dims.height != null) ? dims.height.toFixed(1) : '?';
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Dimensions:</div>
+          <div class="info-item-value">w: ${dimW}, d: ${dimD}, h: ${dimH}</div>
+        </div>
+      `;
+      
+      // Decorations (collapsible sections) - start minimized
+      if (decorations && Array.isArray(decorations) && decorations.length > 0) {
+        html += `
+          <div class="info-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0, 255, 0, 0.3);">
+            <div class="info-item-label decoration-toggle" style="cursor: pointer; user-select: none;" data-target="decorations-container-${structureId}">
+              Decorations: ▼
+            </div>
+          </div>
+          <div class="decorations-container-${structureId}" style="display: none; margin-left: 10px;">
+        `;
+        
+        decorations.forEach((decoration, index) => {
+          const decType = this.escapeHtml(String(decoration.type || decoration.decoration_type || 'unknown'));
+          const decId = `decoration-${structureId}-${index}`;
+          const decJson = JSON.stringify(decoration, null, 2);
+          html += `
+            <div class="info-item" style="margin-left: 10px; margin-top: 5px;">
+              <div class="info-item-label decoration-toggle" style="cursor: pointer; user-select: none;" data-target="${decId}">
+                ${decType}: ▼
+              </div>
+              <div id="${decId}" style="display: none; margin-left: 10px;">
+                <pre style="font-size: 10px; color: #88ff88; margin: 5px 0;">${this.escapeHtml(decJson)}</pre>
+              </div>
+            </div>
+          `;
+        });
+        
+        html += `</div>`;
+      } else {
+        html += `
+          <div class="info-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0, 255, 0, 0.3);">
+            <div class="info-item-label">Decorations:</div>
+            <div class="info-item-value">None</div>
+          </div>
+        `;
+      }
+      
+      console.log('[StructureManager] Rendering structure info:', { title, htmlLength: html.length, structureId });
+      this.renderStructureInfoContent(title, html, structureId);
+    } catch (error) {
+      console.error('[StructureManager] Error showing structure info:', error, structure);
+      // Fallback to simple display using the old method
+      const fallbackInfo = {
+        id: structure.id || 'unknown',
+        type: structure.structure_type || structure.type || 'unknown',
+        error: 'Failed to load full structure info'
+      };
+      updateInfoBox(fallbackInfo, { title: 'Structure', source: 'structure' });
+    }
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  renderStructureInfoContent(title, html, structureId) {
+    // Ensure info box exists (don't use updateInfoBox as it will overwrite our HTML)
+    if (!document.getElementById('info-box')) {
+      createInfoBox();
+    }
+    
+    const infoBox = document.getElementById('info-box');
+    const titleElement = document.getElementById('info-box-title');
+    const content = document.getElementById('info-box-content');
+    
+    if (!infoBox || !titleElement || !content) {
+      console.error('[StructureManager] Info box elements not found', { 
+        infoBox: !!infoBox,
+        titleElement: !!titleElement, 
+        content: !!content
+      });
+      return;
+    }
+    
+    // Make sure box is visible
+    infoBox.style.display = 'flex';
+    
+    // Set our custom HTML content - use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      if (content && titleElement) {
+        // Update title AFTER setting content to ensure it sticks
+        titleElement.textContent = title;
+        titleElement.removeAttribute('data-tooltip');
+        
+        content.innerHTML = html;
+        console.log('[StructureManager] Custom content set, HTML length:', content.innerHTML.length);
+        console.log('[StructureManager] Content children count:', content.children.length);
+        
+        // Set up handlers after content is set
+        this.setupStructureInfoHandlers(content, structureId, infoBox, titleElement);
+        
+        // Verify title is still correct after a brief moment
+        setTimeout(() => {
+          if (titleElement && titleElement.textContent !== title) {
+            titleElement.textContent = title;
+          }
+        }, 100);
+      }
+    });
+  }
+
+  setupStructureInfoHandlers(content, structureId, infoBox, titleElement) {
+    if (!content) return;
+    
+    // Set up name field save handler
+    const nameField = content.querySelector('[data-field="name"]');
+    if (nameField) {
+      const saveHandler = () => {
+        const newName = nameField.textContent.trim();
+        this.saveStructureName(structureId, newName);
+      };
+      nameField.addEventListener('blur', saveHandler);
+      nameField.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          nameField.blur();
+        }
+      });
+    }
+    
+    // Set up decoration toggle handlers using event delegation
+    const toggleHandler = (e) => {
+      const toggle = e.target.closest('.decoration-toggle');
+      if (toggle) {
+        const targetId = toggle.dataset.target;
+        if (targetId) {
+          const container = content.querySelector(`#${targetId}`) || content.querySelector(`.${targetId}`);
+          if (container) {
+            const isHidden = container.style.display === 'none';
+            container.style.display = isHidden ? 'block' : 'none';
+            toggle.textContent = toggle.textContent.replace(/[▼▲]/, isHidden ? '▼' : '▲');
+          }
+        }
+      }
+    };
+    
+    // Remove old listener if it exists, then add new one
+    if (this._decorationToggleHandler) {
+      content.removeEventListener('click', this._decorationToggleHandler);
+    }
+    this._decorationToggleHandler = toggleHandler;
+    content.addEventListener('click', toggleHandler);
+    
+    // Auto-resize
+    if (infoBox && titleElement) {
+      setTimeout(() => {
+        if (infoBox && !infoBox.dataset.resizeLocked) {
+          const contentHeight = content.scrollHeight || 0;
+          const headerHeight = titleElement.offsetHeight || 0;
+          const resizeHandleHeight = infoBox.querySelector('#info-box-resize-handle')?.offsetHeight || 0;
+          const padding = 30;
+          const totalHeight = contentHeight + headerHeight + resizeHandleHeight + padding;
+          const maxAllowed = Math.min(300, window.innerHeight - 100);
+          const finalHeight = Math.min(Math.max(100, totalHeight), maxAllowed);
+          infoBox.style.height = `${finalHeight}px`;
+          infoBox.style.maxHeight = `${finalHeight}px`;
+        }
+      }, 10);
+    }
+  }
+
+  async saveStructureName(structureId, newName) {
+    // Get current structure to preserve other properties
+    const structure = this.gameState.getStructure(String(structureId));
+    if (!structure) return;
+    
+    // Update properties with new name
+    const properties = structure.properties || {};
+    const updatedProperties = { ...properties, name: newName };
+    
+    // Import structure service and update
+    const { updateStructure } = await import('../api/structure-service.js');
+    try {
+      // Send properties as JSON object (server expects json.RawMessage which accepts any JSON)
+      await updateStructure(structureId, { properties: updatedProperties });
+      
+      // Update local structure in game state immediately
+      if (structure) {
+        structure.properties = updatedProperties;
+      }
+    } catch (error) {
+      console.error('[StructureManager] Failed to save structure name:', error);
+      // Revert the display
+      const nameField = document.querySelector(`[data-field="name"][data-structure-id="${structureId}"]`);
+      if (nameField) {
+        nameField.textContent = (properties.name || '(unnamed)');
+      }
+    }
   }
 
   /**

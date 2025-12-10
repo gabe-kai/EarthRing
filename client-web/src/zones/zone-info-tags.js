@@ -538,9 +538,19 @@ export class ZoneInfoTags {
       : 'Unknown';
     
     // Format area for display
+    // Area comes from PostGIS ST_Area which returns square meters
     let areaDisplay = 'N/A';
-    if (zone.area !== undefined && zone.area !== null) {
+    if (zone.area !== undefined && zone.area !== null && !isNaN(zone.area) && zone.area > 0) {
+      // Area is in square meters from PostGIS
       areaDisplay = `${zone.area.toFixed(2)} m²`;
+    } else {
+      // Try to get area from properties if not in main zone object
+      if (zone.properties && typeof zone.properties === 'object' && zone.properties.area) {
+        const propArea = zone.properties.area;
+        if (typeof propArea === 'number' && propArea > 0) {
+          areaDisplay = `${propArea.toFixed(2)} m²`;
+        }
+      }
     }
     
     // Fetch owner username for tooltip
@@ -565,11 +575,24 @@ export class ZoneInfoTags {
     }
     const tooltip = tooltipParts.join('\n');
     
+    // Count structures in this zone
+    let structureCount = 0;
+    if (this.gameStateManager) {
+      const structures = this.gameStateManager.getAllStructures();
+      const zoneId = typeof zone.id === 'string' ? parseInt(zone.id) : zone.id;
+      structureCount = structures.filter(s => {
+        const sZoneId = s.zone_id;
+        return sZoneId === zoneId || sZoneId === zone.id;
+      }).length;
+    }
+    
     // Build zone info object for info box
     const zoneInfo = {
       'Name': zone.name || `Zone ${zone.id}`,
+      'Zone ID': zone.id.toString(),
       'Floor': (zone.floor ?? 0).toString(),
       'Area': areaDisplay,
+      'Structures': structureCount.toString(),
     };
     
     // Define name save handler
