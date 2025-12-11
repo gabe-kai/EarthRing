@@ -24,7 +24,9 @@ All reset buttons now include explicit descriptions of their actions:
 
 ### Improved Reset Flow
 All reset buttons now:
-- Close modal automatically after successful reset
+- Start demolition animations for existing structures (7.5 second duration)
+- **Close modal immediately** so user can view demolition animations
+- Wait for demolition animations to complete before loading new chunks (prevents visual overlap)
 - Clear client-side state (chunks, zones, structures)
 - Force reload chunks with `forceReload: true`
 - Wait for chunks to arrive via WebSocket
@@ -190,10 +192,14 @@ for _, structObj := range genResponse.Structures {
    - Fades in opacity from 30% to 100% during first 10% of animation (ensures visibility even at small scales)
    - Position calculation: `mesh.position.y = originalY + box.min.y * (1 - scaleY)`
 
-3. **Demolition Animation**:
-   - Scales Y-axis from 1.0 to 0.01
-   - Adds slight Z-axis rotation
-   - Fades out opacity
+3. **Demolition Animation** (Scale Down + Rotation + Fade):
+   - **Duration**: 7.5 seconds (5-10 second range for quick demolition)
+   - Scales Y-axis from 1.0 down to 0.01 (shrinks vertically)
+   - Adjusts Y-position to keep bottom fixed while top shrinks up
+   - Adds forward tilt rotation (up to 15°) starting at 20% progress
+   - Fades out opacity faster than scale (uses `progress^1.5` for faster fade)
+   - Uses quadratic ease-in easing: `progress^2` for acceleration effect
+   - Position calculation: `mesh.position.y = originalY + box.min.y * (1 - scaleProgress)`
 
 4. **Animation Registration**:
    - `registerConstructionAnimation()`: Initializes animations based on server-provided construction state
@@ -245,19 +251,27 @@ sceneManager.onRender((deltaTime) => {
 ### Automatic Reloading (`client-web/src/ui/admin-modal.js`)
 
 **Reset All Chunks Database**:
-- Clears zones, structures, and chunks from client immediately
+- Starts demolition animations for existing structures (7.5 second duration)
+- Closes modal immediately so user can view demolitions
+- Waits for demolition animations to complete before loading new chunks (prevents visual overlap)
+- Clears zones, structures, and chunks from client
 - Forces chunk reload by clearing subscription state
 - Waits for chunks to arrive (up to 5 seconds with progress checking)
 - Re-renders zones after chunks load
-- Automatically closes modal after successful reset
 - **No page refresh required**
 
 **Reset All Zones**:
+- Starts demolition animations for existing structures
+- Closes modal immediately so user can view demolitions
+- Waits for demolition animations to complete
 - Clears zones from client
 - Triggers chunk reload (zones are embedded in chunks)
 - Re-renders zones to ensure proper display
 
 **Rebuild Structures**:
+- Starts demolition animations for existing structures
+- Closes modal immediately so user can view demolitions
+- Waits for demolition animations to complete
 - Clears all chunks and structures
 - Forces chunk regeneration
 - Structures spawn with construction animations

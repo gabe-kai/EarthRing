@@ -892,13 +892,25 @@ function setupAdminStructuresListeners(container) {
         resultDiv.textContent = `Success! Deleted ${data.structures_deleted || 0} procedural structures and ${data.chunks_deleted || 0} chunks. Regenerating...`;
         resultDiv.className = 'result-display show success';
         
-        // Clear structures from client (but keep zones and chunks visible)
+        // Clear structures from client (this starts demolition animations)
         if (window.earthring && window.earthring.structureManager) {
           const structureManager = window.earthring.structureManager;
           const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
           allStructureIDs.forEach(structureID => {
             structureManager.removeStructure(structureID);
           });
+        }
+        
+        // Close modal immediately so user can see the demolition animations
+        hideAdminModal();
+        
+        // Wait for demolition animations to complete before loading new chunks
+        // This prevents new structures from appearing while old ones are still demolishing
+        if (window.earthring && window.earthring.structureManager) {
+          const structureManager = window.earthring.structureManager;
+          console.log('[Admin] Waiting for demolition animations to complete...');
+          await structureManager.waitForDemolitionAnimations(10000); // Wait up to 10 seconds
+          console.log('[Admin] Demolition animations complete, proceeding with chunk reload');
         }
         
         // Clear chunks from client so they reload with new structures
@@ -960,9 +972,6 @@ function setupAdminStructuresListeners(container) {
             }
           }
         }
-        
-        // Close the modal after successful rebuild
-        hideAdminModal();
         
       } catch (error) {
         resultDiv.className = 'result-display show error';
@@ -1766,12 +1775,20 @@ async function handleAdminResetAllZones(container, cascade = false) {
         zoneManager.clearAllZones();
       }
       
-      // Clear all structures
+      // Clear all structures (this starts demolition animations)
       if (structureManager) {
         const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
         allStructureIDs.forEach(structureID => {
           structureManager.removeStructure(structureID);
         });
+      }
+      
+      // Wait for demolition animations to complete before loading new chunks
+      // This prevents new structures from appearing while old ones are still demolishing
+      if (structureManager) {
+        console.log('[Admin] Waiting for demolition animations to complete...');
+        await structureManager.waitForDemolitionAnimations(10000); // Wait up to 10 seconds
+        console.log('[Admin] Demolition animations complete, proceeding with chunk reload');
       }
       
       // Clear all chunks from client
@@ -1879,12 +1896,23 @@ async function handleAdminResetAllChunks(container) {
         zoneManager.clearAllZones();
       }
       
-      // Clear all structures
+      // Clear all structures (this starts demolition animations)
       if (structureManager) {
         const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
         allStructureIDs.forEach(structureID => {
           structureManager.removeStructure(structureID);
         });
+      }
+      
+      // Close modal immediately so user can see the demolition animations
+      hideAdminModal();
+      
+      // Wait for demolition animations to complete before loading new chunks
+      // This prevents new structures from appearing while old ones are still demolishing
+      if (structureManager) {
+        console.log('[Admin] Waiting for demolition animations to complete...');
+        await structureManager.waitForDemolitionAnimations(10000); // Wait up to 10 seconds
+        console.log('[Admin] Demolition animations complete, proceeding with chunk reload');
       }
       
       // Clear all chunks from client (this will also trigger cleanup of structures/zones)
@@ -1940,9 +1968,6 @@ async function handleAdminResetAllChunks(container) {
         }
       }
     }
-    
-    // Close the modal after successful reset
-    hideAdminModal();
   } catch (error) {
     resultDisplay.textContent = `Error: ${error.message}`;
     resultDisplay.className = 'result-display show error';

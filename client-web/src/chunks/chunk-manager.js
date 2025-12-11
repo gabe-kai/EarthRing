@@ -1420,6 +1420,18 @@ export class ChunkManager {
           }
         }
         
+        // Ensure construction state fields are preserved (critical for animations)
+        // These should already be present from server when loaded from database
+        // Debug log to verify they're present
+        if (window.earthring?.debug && idx < 3) {
+          console.log(`[Chunks] Direct format structure ${structure.id} construction fields:`, {
+            construction_state: structure.construction_state,
+            construction_started_at: structure.construction_started_at,
+            construction_duration_seconds: structure.construction_duration_seconds,
+            construction_completed_at: structure.construction_completed_at
+          });
+        }
+        
         // Extract doors and garage_doors from model_data if present (for structures loaded from database)
         if (structure.model_data) {
           let modelData = structure.model_data;

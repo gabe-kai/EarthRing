@@ -909,8 +909,18 @@ export class StructureManager {
     const activeFloor = this.gameState.getActiveFloor();
 
     structures.forEach(structure => {
+      // Debug: Log construction state for structures being added
+      if (window.earthring?.debug && chunkStructureSet.size < 3) {
+        console.log(`[StructureManager] handleStreamedStructures: structure ${structure.id}:`, {
+          construction_state: structure.construction_state,
+          construction_started_at: structure.construction_started_at,
+          construction_duration_seconds: structure.construction_duration_seconds,
+          floor: structure.floor,
+          activeFloor: activeFloor
+        });
+      }
 
-      // Upsert to game state
+      // Upsert to game state (preserves all fields including construction state)
       this.gameState.upsertStructure(structure);
 
       // Track for chunk cleanup
@@ -964,6 +974,12 @@ export class StructureManager {
       if (existingMesh.userData.lastCameraXUsed !== cameraXWrapped) {
         this.updateStructurePosition(existingMesh, structure, cameraXWrapped);
       }
+      
+      // Re-register animation if construction state changed (e.g., loaded from database)
+      // Get latest structure from game state to ensure we have construction fields
+      const latestStructure = this.gameState.getStructure(structure.id) || structure;
+      this.registerConstructionAnimation(latestStructure, existingMesh);
+      
       return;
     }
 
@@ -1093,8 +1109,13 @@ export class StructureManager {
     this.scene.add(structureGroup);
     this.structureMeshes.set(structure.id, structureGroup);
 
+    // Get the latest structure data from game state (may have updated construction state)
+    // This ensures we use the most up-to-date structure data including construction fields
+    const latestStructure = this.gameState.getStructure(structure.id) || structure;
+    
     // Check construction state and register animation if needed
-    this.registerConstructionAnimation(structure, structureGroup);
+    // Use latestStructure to ensure we have construction fields from database
+    this.registerConstructionAnimation(latestStructure, structureGroup);
 
     this.lastCameraX = cameraXWrapped;
   }
@@ -1109,6 +1130,16 @@ export class StructureManager {
 
     const constructionState = structure.construction_state;
     
+    // Debug logging for construction state
+    if (window.earthring?.debug && this.constructionAnimations.size <= 3) {
+      console.log(`[StructureManager] registerConstructionAnimation for ${structure.id}:`, {
+        construction_state: constructionState,
+        construction_started_at: structure.construction_started_at,
+        construction_duration_seconds: structure.construction_duration_seconds,
+        construction_completed_at: structure.construction_completed_at
+      });
+    }
+    
     if (!constructionState || constructionState === 'completed') {
       // No animation needed for completed structures
       return;
@@ -1119,8 +1150,13 @@ export class StructureManager {
     let durationMs = 300000; // Default: 5 minutes
 
     if (structure.construction_started_at) {
-      // Parse ISO 8601 timestamp
-      startTime = new Date(structure.construction_started_at).getTime();
+      // Parse ISO 8601 timestamp (from database) or timestamp string
+      const parsedTime = new Date(structure.construction_started_at).getTime();
+      if (!isNaN(parsedTime)) {
+        startTime = parsedTime;
+      } else {
+        console.warn(`[StructureManager] Invalid construction_started_at for structure ${structure.id}:`, structure.construction_started_at);
+      }
     }
 
     if (structure.construction_duration_seconds) {
@@ -1129,6 +1165,7 @@ export class StructureManager {
 
     // If start time is missing, use current time (for structures just created)
     if (!startTime || isNaN(startTime)) {
+      console.warn(`[StructureManager] Missing or invalid start time for structure ${structure.id}, using current time`);
       startTime = Date.now();
     }
 
@@ -1138,8 +1175,11 @@ export class StructureManager {
       // Check if construction is already complete
       if (structure.construction_completed_at) {
         const completedTime = new Date(structure.construction_completed_at).getTime();
-        if (now >= completedTime) {
+        if (!isNaN(completedTime) && now >= completedTime) {
           // Construction already complete, no animation needed
+          if (window.earthring?.debug) {
+            console.log(`[StructureManager] Structure ${structure.id} construction already complete (completed at ${new Date(completedTime).toISOString()})`);
+          }
           return;
         }
       }
@@ -1165,13 +1205,15 @@ export class StructureManager {
         return;
       }
       
-      // Store original mesh position for scale-based animation
+      // Store original mesh position and rotation for animation
       animation.originalPosition = meshGroup.position.y;
+      animation.originalRotation = meshGroup.rotation.z;
       
       // Calculate initial progress and set initial scale
       const initialProgress = animation.getProgress(now);
       const easedInitialProgress = 1 - Math.pow(1 - initialProgress, 3);
-      const initialScaleY = Math.max(0.001, easedInitialProgress);
+      const minScale = 0.01; // Minimum visible scale (1% to ensure something is visible)
+      const initialScaleY = Math.max(minScale, easedInitialProgress);
       
       // Set initial scale and adjust position for bottom-up growth
       // The bounding box is in local coordinates relative to the group center
@@ -1182,20 +1224,64 @@ export class StructureManager {
       const positionAdjustment = bottomY * (1 - initialScaleY);
       meshGroup.position.y = animation.originalPosition + positionAdjustment;
       
+      // Set initial opacity based on progress (ensure buildings are visible even at start)
+      // Fade in during first 10% of animation, but ensure minimum 30% opacity
+      const opacityProgress = Math.max(0.3, Math.min(1.0, initialProgress / 0.1));
+      meshGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat.transparent !== undefined) {
+                mat.transparent = opacityProgress < 1.0;
+                mat.opacity = opacityProgress;
+              }
+            });
+          } else {
+            if (child.material.transparent !== undefined) {
+              child.material.transparent = opacityProgress < 1.0;
+              child.material.opacity = opacityProgress;
+            }
+          }
+        }
+      });
+      
       this.constructionAnimations.set(String(structure.id), animation);
       
       // Debug logging (only log first few structures to avoid spam)
       if (window.earthring?.debug && this.constructionAnimations.size <= 3) {
-        console.log(`[StructureManager] Registered animation ${structure.id}:`, {
+        console.log(`[StructureManager] Registered construction animation ${structure.id}:`, {
           progress: initialProgress.toFixed(3),
           scaleY: initialScaleY.toFixed(3),
-          height: totalHeight.toFixed(2)
+          height: totalHeight.toFixed(2),
+          duration: (durationMs / 1000).toFixed(1) + 's'
         });
       }
     } else if (constructionState === 'demolishing') {
-      // Register demolition animation
+      // Register demolition animation (from server state)
+      // Note: Client-side demolition is typically triggered by removeStructure(),
+      // but we handle server-sent 'demolishing' state here for consistency
+      
+      // Default demolition duration: 7.5 seconds (5-10 second range)
+      // Server might send a different duration, but default is quick
+      if (!structure.construction_duration_seconds) {
+        durationMs = 7500; // 7.5 seconds
+      }
+      
       const animation = new AnimationState(startTime, durationMs, 'demolition');
+      
+      // Store bounding box for position calculations
+      meshGroup.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      box.setFromObject(meshGroup);
+      animation.boundingBox = box.clone();
+      animation.originalPosition = meshGroup.position.y;
+      animation.originalRotation = meshGroup.rotation.z;
+      
       this.constructionAnimations.set(String(structure.id), animation);
+      
+      if (window.earthring?.debug) {
+        console.log(`[StructureManager] Registered demolition animation ${structure.id} from server state, duration: ${(durationMs / 1000).toFixed(1)}s`);
+      }
     }
   }
 
@@ -2615,10 +2701,59 @@ export class StructureManager {
   }
 
   /**
-   * Remove a structure from the scene
-   * @param {number} structureID - Structure ID to remove
+   * Start demolition animation for a structure
+   * @param {string|number} structureID - Structure ID to demolish
+   * @param {number} durationSeconds - Duration in seconds (default: 7.5 seconds)
    */
-  removeStructure(structureID) {
+  startDemolitionAnimation(structureID, durationSeconds = 7.5) {
+    const structureIDStr = String(structureID);
+    const mesh = this.structureMeshes.get(structureIDStr);
+    
+    if (!mesh) {
+      // No mesh to animate, just remove immediately
+      this.removeStructureImmediate(structureID);
+      return;
+    }
+    
+    // If there's already a demolition animation, skip
+    const existingAnimation = this.constructionAnimations.get(structureIDStr);
+    if (existingAnimation && existingAnimation.type === 'demolition') {
+      return; // Already demolishing
+    }
+    
+    // Cancel any construction animation
+    if (existingAnimation && existingAnimation.type === 'construction') {
+      this.constructionAnimations.delete(structureIDStr);
+    }
+    
+    // Register demolition animation
+    const startTime = Date.now();
+    const durationMs = durationSeconds * 1000;
+    const animation = new AnimationState(startTime, durationMs, 'demolition');
+    
+    // Calculate bounding box for position calculations during demolition
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    box.setFromObject(mesh);
+    animation.boundingBox = box.clone();
+    
+    // Store original rotation and position for animation
+    animation.originalPosition = mesh.position.y;
+    animation.originalRotation = mesh.rotation.z;
+    
+    this.constructionAnimations.set(structureIDStr, animation);
+    
+    if (window.earthring?.debug) {
+      console.log(`[StructureManager] Started demolition animation for structure ${structureIDStr}, duration: ${durationSeconds}s`);
+    }
+  }
+
+  /**
+   * Immediately remove a structure from the scene (no animation)
+   * Used internally after demolition animation completes, or when animation is not desired
+   * @param {string|number} structureID - Structure ID to remove
+   */
+  removeStructureImmediate(structureID) {
     const structureIDStr = String(structureID);
     
     // Clean up any active animations
@@ -2632,7 +2767,9 @@ export class StructureManager {
       // Dispose of geometry and materials
       mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
+          if (child.geometry) {
+            child.geometry.dispose();
+          }
           if (child.material) {
             if (Array.isArray(child.material)) {
               child.material.forEach(mat => mat.dispose());
@@ -2647,6 +2784,21 @@ export class StructureManager {
 
     // Remove from game state
     this.gameState.removeStructure(structureIDStr);
+  }
+
+  /**
+   * Remove a structure from the scene with demolition animation
+   * @param {number|string} structureID - Structure ID to remove
+   * @param {boolean} animate - Whether to animate demolition (default: true)
+   */
+  removeStructure(structureID, animate = true) {
+    if (animate) {
+      // Start demolition animation, which will remove the structure when complete
+      this.startDemolitionAnimation(structureID);
+    } else {
+      // Remove immediately without animation
+      this.removeStructureImmediate(structureID);
+    }
   }
 
   /**
@@ -2827,45 +2979,75 @@ export class StructureManager {
   applyDemolitionAnimation(mesh, progress, structureId) {
     if (!mesh) return;
 
-    // Store original rotation and position on first frame
     const animation = this.constructionAnimations.get(structureId);
-    if (animation && animation.originalPosition === null) {
+    if (!animation) return;
+
+    // Ensure original values are stored (should be set in startDemolitionAnimation)
+    if (animation.originalPosition === null) {
       animation.originalPosition = mesh.position.y;
+    }
+    if (animation.originalRotation === null || animation.originalRotation === undefined) {
       animation.originalRotation = mesh.rotation.z;
     }
 
+    // Use easing for smoother animation (ease-in for demolition)
+    const easedProgress = Math.pow(progress, 2); // Quadratic ease-in
+
     // Shrink vertically: scale Y from 1 to 0
-    const scaleProgress = 1.0 - progress;
+    const scaleProgress = 1.0 - easedProgress;
     const minScale = 0.01;
     mesh.scale.y = Math.max(minScale, scaleProgress);
 
+    // Adjust position so building shrinks from bottom up (opposite of construction)
+    // Keep bottom fixed while top shrinks down
+    const bottomY = animation.boundingBox ? animation.boundingBox.min.y : 0;
+    const originalY = animation.originalPosition;
+    // As scale decreases, move position down to keep bottom fixed
+    const positionAdjustment = bottomY * (1 - scaleProgress);
+    mesh.position.y = originalY + positionAdjustment;
+
     // Add rotation as it falls (tilt forward)
-    if (progress > 0.3) {
-      const rotationAmount = (progress - 0.3) * 0.7 * Math.PI * 0.15; // Max 15 degrees tilt
-      if (animation && animation.originalRotation !== undefined) {
+    // Start tilting after 20% progress, increase tilting as it progresses
+    if (easedProgress > 0.2) {
+      const tiltProgress = (easedProgress - 0.2) / 0.8; // 0 to 1 over remaining 80%
+      const rotationAmount = tiltProgress * Math.PI * 0.15; // Max 15 degrees tilt
+      if (animation.originalRotation !== null && animation.originalRotation !== undefined) {
         mesh.rotation.z = animation.originalRotation + rotationAmount;
       }
     }
 
-    // Fade out opacity
-    const opacity = 1.0 - progress;
+    // Fade out opacity (faster fade than scale)
+    // Opacity drops more quickly to make it feel like it's disappearing
+    const opacityProgress = Math.pow(easedProgress, 1.5); // Faster fade
+    const opacity = 1.0 - opacityProgress;
+    
     mesh.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         if (Array.isArray(child.material)) {
           child.material.forEach(mat => {
             if (mat.transparent !== undefined) {
               mat.transparent = true;
-              mat.opacity = opacity;
+              mat.opacity = Math.max(0, opacity);
             }
           });
         } else {
           if (child.material.transparent !== undefined) {
             child.material.transparent = true;
-            child.material.opacity = opacity;
+            child.material.opacity = Math.max(0, opacity);
           }
         }
       }
     });
+
+    // Debug logging for first few frames
+    if (window.earthring?.debug && easedProgress < 0.1) {
+      console.log(`[StructureManager] Demolition ${structureId}:`, {
+        progress: easedProgress.toFixed(3),
+        scaleY: mesh.scale.y.toFixed(3),
+        opacity: opacity.toFixed(3),
+        rotation: mesh.rotation.z.toFixed(3)
+      });
+    }
   }
 
   /**
@@ -2918,12 +3100,54 @@ export class StructureManager {
             }
           });
         } else if (animation.type === 'demolition') {
-          // Remove mesh when demolition complete
-          this.scene.remove(mesh);
-          this.structureMeshes.delete(structureId);
+          // Demolition complete - remove mesh and clean up
+          if (window.earthring?.debug) {
+            console.log(`[StructureManager] Demolition complete for structure ${structureId}, removing from scene`);
+          }
+          this.removeStructureImmediate(structureId);
         }
         this.constructionAnimations.delete(structureId);
       }
+    }
+  }
+
+  /**
+   * Check if there are any active demolition animations
+   * @returns {boolean} True if demolition animations are in progress
+   */
+  hasActiveDemolitionAnimations() {
+    for (const [structureId, animation] of this.constructionAnimations.entries()) {
+      if (animation.type === 'demolition' && !animation.completed) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Wait for all demolition animations to complete
+   * @param {number} maxWaitTime - Maximum time to wait in milliseconds (default: 10 seconds)
+   * @param {number} checkInterval - Interval to check in milliseconds (default: 100ms)
+   * @returns {Promise<void>} Resolves when all demolitions complete or timeout
+   */
+  async waitForDemolitionAnimations(maxWaitTime = 10000, checkInterval = 100) {
+    const startTime = Date.now();
+    let elapsed = 0;
+
+    while (elapsed < maxWaitTime) {
+      if (!this.hasActiveDemolitionAnimations()) {
+        if (window.earthring?.debug) {
+          console.log(`[StructureManager] All demolition animations complete after ${elapsed}ms`);
+        }
+        return;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      elapsed = Date.now() - startTime;
+    }
+
+    if (window.earthring?.debug) {
+      console.warn(`[StructureManager] Timeout waiting for demolition animations (${maxWaitTime}ms), continuing anyway`);
     }
   }
 }
