@@ -134,10 +134,12 @@ for _, structObj := range genResponse.Structures {
    }
    ```
 
-2. **Construction Animation** (Vertical Reveal):
-   - Scales Y-axis from 0.01 to 1.0
-   - Adjusts Y-position to appear growing from ground
-   - Fades in opacity during first 10% of animation
+2. **Construction Animation** (Bottom-Up Vertical Reveal):
+   - Scales Y-axis from 0.01 (minimum visible scale) to 1.0
+   - Adjusts Y-position using bounding box to keep bottom fixed, creating bottom-up growth effect
+   - Uses cubic ease-out easing: `1 - (1 - progress)^3`
+   - Fades in opacity from 30% to 100% during first 10% of animation (ensures visibility even at small scales)
+   - Position calculation: `mesh.position.y = originalY + box.min.y * (1 - scaleY)`
 
 3. **Demolition Animation**:
    - Scales Y-axis from 1.0 to 0.01
@@ -262,20 +264,36 @@ color_palette = libs.get_color_palette(color_palette_zone, hub_name)
 
 ## Animation Details
 
-### Construction Animation (Vertical Reveal)
+### Construction Animation (Bottom-Up Vertical Reveal)
 
 **Duration**: Configurable (default 5 minutes = 300 seconds)
 
-**Animation Steps**:
-1. **Initial State**: Building scale Y = 0.01 (nearly invisible), fully transparent
-2. **Growth Phase**:
-   - Scale Y interpolates from 0.01 to 1.0 over full duration
-   - Position Y adjusted to keep building appearing to grow from ground
-   - Formula: `mesh.position.y = originalY - (originalHeight * (1 - scaleY) / 2)`
-3. **Fade In**: Opacity fades from 0 to 1 during first 10% of animation
-4. **Completion**: At 100%, building is fully visible and at normal scale
+**Animation Technique**: Scale-based vertical reveal with position adjustment
 
-**Visual Effect**: Building appears to grow from the ground, giving impression of construction progress
+**Animation Steps**:
+1. **Initial State**: 
+   - Building scale Y = 0.01 (1% height, minimum visible scale)
+   - Opacity = 30% (ensures buildings are visible even at very small scales)
+   - Position adjusted to keep bottom of building fixed at ground level
+
+2. **Growth Phase**:
+   - Scale Y interpolates from 0.01 to 1.0 over full duration using cubic ease-out: `1 - (1 - progress)^3`
+   - Position Y is continuously adjusted to maintain bottom-fixed growth: `mesh.position.y = originalY + box.min.y * (1 - scaleY)`
+   - Since `box.min.y` is negative (local coordinate space), this formula moves the mesh center down as scale increases, keeping the bottom fixed
+   
+3. **Fade In**: Opacity interpolates from 30% to 100% during first 10% of animation (progress 0.0 to 0.1)
+
+4. **Completion**: 
+   - At 100%, building is fully visible (scale = 1.0, opacity = 100%)
+   - Position returns to original (no adjustment needed)
+   - Animation is cleaned up and removed from active animations
+
+**Visual Effect**: Building appears to "unsquish" upward from the ground, with the bottom remaining fixed while the top extends upward, creating a natural construction effect.
+
+**Technical Details**:
+- Bounding box is calculated in world coordinates on animation registration
+- The bounding box's `min.y` value (bottom in local space) is used for position calculations
+- Minimum scale of 0.01 ensures buildings are always visible, preventing issues with zero or near-zero scales
 
 ### Demolition Animation
 

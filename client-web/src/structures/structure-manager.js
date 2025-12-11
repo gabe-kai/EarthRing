@@ -12,7 +12,8 @@ class AnimationState {
     this.duration = durationMs; // duration in milliseconds
     this.type = type; // 'construction' | 'demolition'
     this.completed = false;
-    this.originalPosition = null; // Store original Y position for vertical reveal
+    this.originalPosition = null; // Store original Y position for scale-based reveal
+    this.boundingBox = null; // Store bounding box for height calculations
   }
 
   /**
@@ -1107,6 +1108,7 @@ export class StructureManager {
     if (!structure || !meshGroup) return;
 
     const constructionState = structure.construction_state;
+    
     if (!constructionState || constructionState === 'completed') {
       // No animation needed for completed structures
       return;
@@ -1144,27 +1146,52 @@ export class StructureManager {
 
       // Register construction animation
       const animation = new AnimationState(startTime, durationMs, 'construction');
+      
+      // Calculate bounding box for clipping plane (use world coordinates)
+      // Update world matrix first to ensure accurate bounding box
+      meshGroup.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      box.setFromObject(meshGroup);
+      animation.boundingBox = box.clone();
+      
+      // Check bounding box validity
+      const totalHeight = box.max.y - box.min.y;
+      if (totalHeight <= 0 || !isFinite(totalHeight)) {
+        console.warn(`[StructureManager] Invalid bounding box for structure ${structure.id}, skipping animation:`, {
+          min: box.min,
+          max: box.max,
+          height: totalHeight
+        });
+        return;
+      }
+      
+      // Store original mesh position for scale-based animation
+      animation.originalPosition = meshGroup.position.y;
+      
+      // Calculate initial progress and set initial scale
+      const initialProgress = animation.getProgress(now);
+      const easedInitialProgress = 1 - Math.pow(1 - initialProgress, 3);
+      const initialScaleY = Math.max(0.001, easedInitialProgress);
+      
+      // Set initial scale and adjust position for bottom-up growth
+      // The bounding box is in local coordinates relative to the group center
+      // box.min.y is the bottom of the mesh in local space (negative value)
+      // To keep the bottom fixed, move group by: box.min.y * (1 - scaleY)
+      meshGroup.scale.y = initialScaleY;
+      const bottomY = box.min.y;
+      const positionAdjustment = bottomY * (1 - initialScaleY);
+      meshGroup.position.y = animation.originalPosition + positionAdjustment;
+      
       this.constructionAnimations.set(String(structure.id), animation);
-
-      // Start with building at scale 0 (hidden)
-      meshGroup.scale.y = 0.01;
-      meshGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(mat => {
-              if (mat.transparent !== undefined) {
-                mat.transparent = true;
-                mat.opacity = 0.0;
-              }
-            });
-          } else {
-            if (child.material.transparent !== undefined) {
-              child.material.transparent = true;
-              child.material.opacity = 0.0;
-            }
-          }
-        }
-      });
+      
+      // Debug logging (only log first few structures to avoid spam)
+      if (window.earthring?.debug && this.constructionAnimations.size <= 3) {
+        console.log(`[StructureManager] Registered animation ${structure.id}:`, {
+          progress: initialProgress.toFixed(3),
+          scaleY: initialScaleY.toFixed(3),
+          height: totalHeight.toFixed(2)
+        });
+      }
     } else if (constructionState === 'demolishing') {
       // Register demolition animation
       const animation = new AnimationState(startTime, durationMs, 'demolition');
@@ -2703,7 +2730,8 @@ export class StructureManager {
 
   /**
    * Apply construction animation to a structure mesh
-   * Uses vertical reveal: building grows from ground up
+   * Uses scale-based vertical reveal: building grows from bottom up
+   * Works with all material types including ShaderMaterials
    * @param {THREE.Group} mesh - Structure mesh group
    * @param {number} progress - Animation progress (0.0 to 1.0)
    * @param {string} structureId - Structure ID
@@ -2711,38 +2739,65 @@ export class StructureManager {
   applyConstructionAnimation(mesh, progress, structureId) {
     if (!mesh) return;
 
-    // Store original Y position on first frame
     const animation = this.constructionAnimations.get(structureId);
-    if (animation && animation.originalPosition === null) {
-      animation.originalPosition = mesh.position.y;
+    if (!animation || !animation.boundingBox) {
+      return;
     }
 
     // Use easing function for smooth animation (ease-out)
     const easedProgress = 1 - Math.pow(1 - progress, 3);
 
-    // Vertical reveal: scale Y from 0 to 1, keep X and Z at 1
-    // Adjust position so building grows from ground up
-    const currentScaleY = easedProgress;
-    const minScale = 0.01; // Avoid zero scale which can cause issues
-    mesh.scale.y = Math.max(minScale, currentScaleY);
-
-    // Adjust position to keep base on ground
-    if (animation && animation.originalPosition !== null) {
-      const originalY = animation.originalPosition;
-      // When scale is 0.5, we want the bottom to be at originalY
-      // The center of the scaled mesh should be at originalY + (originalHeight * scale / 2)
-      // But since we're scaling from the center, we need to adjust
-      // For a building growing from ground: position.y = originalY + (height * (1 - scale) / 2)
-      // Actually simpler: if mesh was at Y, and we scale to scaleY, 
-      // the bottom moves from Y - height/2 to Y - height*scaleY/2
-      // So we move position by height*(1-scaleY)/2 downward
-      // But we don't have height directly, so we use a heuristic
-      const heightEstimate = 20; // Default building height estimate
-      mesh.position.y = originalY + (heightEstimate * (1 - currentScaleY) * 0.5);
+    // Calculate the reveal height based on progress
+    // Progress 0 = only bottom visible, Progress 1 = entire building visible
+    const box = animation.boundingBox;
+    const totalHeight = box.max.y - box.min.y;
+    
+    // Scale Y from 0 to 1 to reveal building from bottom
+    const scaleY = easedProgress;
+    const minScale = 0.01; // Minimum visible scale (1% to ensure something is visible)
+    
+    // Store original position on first frame
+    if (animation.originalPosition === null) {
+      animation.originalPosition = mesh.position.y;
     }
+    
+    const originalY = animation.originalPosition;
+    
+    // Scale the mesh vertically
+    mesh.scale.y = Math.max(minScale, scaleY);
+    
+    // Adjust position so building grows from bottom up
+    // The bounding box is in local coordinates relative to the group center
+    // box.min.y is the bottom of the mesh in local space (negative value, e.g., -6.5)
+    // Original world bottom = originalY + box.min.y
+    // When scaled, local bottom = box.min.y * scaleY
+    // To keep world bottom fixed: newPositionY + (box.min.y * scaleY) = originalY + box.min.y
+    // Solving: newPositionY = originalY + box.min.y - (box.min.y * scaleY)
+    //         = originalY + box.min.y * (1 - scaleY)
+    // Since box.min.y is negative, as scaleY increases, the adjustment decreases (moves up)
+    const bottomY = box.min.y;
+    const positionAdjustment = bottomY * (1 - scaleY);
+    mesh.position.y = originalY + positionAdjustment;
 
-    // Fade in opacity during first 10% of animation
-    const opacityProgress = Math.min(1.0, progress / 0.1);
+    // Fade in opacity during first 10% of animation for smooth appearance
+    // But ensure minimum opacity so buildings are visible even at very small scale
+    const opacityProgress = Math.max(0.3, Math.min(1.0, progress / 0.1)); // Min 30% opacity
+    
+    // Debug logging (only for first structure, first few frames)
+    if (window.earthring?.debug && structureId.includes('_1_1') && progress < 0.05) {
+      console.log(`[StructureManager] Construction ${structureId}:`, {
+        progress: progress.toFixed(3),
+        scaleY: scaleY.toFixed(3),
+        actualScaleY: mesh.scale.y.toFixed(3),
+        originalY: originalY.toFixed(2),
+        newY: mesh.position.y.toFixed(2),
+        adjustment: positionAdjustment.toFixed(2),
+        bottomY: bottomY.toFixed(2),
+        height: totalHeight.toFixed(2),
+        opacity: opacityProgress.toFixed(3)
+      });
+    }
+    
     mesh.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         if (Array.isArray(child.material)) {
@@ -2840,8 +2895,11 @@ export class StructureManager {
       // Clean up completed animations
       if (animation.completed) {
         if (animation.type === 'construction') {
-          // Reset to full scale and opacity when complete
+          // Reset scale and position when complete
           mesh.scale.set(1, 1, 1);
+          if (animation.originalPosition !== null) {
+            mesh.position.y = animation.originalPosition;
+          }
           mesh.traverse((child) => {
             if (child instanceof THREE.Mesh && child.material) {
               if (Array.isArray(child.material)) {
