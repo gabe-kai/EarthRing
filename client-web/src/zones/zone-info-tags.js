@@ -62,6 +62,11 @@ export class ZoneInfoTags {
     this.toolbarExpanded = false;
     this.zonesVisible = false;
     
+    // PERFORMANCE: Cache zone bounds to avoid recalculating every frame
+    this.zoneBoundsCache = new Map(); // Map<zoneId, { center, bounds }>
+    this.lastZoneCount = 0; // Track when zones change
+    this.lastTagUpdateTime = 0; // Throttle tag updates
+    
     this.setupContainer();
     this.setupStyles();
     this.setupEventListeners();
@@ -240,7 +245,14 @@ export class ZoneInfoTags {
       // Wrap both camera and zone positions to [0, RING_CIRCUMFERENCE) first
       const cameraXWrapped = wrapArcLength(cameraPos.x);
       const zonesWithDistance = visibleZones.map(zone => {
-        const bounds = calculateZoneBounds(zone.geometry);
+        // PERFORMANCE: Use cached bounds if available
+        let bounds = this.zoneBoundsCache.get(zone.id);
+        if (!bounds) {
+          bounds = calculateZoneBounds(zone.geometry);
+          if (bounds) {
+            this.zoneBoundsCache.set(zone.id, bounds);
+          }
+        }
         if (!bounds) return { zone, distance: Infinity };
         
         // Wrap zone X to [0, RING_CIRCUMFERENCE)
@@ -323,7 +335,14 @@ export class ZoneInfoTags {
       if (!visibleZoneIds.has(zoneId)) {
         tag.remove();
         this.tags.delete(zoneId);
+        // Clean up cached bounds when zone is removed
+        this.zoneBoundsCache.delete(zoneId);
       }
+    }
+    
+    // Update zone count tracker
+    if (this.gameStateManager) {
+      this.lastZoneCount = this.gameStateManager.getAllZones().length;
     }
 
     // Create or update tags for visible zones
@@ -458,8 +477,13 @@ export class ZoneInfoTags {
       }
     }
     
-    // Update tags first (in case zones changed)
-    this.updateTags();
+    // PERFORMANCE: Only update tags if zones changed or enough time has passed (throttle)
+    const now = performance.now();
+    const zonesChanged = this.gameStateManager && this.gameStateManager.getAllZones().length !== this.lastZoneCount;
+    if (zonesChanged || (now - this.lastTagUpdateTime) >= 500) {
+      this.updateTags();
+      this.lastTagUpdateTime = now;
+    }
     
     if (!this.visible) return;
 
