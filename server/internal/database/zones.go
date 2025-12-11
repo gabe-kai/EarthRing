@@ -343,8 +343,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 		return nil, fmt.Errorf("failed to iterate all overlapping zones: %w", err)
 	}
 
-	log.Printf("[ZoneConflict] Found %d total overlapping zones (any type/owner)", len(allOverlappingZones))
-
 	// STEP 2: Separate overlapping zones into three categories:
 	// 1. Default zones (system zones) - they win, subtract their area from new zone
 	// 2. Merge candidates: same type (will be merged with new zone)
@@ -372,10 +370,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 		}
 	}
 
-	log.Printf("[ZoneConflict] Default zones (system zones, win): %d zones", len(defaultZoneIDs))
-	log.Printf("[ZoneConflict] Merge candidates (same type/owner): %d zones", len(mergeCandidateIDs))
-	log.Printf("[ZoneConflict] Conflict zones (different type/owner): %d zones", len(conflictZoneIDs))
-
 	// STEP 3: Subtract default zone geometries from new zone (default zones win)
 	// This ensures default zones always keep their area
 	// May result in multiple geometries if zone is bisected
@@ -388,7 +382,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			// Continue with original geometry if subtraction fails
 		} else if len(subtractedGeometries) > 0 {
 			modifiedGeometries = subtractedGeometries
-			log.Printf("[ZoneConflict] Successfully subtracted default zones from new zone geometry (resulted in %d components)", len(modifiedGeometries))
 		} else {
 			// Geometry was completely removed by default zones
 			log.Printf("[ZoneConflict] New zone geometry completely removed by default zones - rejecting zone creation")
@@ -417,7 +410,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 						log.Printf("[ZoneConflict] ERROR: Modified geometry %d has zero or negative area: %.2f", i+1, geomArea)
 						return nil, fmt.Errorf("zone geometry component %d has no area after subtracting default zones", i+1)
 					}
-					log.Printf("[ZoneConflict] Modified geometry %d validated: area=%.2f m², valid=%v", i+1, geomArea, isValid)
 				} else {
 					log.Printf("[ZoneConflict] WARNING: Could not validate geometry %d in database: %v", i+1, err)
 				}
@@ -500,7 +492,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 
 			// Skip system zones - they were already handled in STEP 3
 			if conflictZone.IsSystemZone {
-				log.Printf("[ZoneConflict] Skipping system zone %d - already handled", conflictZoneID)
 				continue
 			}
 
@@ -508,17 +499,14 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			// Protect other players' zones and unowned zones (NULL owner_id)
 			if input.OwnerID == nil {
 				// New zone has no owner - cannot claim space from any zones
-				log.Printf("[ZoneConflict] Skipping conflict zone %d - new zone has no owner (cannot claim space)", conflictZoneID)
 				continue
 			}
 			if conflictZone.OwnerID == nil {
 				// Conflict zone has no owner - protect it
-				log.Printf("[ZoneConflict] Skipping conflict zone %d - unowned zones are protected", conflictZoneID)
 				continue
 			}
 			if *conflictZone.OwnerID != *input.OwnerID {
 				// Conflict zone owned by different player - protect it
-				log.Printf("[ZoneConflict] Skipping conflict zone %d - owned by different player (cannot claim from other players)", conflictZoneID)
 				continue
 			}
 
@@ -528,23 +516,15 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			if input.ConflictResolutions != nil {
 				if perZoneRes, ok := input.ConflictResolutions[conflictZoneID]; ok {
 					resolution = perZoneRes
-					log.Printf("[ZoneConflict] Using per-zone resolution for zone %d: %s", conflictZoneID, resolution)
 				} else if input.ConflictResolution != nil {
 					resolution = *input.ConflictResolution
-					log.Printf("[ZoneConflict] Using bulk resolution for zone %d: %s (no per-zone resolution found)", conflictZoneID, resolution)
-				} else {
-					log.Printf("[ZoneConflict] Using default resolution for zone %d: %s (no resolution provided)", conflictZoneID, resolution)
 				}
 			} else if input.ConflictResolution != nil {
 				resolution = *input.ConflictResolution
-				log.Printf("[ZoneConflict] Using bulk resolution for zone %d: %s", conflictZoneID, resolution)
-			} else {
-				log.Printf("[ZoneConflict] Using default resolution for zone %d: %s", conflictZoneID, resolution)
 			}
 
 			if resolution == "existing_wins" {
 				// Existing zone wins - subtract existing zone from new zone geometries
-				log.Printf("[ZoneConflict] Existing zone %d wins - subtracting existing zone from new zone", conflictZoneID)
 				// Subtract existing zone from each component of the new zone
 				newModifiedGeometries := []json.RawMessage{}
 				for i, geom := range modifiedGeometries {
@@ -723,20 +703,15 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 				overlappingIDs = append(overlappingIDs, newOverlappingIDs...)
 			}
 
-			if len(overlappingIDs) > len(mergeCandidateIDs) {
-				log.Printf("[ZoneMerge] Expanded overlap set: initial candidates=%d, full connected set=%d",
-					len(mergeCandidateIDs), len(overlappingIDs))
-			}
+			// Expanded overlap set found additional zones
 		} else {
 			// No merge candidates for this component - new zone will be created without merging
 			overlappingIDs = []int64{}
 			log.Printf("[ZoneMerge] No merge candidates for component %d - new zone will be created without merging", geomIdx+1)
 		}
 
-		if len(overlappingIDs) > 0 {
-			log.Printf("[ZoneMerge] Found %d overlapping zones to merge: %v", len(overlappingIDs), overlappingIDs)
-		} else {
-			log.Printf("[ZoneMerge] No overlapping zones found - will create new zone")
+		if len(overlappingIDs) == 0 {
+			// No overlapping zones found - will create new zone
 		}
 
 		// If there are overlapping zones, merge them
@@ -763,21 +738,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			oldestZoneQueryFormatted := fmt.Sprintf(oldestZoneQuery, strings.Join(deletePlaceholders, ","))
 			if err := s.db.QueryRow(oldestZoneQueryFormatted, deleteArgs...).Scan(&oldestZoneID, &oldestZoneCreatedAt); err != nil {
 				return nil, fmt.Errorf("failed to find oldest overlapping zone: %w", err)
-			}
-
-			log.Printf("[ZoneMerge] Oldest zone ID to keep: %d (created: %v)", oldestZoneID, oldestZoneCreatedAt)
-			log.Printf("[ZoneMerge] Will merge ALL %d overlapping zones together (including oldest zone %d)", len(overlappingIDs), oldestZoneID)
-			if len(overlappingIDs) > 1 {
-				log.Printf("[ZoneMerge] NOTE: Merging %d zones into one. Zones %v will be deleted, zone %d will contain the merged geometry.",
-					len(overlappingIDs), func() []int64 {
-						toDelete := make([]int64, 0, len(overlappingIDs)-1)
-						for _, id := range overlappingIDs {
-							if id != oldestZoneID {
-								toDelete = append(toDelete, id)
-							}
-						}
-						return toDelete
-					}(), oldestZoneID)
 			}
 
 			// Build placeholders for union query
@@ -1013,7 +973,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 					if len(preview) > 200 {
 						preview = preview[:200] + "..."
 					}
-					log.Printf("[ZoneMerge] Existing zone %d geometry (first 200 chars): %s", id, preview)
 				}
 				_ = i // suppress unused warning
 			}
@@ -1128,12 +1087,7 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 					ST_XMax(merged_geom)
 				FROM unioned
 			`, strings.Join(unionPlaceholders, ","))
-				if debugErr := tx.QueryRow(debugQuery, unionArgs...).Scan(&debugGeomType, &debugIsValid, &debugMinX, &debugMaxX); debugErr == nil {
-					log.Printf("[ZoneMerge] Debug: union result - type: %v, valid: %v, X range: [%.2f, %.2f]",
-						debugGeomType.String, debugIsValid.Bool, debugMinX.Float64, debugMaxX.Float64)
-				} else {
-					log.Printf("[ZoneMerge] Debug query failed: %v", debugErr)
-				}
+				_ = tx.QueryRow(debugQuery, unionArgs...).Scan(&debugGeomType, &debugIsValid, &debugMinX, &debugMaxX)
 				return nil, fmt.Errorf("failed to merge geometries: %w", err)
 			}
 			if !mergedGeometryJSON.Valid {
@@ -1150,7 +1104,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 				// Log the error but don't fail - this is just for debugging
 				log.Printf("[ZoneMerge] Warning: Could not check merged geometry type: %v", typeCheckErr)
 			} else if mergedGeomType.Valid {
-				log.Printf("[ZoneMerge] Merged geometry type: %s, area: %.2f", mergedGeomType.String, mergedAreaCheck)
 				if mergedGeomType.String != "ST_Polygon" {
 					log.Printf("[ZoneMerge] WARNING: Merged geometry is %s, expected ST_Polygon - union may have failed", mergedGeomType.String)
 					if mergedGeomType.String == "ST_MultiPolygon" {
@@ -1164,16 +1117,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			} else {
 				log.Printf("[ZoneMerge] Warning: Merged geometry type check returned NULL")
 			}
-
-			log.Printf("[ZoneMerge] Successfully merged %d zones into new geometry (result length: %d, type: %s)",
-				len(overlappingIDs)+1, len(mergedGeometryJSON.String), func() string {
-					if mergedGeomType.Valid {
-						return mergedGeomType.String
-					}
-					return "unknown"
-				}())
-			log.Printf("[ZoneMerge] Merged result includes: new zone + existing zones %v (all %d zones)",
-				overlappingIDs, len(overlappingIDs)+1)
 
 			// Check if any geometry wraps around (spans > half ring) - this causes union issues
 			const RING_CIRCUMFERENCE = 264000000.0
@@ -1198,7 +1141,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 			if len(mergedPreview) > 300 {
 				mergedPreview = mergedPreview[:300] + "..."
 			}
-			log.Printf("[ZoneMerge] Merged geometry (first 300 chars): %s", mergedPreview)
 
 			// Log area comparison
 			var newArea, mergedArea float64
@@ -1231,8 +1173,6 @@ func (s *ZoneStorage) CreateZoneWithComponents(input *ZoneCreateInput) (*ZoneCre
 					for _, area := range existingAreas {
 						sumExisting += area
 					}
-					log.Printf("[ZoneMerge] Area comparison: new=%.2f, existing sum=%.2f, merged=%.2f (merged should be >= max of new/existing, less than sum if they overlap)",
-						newArea, sumExisting, mergedArea)
 				}
 			}
 

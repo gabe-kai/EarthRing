@@ -1,0 +1,68 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "elements": {
+      "loading_dock": {
+        "category": "industrial",
+        "placement": "front",
+        "size": [4.0, 3.0, 4.0]
+      },
+      "vent_stack": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [1.0, 1.0, 2.0]
+      },
+      "utility_band": {
+        "category": "industrial",
+        "placement": "facade",
+        "size": [4.0, 0.2, 0.3]
+      },
+      "roof_hvac": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [2.0, 2.0, 1.0]
+      },
+      "piping": {
+        "category": "industrial",
+        "placement": "facade",
+        "size": [0.25, 0.25, 6.0]
+      },
+      "skylight": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [1.8, 1.8, 0.25]
+      },
+      "solar_panel": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [3.0, 1.6, 0.15]
+      },
+      "green_roof": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [8.0, 8.0, 0.3]
+      },
+      "roof_access": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [3.0, 2.5, 2.4]
+      },
+      "roof_railing": {
+        "category": "industrial",
+        "placement": "roof",
+        "size": [8.0, 8.0, 1.1]
+      },
+      "cooling_tower": {
+        "category": "industrial",
+        "placement": "exterior",
+        "size": [8.0, 8.0, 12.0]
+      },
+      "reactor_turbine_hall": {
+        "category": "industrial",
+        "placement": "exterior",
+        "size": [12.0, 6.0, 8.0]
+      }
+    }
+  },
+  "hub_overrides": {}
+}

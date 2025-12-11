@@ -7,6 +7,8 @@ let infoBox = null;
 let isResizeLocked = false;
 let userHeight = null; // User's preferred height (null = auto)
 let isResizing = false;
+let lastUpdateSource = 'init';
+let lastUpdateTime = 0;
 
 /**
  * Create and show the info box
@@ -362,12 +364,22 @@ export function updateInfoBox(itemInfo, options = {}) {
   if (!infoBox) {
     createInfoBox();
   }
+  // Make sure the box is visible
+  infoBox.style.display = 'flex';
 
-  const { title = 'Info', tooltip = '', actions = {}, editableFields = {} } = options;
+  const {
+    title = 'Info',
+    tooltip = '',
+    actions = {},
+    editableFields = {},
+    source = 'unknown',
+  } = options;
   const content = document.getElementById('info-box-content');
   const titleElement = document.getElementById('info-box-title');
   
   if (!content || !titleElement) return;
+
+  const now = Date.now();
 
   // Update title (always update, even if itemInfo is empty)
   titleElement.textContent = title;
@@ -378,12 +390,18 @@ export function updateInfoBox(itemInfo, options = {}) {
   }
 
   if (!itemInfo || Object.keys(itemInfo).length === 0) {
+    // If the last update was a structure very recently, avoid clearing immediately
+    if (lastUpdateSource === 'structure' && now - lastUpdateTime < 1000) {
+      return;
+    }
     content.innerHTML = '<div class="info-box-empty">No item selected</div>';
     // Auto-resize if not locked
     if (!isResizeLocked && userHeight === null) {
       infoBox.style.height = 'auto';
       infoBox.style.maxHeight = '300px';
     }
+    lastUpdateSource = source;
+    lastUpdateTime = now;
     return;
   }
 
@@ -418,6 +436,9 @@ export function updateInfoBox(itemInfo, options = {}) {
 
   content.innerHTML = html;
 
+  lastUpdateSource = source;
+  lastUpdateTime = now;
+
   // Auto-resize if not locked and no user preference
   if (!isResizeLocked && userHeight === null) {
     // Reset to auto height, then measure content
@@ -431,7 +452,7 @@ export function updateInfoBox(itemInfo, options = {}) {
         const resizeHandleHeight = infoBox.querySelector('#info-box-resize-handle')?.offsetHeight || 0;
         const padding = 30; // Top and bottom padding
         const totalHeight = contentHeight + headerHeight + resizeHandleHeight + padding;
-        const maxAllowed = window.innerHeight - 100; // Don't go below toolbar
+        const maxAllowed = Math.min(300, window.innerHeight - 100); // Cap to 300px unless the viewport is smaller
         const finalHeight = Math.min(Math.max(100, totalHeight), maxAllowed);
         infoBox.style.height = `${finalHeight}px`;
         infoBox.style.maxHeight = `${finalHeight}px`;

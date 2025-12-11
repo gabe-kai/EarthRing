@@ -146,13 +146,17 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user from database (role defaults to "player" since column doesn't exist yet)
+	// Get user from database
 	var user User
-	user.Role = "player" // Default role until role column is added
 	err := h.db.QueryRow(
-		"SELECT id, username, email, password_hash FROM players WHERE username = $1",
+		"SELECT id, username, email, password_hash, COALESCE(role, 'player') as role FROM players WHERE username = $1",
 		req.Username,
-	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash)
+	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role)
+	
+	// Ensure role is set (shouldn't be needed with COALESCE, but just in case)
+	if user.Role == "" {
+		user.Role = "player"
+	}
 
 	if err == sql.ErrNoRows {
 		h.sendError(w, http.StatusUnauthorized, "InvalidCredentials", "Invalid username or password")

@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "Industrial": {
+      "foundation": "#3b3f46",
+      "walls": "#4f5964",
+      "roofs": "#2f343a",
+      "trim": "#8a929d",
+      "accents": "#d1d5db"
+    }
+  },
+  "hub_overrides": {}
+}

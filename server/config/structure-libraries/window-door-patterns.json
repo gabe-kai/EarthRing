@@ -1,0 +1,26 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "window_patterns": {
+      "industrial_sparse": {
+        "density": 0.25,
+        "width": 2.5,
+        "height": 2.0,
+        "sill_height": 1.5
+      }
+    },
+    "door_patterns": {
+      "industrial_main": {
+        "width": 1.2,
+        "height": 2.2,
+        "type": "main"
+      },
+      "truck_bay": {
+        "width": 3.0,
+        "height": 3.5,
+        "type": "truck_bay"
+      }
+    }
+  },
+  "hub_overrides": {}
+}

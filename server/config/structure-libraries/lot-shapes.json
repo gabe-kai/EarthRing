@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "lot_shapes": {
+      "centered": {
+        "offset": [0.0, 0.0],
+        "rotation": 0.0,
+        "description": "Centered on zone centroid"
+      },
+      "front_offset": {
+        "offset": [0.0, -5.0],
+        "rotation": 0.0,
+        "description": "Shifted toward restricted edge"
+      }
+    }
+  },
+  "hub_overrides": {}
+}

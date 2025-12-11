@@ -34,10 +34,11 @@ func NewProceduralClient(cfg *config.Config) *ProceduralClient {
 
 // GenerateChunkRequest represents a request to generate a chunk
 type GenerateChunkRequest struct {
-	Floor      int    `json:"floor"`
-	ChunkIndex int    `json:"chunk_index"`
-	LODLevel   string `json:"lod_level"`
-	WorldSeed  *int   `json:"world_seed,omitempty"`
+	Floor               int    `json:"floor"`
+	ChunkIndex          int    `json:"chunk_index"`
+	LODLevel            string `json:"lod_level"`
+	WorldSeed           *int   `json:"world_seed,omitempty"`
+	RegenerationCounter *int   `json:"regeneration_counter,omitempty"`
 }
 
 // ChunkGeometry represents chunk geometry data (Phase 2: ring floor geometry)
@@ -122,14 +123,15 @@ func (c *ProceduralClient) HealthCheck() error {
 }
 
 // GenerateChunk requests chunk generation from the procedural service
-func (c *ProceduralClient) GenerateChunk(floor, chunkIndex int, lodLevel string, worldSeed *int) (*GenerateChunkResponse, error) {
+func (c *ProceduralClient) GenerateChunk(floor, chunkIndex int, lodLevel string, worldSeed *int, regenerationCounter *int) (*GenerateChunkResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/chunks/generate", c.baseURL)
 
 	request := GenerateChunkRequest{
-		Floor:      floor,
-		ChunkIndex: chunkIndex,
-		LODLevel:   lodLevel,
-		WorldSeed:  worldSeed,
+		Floor:               floor,
+		ChunkIndex:          chunkIndex,
+		LODLevel:            lodLevel,
+		WorldSeed:           worldSeed,
+		RegenerationCounter: regenerationCounter,
 	}
 
 	body, err := json.Marshal(request)

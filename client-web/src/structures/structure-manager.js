@@ -1,11 +1,35 @@
-/**
- * Structure Manager
- * Handles structure rendering, placement, and management in Three.js
- */
-
 import * as THREE from 'three';
 import { toThreeJS, wrapRingPosition, normalizeRelativeToCamera, DEFAULT_FLOOR_HEIGHT } from '../utils/coordinates-new.js';
 import { createMeshAtEarthRingPosition } from '../utils/rendering.js';
+import { updateInfoBox, createInfoBox } from '../ui/info-box.js';
+
+/**
+ * AnimationState tracks construction/demolition animation state for a structure
+ */
+class AnimationState {
+  constructor(startTime, durationMs, type = 'construction') {
+    this.startTime = startTime; // timestamp in milliseconds
+    this.duration = durationMs; // duration in milliseconds
+    this.type = type; // 'construction' | 'demolition'
+    this.completed = false;
+    this.originalPosition = null; // Store original Y position for scale-based reveal
+    this.boundingBox = null; // Store bounding box for height calculations
+    this.cachedMaterials = null; // Cache materials for this structure to avoid traversing every frame
+    this.lastOpacity = null; // Track last opacity value to avoid unnecessary updates
+  }
+
+  /**
+   * Get animation progress (0.0 to 1.0)
+   * @param {number} now - Current timestamp in milliseconds
+   * @returns {number} Progress from 0.0 to 1.0
+   */
+  getProgress(now) {
+    const elapsed = now - this.startTime;
+    const progress = Math.min(1.0, Math.max(0.0, elapsed / this.duration));
+    this.completed = progress >= 1.0;
+    return progress;
+  }
+}
 
 /**
  * StructureManager coordinates structure data and renders structures as world-positioned meshes.
@@ -16,6 +40,8 @@ export class StructureManager {
     this.cameraController = cameraController;
     this.sceneManager = sceneManager;
     this.scene = sceneManager.getScene();
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
 
     this.structuresVisible = true;
     this.structureMeshes = new Map(); // Map<structureID, THREE.Group>
@@ -39,7 +65,12 @@ export class StructureManager {
     this.materialCache = new Map(); // Map<materialKey, Material>
     this.geometryCache = new Map(); // Map<geometryKey, Geometry>
     
+    // Construction/demolition animation tracking
+    // Map<structureID, AnimationState>
+    this.constructionAnimations = new Map();
+    
     this.setupListeners();
+    this.setupStructureClickHandler();
   }
 
   /**
@@ -102,6 +133,8 @@ export class StructureManager {
       
       // Extract attributes
       const posAttr = geom.attributes.position;
+      if (!posAttr) continue;
+      
       const normalAttr = geom.attributes.normal;
       const uvAttr = geom.attributes.uv;
       const indexAttr = geom.index;
@@ -109,8 +142,12 @@ export class StructureManager {
       // Add vertices with offset indices
       for (let i = 0; i < posAttr.count; i++) {
         positions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-        normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
-        uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+        if (normalAttr) {
+          normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
+        }
+        if (uvAttr) {
+          uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+        }
       }
       
       // Add indices with offset
@@ -118,16 +155,29 @@ export class StructureManager {
         for (let i = 0; i < indexAttr.count; i++) {
           indices.push(indexAttr.getX(i) + indexOffset);
         }
+      } else {
+        // No indices - create them sequentially
+        for (let i = 0; i < posAttr.count; i++) {
+          indices.push(indexOffset + i);
+        }
       }
       
       indexOffset += posAttr.count;
     }
     
     // Set merged attributes
-    mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    mergedGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    mergedGeometry.setIndex(indices);
+    if (positions.length > 0) {
+      mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    }
+    if (normals.length > 0) {
+      mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    }
+    if (uvs.length > 0) {
+      mergedGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    }
+    if (indices.length > 0) {
+      mergedGeometry.setIndex(indices);
+    }
     
     return mergedGeometry;
   }
@@ -145,11 +195,898 @@ export class StructureManager {
     return this.materialCache.get(key);
   }
 
+  /**
+   * Get or create cached geometry
+   * @param {string} key - Geometry cache key
+   * @param {Function} createFn - Function to create geometry if not cached
+   * @returns {THREE.BufferGeometry} Cached or new geometry
+   */
+  getCachedGeometry(key, createFn) {
+    if (!this.geometryCache.has(key)) {
+      this.geometryCache.set(key, createFn());
+    }
+    return this.geometryCache.get(key);
+  }
+
   setupListeners() {
     // Listen for active floor changes
     this.gameState.on('activeFloorChanged', () => {
       this.updateStructureVisibility();
     });
+    
+    // Listen for structure updates to handle construction state changes
+    this.gameState.on('structureUpdated', ({ structure }) => {
+      if (structure && structure.id) {
+        const structureIDStr = String(structure.id);
+        const existingMesh = this.structureMeshes.get(structureIDStr);
+        
+        if (existingMesh) {
+          // Re-register animation if construction state changed
+          this.registerConstructionAnimation(structure, existingMesh);
+        }
+      }
+    });
+    
+    // Listen for structure additions to register animations
+    this.gameState.on('structureAdded', ({ structure }) => {
+      if (structure && structure.id) {
+        const structureIDStr = String(structure.id);
+        const existingMesh = this.structureMeshes.get(structureIDStr);
+        
+        if (existingMesh) {
+          // Register animation if structure was just added
+          this.registerConstructionAnimation(structure, existingMesh);
+        }
+      }
+    });
+  }
+
+  setupStructureClickHandler() {
+    const tryAttach = () => {
+      const renderer = this.sceneManager?.getRenderer?.();
+      if (!renderer || !renderer.domElement) {
+        // Renderer not ready yet; retry shortly
+        setTimeout(tryAttach, 250);
+        return;
+      }
+      const canvas = renderer.domElement;
+      // Avoid double-binding
+      if (canvas._structureClickHandlerAttached) return;
+      canvas._structureClickHandlerAttached = true;
+      canvas.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return; // left click only
+        this.handleStructureClick(event, renderer);
+      });
+    };
+    tryAttach();
+  }
+
+  handleStructureClick(event, renderer) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.sceneManager.getCamera());
+
+    const meshes = Array.from(this.structureMeshes.values());
+    const intersects = this.raycaster.intersectObjects(meshes, true);
+    if (!intersects.length) return;
+
+    let obj = intersects[0].object;
+    while (obj && !obj.userData?.structureId) {
+      obj = obj.parent;
+    }
+    if (!obj || !obj.userData?.structureId) return;
+
+    const structureId = String(obj.userData.structureId);
+    let structure = this.gameState.getStructure(structureId);
+    if (!structure) {
+      structure = obj.userData.structure;
+      if (!structure) return;
+    }
+
+    this.showStructureInfo(structure);
+  }
+
+  setStructureIdRecursive(obj, id, structure) {
+    if (!obj || typeof obj !== 'object') return;
+    obj.userData = obj.userData || {};
+    // Force-set so any existing userData.structureId is replaced by the canonical one
+    obj.userData.structureId = id;
+    if (structure) {
+      obj.userData.structure = structure;
+    }
+    if (obj.children && obj.children.length) {
+      obj.children.forEach(child => this.setStructureIdRecursive(child, id, structure));
+    }
+  }
+
+  buildStructureInfo(structure) {
+    const doors = structure.doors || structure.model_data?.doors || {};
+    const garageDoors = structure.garage_doors || structure.model_data?.garage_doors || [];
+    const windows = structure.windows || structure.model_data?.windows || [];
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
+    const dims = structure.dimensions || {};
+    return {
+      id: structure.id,
+      type: structure.structure_type || structure.type || 'unknown',
+      building_class: structure.building_class || structure.model_data?.class || 'n/a',
+      category: structure.category || 'n/a',
+      subcategory: structure.subcategory || 'n/a',
+      floor: structure.floor,
+      position: `x:${structure.position?.x?.toFixed?.(1) ?? '?'}, y:${structure.position?.y?.toFixed?.(1) ?? '?'}`,
+      dimensions: `w:${dims.width ?? '?'}, d:${dims.depth ?? '?'}, h:${dims.height ?? '?'}`,
+      doors: JSON.stringify(doors),
+      garage_doors: JSON.stringify(garageDoors),
+      windows: JSON.stringify(windows),
+      decorations: JSON.stringify(decorations),
+    };
+  }
+
+  showStructureInfo(structure) {
+    try {
+      const category = structure.category || structure.model_data?.category || 'n/a';
+      const type = structure.structure_type || structure.type || 'unknown';
+      const buildingClass = structure.building_class || structure.model_data?.class || 'n/a';
+      const subcategory = structure.subcategory || structure.model_data?.subcategory || 'n/a';
+      const structureId = String(structure.id || 'unknown');
+      const zoneId = structure.zone_id ? String(structure.zone_id) : 'N/A';
+      const floor = structure.floor ?? 0;
+      const pos = structure.position || {};
+      const dims = structure.dimensions || {};
+      const decorations = structure.decorations || structure.model_data?.decorations || [];
+      
+      // Parse properties if it's a string, otherwise use as-is
+      let properties = structure.properties || {};
+      if (typeof properties === 'string') {
+        try {
+          properties = JSON.parse(properties);
+        } catch (e) {
+          console.error('[StructureManager] Failed to parse properties as JSON:', e);
+          properties = {};
+        }
+      }
+      const name = (typeof properties === 'object' && properties && properties.name) ? String(properties.name) : '';
+      
+      // Build title: "{Type} - {Category}" with first letters capitalized
+      const capitalizeFirst = (str) => {
+        if (!str || str === 'n/a') return str;
+        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+      };
+      const title = `${capitalizeFirst(type)} - ${capitalizeFirst(category)}`;
+      
+      // Build HTML content
+      let html = '';
+      
+      // Name field (editable)
+      html += `
+        <div class="info-item info-item-editable">
+          <div class="info-item-label">Name:</div>
+          <div class="info-item-value-editable" contenteditable="true" data-field="name" data-structure-id="${structureId}">${this.escapeHtml(name || '(unnamed)')}</div>
+        </div>
+      `;
+      
+      // Subcategory - building class
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Class:</div>
+          <div class="info-item-value">${this.escapeHtml(subcategory)} - ${this.escapeHtml(buildingClass)}</div>
+        </div>
+      `;
+      
+      // Structure & Zone ID
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Structure & Zone ID:</div>
+          <div class="info-item-value">${this.escapeHtml(structureId)} in ${this.escapeHtml(zoneId)}</div>
+        </div>
+      `;
+      
+      // Floor
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Floor:</div>
+          <div class="info-item-value">${floor}</div>
+        </div>
+      `;
+      
+      // Position
+      const posX = (pos.x != null) ? pos.x.toFixed(1) : '?';
+      const posY = (pos.y != null) ? pos.y.toFixed(1) : '?';
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Position:</div>
+          <div class="info-item-value">x: ${posX}, y: ${posY}</div>
+        </div>
+      `;
+      
+      // Dimensions
+      const dimW = (dims.width != null) ? dims.width.toFixed(1) : '?';
+      const dimD = (dims.depth != null) ? dims.depth.toFixed(1) : '?';
+      const dimH = (dims.height != null) ? dims.height.toFixed(1) : '?';
+      html += `
+        <div class="info-item">
+          <div class="info-item-label">Dimensions:</div>
+          <div class="info-item-value">w: ${dimW}, d: ${dimD}, h: ${dimH}</div>
+        </div>
+      `;
+      
+      // Decorations (collapsible sections) - start minimized
+      if (decorations && Array.isArray(decorations) && decorations.length > 0) {
+        html += `
+          <div class="info-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0, 255, 0, 0.3);">
+            <div class="info-item-label decoration-toggle" style="cursor: pointer; user-select: none;" data-target="decorations-container-${structureId}">
+              Decorations: ▼
+            </div>
+          </div>
+          <div class="decorations-container-${structureId}" style="display: none; margin-left: 10px;">
+        `;
+        
+        decorations.forEach((decoration, index) => {
+          const decType = this.escapeHtml(String(decoration.type || decoration.decoration_type || 'unknown'));
+          const decId = `decoration-${structureId}-${index}`;
+          const decJson = JSON.stringify(decoration, null, 2);
+          html += `
+            <div class="info-item" style="margin-left: 10px; margin-top: 5px;">
+              <div class="info-item-label decoration-toggle" style="cursor: pointer; user-select: none;" data-target="${decId}">
+                ${decType}: ▼
+              </div>
+              <div id="${decId}" style="display: none; margin-left: 10px;">
+                <pre style="font-size: 10px; color: #88ff88; margin: 5px 0;">${this.escapeHtml(decJson)}</pre>
+              </div>
+            </div>
+          `;
+        });
+        
+        html += `</div>`;
+      } else {
+        html += `
+          <div class="info-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0, 255, 0, 0.3);">
+            <div class="info-item-label">Decorations:</div>
+            <div class="info-item-value">None</div>
+          </div>
+        `;
+      }
+      
+      console.log('[StructureManager] Rendering structure info:', { title, htmlLength: html.length, structureId });
+      this.renderStructureInfoContent(title, html, structureId);
+    } catch (error) {
+      console.error('[StructureManager] Error showing structure info:', error, structure);
+      // Fallback to simple display using the old method
+      const fallbackInfo = {
+        id: structure.id || 'unknown',
+        type: structure.structure_type || structure.type || 'unknown',
+        error: 'Failed to load full structure info'
+      };
+      updateInfoBox(fallbackInfo, { title: 'Structure', source: 'structure' });
+    }
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  renderStructureInfoContent(title, html, structureId) {
+    // Ensure info box exists (don't use updateInfoBox as it will overwrite our HTML)
+    if (!document.getElementById('info-box')) {
+      createInfoBox();
+    }
+    
+    const infoBox = document.getElementById('info-box');
+    const titleElement = document.getElementById('info-box-title');
+    const content = document.getElementById('info-box-content');
+    
+    if (!infoBox || !titleElement || !content) {
+      console.error('[StructureManager] Info box elements not found', { 
+        infoBox: !!infoBox,
+        titleElement: !!titleElement, 
+        content: !!content
+      });
+      return;
+    }
+    
+    // Make sure box is visible
+    infoBox.style.display = 'flex';
+    
+    // Set our custom HTML content - use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      if (content && titleElement) {
+        // Update title AFTER setting content to ensure it sticks
+        titleElement.textContent = title;
+        titleElement.removeAttribute('data-tooltip');
+        
+        content.innerHTML = html;
+        console.log('[StructureManager] Custom content set, HTML length:', content.innerHTML.length);
+        console.log('[StructureManager] Content children count:', content.children.length);
+        
+        // Set up handlers after content is set
+        this.setupStructureInfoHandlers(content, structureId, infoBox, titleElement);
+        
+        // Verify title is still correct after a brief moment
+        setTimeout(() => {
+          if (titleElement && titleElement.textContent !== title) {
+            titleElement.textContent = title;
+          }
+        }, 100);
+      }
+    });
+  }
+
+  setupStructureInfoHandlers(content, structureId, infoBox, titleElement) {
+    if (!content) return;
+    
+    // Set up name field save handler
+    const nameField = content.querySelector('[data-field="name"]');
+    if (nameField) {
+      const saveHandler = () => {
+        const newName = nameField.textContent.trim();
+        this.saveStructureName(structureId, newName);
+      };
+      nameField.addEventListener('blur', saveHandler);
+      nameField.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          nameField.blur();
+        }
+      });
+    }
+    
+    // Set up decoration toggle handlers using event delegation
+    const toggleHandler = (e) => {
+      const toggle = e.target.closest('.decoration-toggle');
+      if (toggle) {
+        const targetId = toggle.dataset.target;
+        if (targetId) {
+          const container = content.querySelector(`#${targetId}`) || content.querySelector(`.${targetId}`);
+          if (container) {
+            const isHidden = container.style.display === 'none';
+            container.style.display = isHidden ? 'block' : 'none';
+            toggle.textContent = toggle.textContent.replace(/[▼▲]/, isHidden ? '▼' : '▲');
+          }
+        }
+      }
+    };
+    
+    // Remove old listener if it exists, then add new one
+    if (this._decorationToggleHandler) {
+      content.removeEventListener('click', this._decorationToggleHandler);
+    }
+    this._decorationToggleHandler = toggleHandler;
+    content.addEventListener('click', toggleHandler);
+    
+    // Auto-resize
+    if (infoBox && titleElement) {
+      setTimeout(() => {
+        if (infoBox && !infoBox.dataset.resizeLocked) {
+          const contentHeight = content.scrollHeight || 0;
+          const headerHeight = titleElement.offsetHeight || 0;
+          const resizeHandleHeight = infoBox.querySelector('#info-box-resize-handle')?.offsetHeight || 0;
+          const padding = 30;
+          const totalHeight = contentHeight + headerHeight + resizeHandleHeight + padding;
+          const maxAllowed = Math.min(300, window.innerHeight - 100);
+          const finalHeight = Math.min(Math.max(100, totalHeight), maxAllowed);
+          infoBox.style.height = `${finalHeight}px`;
+          infoBox.style.maxHeight = `${finalHeight}px`;
+        }
+      }, 10);
+    }
+  }
+
+  async saveStructureName(structureId, newName) {
+    // Get current structure to preserve other properties
+    const structure = this.gameState.getStructure(String(structureId));
+    if (!structure) return;
+    
+    // Update properties with new name
+    const properties = structure.properties || {};
+    const updatedProperties = { ...properties, name: newName };
+    
+    // Import structure service and update
+    const { updateStructure } = await import('../api/structure-service.js');
+    try {
+      // Send properties as JSON object (server expects json.RawMessage which accepts any JSON)
+      await updateStructure(structureId, { properties: updatedProperties });
+      
+      // Update local structure in game state immediately
+      if (structure) {
+        structure.properties = updatedProperties;
+      }
+    } catch (error) {
+      console.error('[StructureManager] Failed to save structure name:', error);
+      // Revert the display
+      const nameField = document.querySelector(`[data-field="name"][data-structure-id="${structureId}"]`);
+      if (nameField) {
+        nameField.textContent = (properties.name || '(unnamed)');
+      }
+    }
+  }
+
+  /**
+   * Add simple decoration meshes to the structure group.
+   * Decorations are data-only hints: we render low-poly placeholders.
+   */
+  addDecorations(structureGroup, structure, dimensions) {
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
+    if (!decorations || decorations.length === 0) return;
+
+    const { width, depth, height } = dimensions;
+    
+    // PERFORMANCE: Collect all decorations by material type for merging
+    const decorationsByMaterial = new Map(); // Map<materialKey, Array<{geometry, position, rotation, scale}>>
+    const dockInstances = [];
+    const hvacInstances = [];
+    const solarInstances = [];
+    const solarBaseInstances = [];
+
+    decorations.forEach((dec) => {
+      const type = dec.type || 'decoration';
+      if (type === 'utility_band') return; // shader-driven
+
+      const pos = dec.position || [0, 0, 0]; // [x, depthAxis, vertical]
+      const size = dec.size || [1, 1, 1];    // [w, d, h]
+
+      // Map generator coords to Three.js (x -> x, y(depth) -> z, z(vertical) -> y)
+      let px = pos[0] || 0;
+      let pz = pos[1] || 0;
+      let py = pos[2] || 0;
+      const sx = size[0] || 1;
+      const sz = size[1] || 1;
+      const sy = size[2] || 1;
+
+      if (type === 'vent_stack') {
+        const radius = Math.min(sx, sz) * 0.35;
+        const stackHeight = sy;
+        py = (height || 0) + stackHeight * 0.5 + 0.05;
+        // PERFORMANCE: Collect for merging instead of creating individual meshes
+        const materialKey = 'vent_stack';
+        if (!decorationsByMaterial.has(materialKey)) {
+          decorationsByMaterial.set(materialKey, []);
+        }
+        // Use cached geometry with standard size, scale it in the merge
+        const baseRadius = 0.35;
+        const baseHeight = 1.0;
+        const scaleX = radius / baseRadius;
+        const scaleZ = radius * 0.9 / baseRadius;
+        const scaleY = stackHeight / baseHeight;
+        decorationsByMaterial.get(materialKey).push({
+          geometry: this.getCachedGeometry('cylinder_10seg', () => 
+            new THREE.CylinderGeometry(baseRadius, baseRadius * 0.9, baseHeight, 10)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [scaleX, scaleY, scaleZ]
+        });
+      } else if (type === 'skylight') {
+        // Rendered in roof shader; skip mesh
+        return;
+      } else if (type === 'solar_panel') {
+        const baseH = 0.3; // taller pedestal
+        const panelOffset = baseH + sy * 0.5 + 0.01; // lift by base plus half panel thickness
+        solarInstances.push({ px, py: py + panelOffset, pz, sx, sy, sz });
+        // Simple base under each panel
+        solarBaseInstances.push({
+          px,
+          py: py + baseH * 0.5, // base sits on roof
+          pz,
+          sx: sx * 0.6,
+          sy: baseH,
+          sz: sz * 0.6,
+        });
+      } else if (type === 'green_roof') {
+        // Rendered in roof shader; skip mesh
+        return;
+      } else if (type === 'roof_access') {
+        // PERFORMANCE: Collect for merging - roof access hut
+        const hutMaterialKey = 'roof_access_hut';
+        if (!decorationsByMaterial.has(hutMaterialKey)) {
+          decorationsByMaterial.set(hutMaterialKey, []);
+        }
+        decorationsByMaterial.get(hutMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, sy, sz]
+        });
+        
+        // Door (different material, collect separately)
+        const doorW = Math.min(0.9, sx * 0.6);
+        const doorH = Math.min(2.0, sy * 0.9);
+        const doorD = 0.08;
+        const doorX = px;
+        const doorY = py - sy * 0.5 + doorH * 0.5 + 0.02;
+        const doorZ = pz + sz * 0.5 + doorD * 0.5;
+        const doorMaterialKey = 'roof_access_door';
+        if (!decorationsByMaterial.has(doorMaterialKey)) {
+          decorationsByMaterial.set(doorMaterialKey, []);
+        }
+        decorationsByMaterial.get(doorMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [doorX, doorY, doorZ],
+          rotation: [0, 0, 0],
+          scale: [doorW, doorH, doorD]
+        });
+      } else if (type === 'roof_railing') {
+        const railW = sx;
+        const railH = sy; // sy is height from generator
+        const railD = sz;
+        const t = 0.05; // thickness
+        // PERFORMANCE: Collect all railing bars for merging
+        const railingMaterialKey = 'roof_railing';
+        if (!decorationsByMaterial.has(railingMaterialKey)) {
+          decorationsByMaterial.set(railingMaterialKey, []);
+        }
+        const bars = decorationsByMaterial.get(railingMaterialKey);
+        
+        // Front bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz + railD * 0.5],
+          rotation: [0, 0, 0],
+          scale: [railW, railH, t]
+        });
+        // Back bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz - railD * 0.5],
+          rotation: [0, 0, 0],
+          scale: [railW, railH, t]
+        });
+        // Left bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px - railW * 0.5, py, pz],
+          rotation: [0, 0, 0],
+          scale: [t, railH, railD]
+        });
+        // Right bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px + railW * 0.5, py, pz],
+          rotation: [0, 0, 0],
+          scale: [t, railH, railD]
+        });
+      } else if (type === 'piping') {
+        const facade = dec.facade || 'front';
+        const radius = Math.min(sx, sz) * 0.5;
+        const pipeHeight = sy;
+        const depthOffset = radius + 0.05;
+        if (facade === 'front') {
+          pz = (depth || 0) * 0.5 + depthOffset;
+        } else if (facade === 'back') {
+          pz = -(depth || 0) * 0.5 - depthOffset;
+        } else if (facade === 'left') {
+          pz = dec.position?.[1] || 0; // keep along depth axis
+          px = -(width || 0) * 0.5 - depthOffset;
+        } else if (facade === 'right') {
+          pz = dec.position?.[1] || 0;
+          px = (width || 0) * 0.5 + depthOffset;
+        }
+        // PERFORMANCE: Collect for merging
+        const pipingMaterialKey = 'piping';
+        if (!decorationsByMaterial.has(pipingMaterialKey)) {
+          decorationsByMaterial.set(pipingMaterialKey, []);
+        }
+        const baseRadius = 0.5;
+        const baseHeight = 1.0;
+        decorationsByMaterial.get(pipingMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_12seg', () => 
+            new THREE.CylinderGeometry(baseRadius, baseRadius, baseHeight, 12)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [radius / baseRadius, pipeHeight / baseHeight, radius / baseRadius]
+        });
+      } else if (type === 'loading_dock') {
+        const facade = dec.facade || 'front';
+        const zOffset = sz * 0.5 + 0.05;
+        if (facade === 'front') {
+          pz = (depth || 0) * 0.5 + zOffset;
+        } else if (facade === 'back') {
+          pz = -(depth || 0) * 0.5 - zOffset;
+        }
+        py = sy * 0.5; // top at ~1m
+        dockInstances.push({ px, py, pz, sx, sy, sz });
+      } else if (type === 'roof_hvac') {
+        hvacInstances.push({ px, py, pz, sx, sy, sz });
+      } else if (type === 'cooling_tower') {
+        const radiusBottom = Math.min(sx, sz) * 0.4;
+        const radiusTop = radiusBottom * 0.8;
+        const towerHeight = sy;
+        // PERFORMANCE: Collect for merging - tower base
+        const towerMaterialKey = 'cooling_tower';
+        if (!decorationsByMaterial.has(towerMaterialKey)) {
+          decorationsByMaterial.set(towerMaterialKey, []);
+        }
+        const baseRadiusTop = 0.8;
+        const baseRadiusBottom = 1.0;
+        const baseHeight = 1.0;
+        decorationsByMaterial.get(towerMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_32seg_tapered', () => 
+            new THREE.CylinderGeometry(baseRadiusTop, baseRadiusBottom, baseHeight, 32, 1, false)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [radiusTop / baseRadiusTop, towerHeight / baseHeight, radiusTop / baseRadiusTop]
+        });
+
+        // Stripe (different material, collect separately)
+        const stripeH = Math.min(0.8, towerHeight * 0.15);
+        const stripeRadius = radiusTop * 1.05;
+        const stripeY = py + (towerHeight * 0.5) - (stripeH * 0.5) - 0.2;
+        const stripeMaterialKey = 'cooling_tower_stripe';
+        if (!decorationsByMaterial.has(stripeMaterialKey)) {
+          decorationsByMaterial.set(stripeMaterialKey, []);
+        }
+        const baseStripeRadius = 1.0;
+        const baseStripeHeight = 0.15;
+        decorationsByMaterial.get(stripeMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_32seg', () => 
+            new THREE.CylinderGeometry(baseStripeRadius, baseStripeRadius, baseStripeHeight, 32, 1, false)
+          ),
+          position: [px, stripeY, pz],
+          rotation: [0, 0, 0],
+          scale: [stripeRadius / baseStripeRadius, stripeH / baseStripeHeight, stripeRadius / baseStripeRadius]
+        });
+      } else if (type === 'reactor_turbine_hall') {
+        const baseH = sy * 0.6;
+        const roofH = sy * 0.4;
+        // PERFORMANCE: Collect for merging - base
+        const baseMaterialKey = 'reactor_base';
+        if (!decorationsByMaterial.has(baseMaterialKey)) {
+          decorationsByMaterial.set(baseMaterialKey, []);
+        }
+        decorationsByMaterial.get(baseMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py + baseH * 0.5, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, baseH, sz]
+        });
+        
+        // Roof (arc shape - more complex, keep as separate for now, but could be merged with similar roofs)
+        // Note: ExtrudeGeometry is complex to merge, so we'll leave it as-is for now
+        const radius = sx * 0.5;
+        const roofShape = new THREE.Shape();
+        roofShape.moveTo(-radius, 0);
+        roofShape.absarc(0, 0, radius, Math.PI, 0, false);
+        const roofGeom = new THREE.ExtrudeGeometry(roofShape, {
+          depth: sz,
+          bevelEnabled: false,
+          curveSegments: 24,
+          steps: 1,
+        });
+        roofGeom.translate(0, 0, -sz * 0.5);
+        const roofMat = this.getCachedMaterial('reactor_roof', () =>
+          new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 0.6, metalness: 0.2 })
+        );
+        const roof = new THREE.Mesh(roofGeom, roofMat);
+        roof.rotation.x = Math.PI; // arc up
+        roof.position.set(px, py + baseH, pz);
+        roof.castShadow = false;
+        roof.receiveShadow = false;
+        structureGroup.add(roof);
+      } else {
+        // Default decoration - collect for merging
+        const defaultMaterialKey = 'decoration_default';
+        if (!decorationsByMaterial.has(defaultMaterialKey)) {
+          decorationsByMaterial.set(defaultMaterialKey, []);
+        }
+        decorationsByMaterial.get(defaultMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, sy, sz]
+        });
+      }
+    });
+
+    // PERFORMANCE: Merge all decorations by material into single meshes
+    decorationsByMaterial.forEach((geomDefs, materialKey) => {
+      if (geomDefs.length === 0) return;
+      
+      // Get cached material
+      let mat;
+      switch (materialKey) {
+        case 'vent_stack':
+          mat = this.getCachedMaterial('vent_stack', () => 
+            new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 })
+          );
+          break;
+        case 'roof_railing':
+          mat = this.getCachedMaterial('roof_railing', () =>
+            new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.6, metalness: 0.2 })
+          );
+          break;
+        case 'piping':
+          mat = this.getCachedMaterial('piping', () =>
+            new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.15, metalness: 0.85 })
+          );
+          break;
+        case 'cooling_tower':
+          mat = this.getCachedMaterial('cooling_tower', () =>
+            new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6, metalness: 0.15 })
+          );
+          break;
+        case 'cooling_tower_stripe':
+          mat = this.getCachedMaterial('cooling_tower_stripe', () =>
+            new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.2 })
+          );
+          break;
+        case 'roof_access_hut':
+          mat = this.getCachedMaterial('roof_access_hut', () =>
+            new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.65, metalness: 0.15 })
+          );
+          break;
+        case 'roof_access_door':
+          mat = this.getCachedMaterial('roof_access_door', () =>
+            new THREE.MeshStandardMaterial({ color: 0x3a2b1a, roughness: 0.6, metalness: 0.1 })
+          );
+          break;
+        case 'reactor_base':
+          mat = this.getCachedMaterial('reactor_base', () =>
+            new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.65, metalness: 0.2 })
+          );
+          break;
+        default:
+          mat = this.getCachedMaterial('decoration_default', () =>
+            new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.1 })
+          );
+      }
+      
+      // Convert geometry definitions to mergeable format
+      const geometriesToMerge = geomDefs.map(def => {
+        const geom = def.geometry.clone();
+        
+        // Apply scale
+        if (def.scale && (def.scale[0] !== 1 || def.scale[1] !== 1 || def.scale[2] !== 1)) {
+          const scaleMatrix = new THREE.Matrix4().makeScale(...def.scale);
+          geom.applyMatrix4(scaleMatrix);
+        }
+        
+        // Apply rotation
+        if (def.rotation && (def.rotation[0] !== 0 || def.rotation[1] !== 0 || def.rotation[2] !== 0)) {
+          const rotationMatrix = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(...def.rotation, 'XYZ')
+          );
+          geom.applyMatrix4(rotationMatrix);
+        }
+        
+        return {
+          geometry: geom,
+          position: def.position,
+          rotation: [0, 0, 0] // Already applied
+        };
+      });
+      
+      // Merge all geometries of this material type
+      const mergedGeom = this.mergeBoxGeometries(geometriesToMerge);
+      const mergedMesh = new THREE.Mesh(mergedGeom, mat);
+      mergedMesh.castShadow = false;
+      mergedMesh.receiveShadow = false;
+      structureGroup.add(mergedMesh);
+    });
+
+    // Instanced loading docks
+    if (dockInstances.length > 0) {
+      // PERFORMANCE: Use cached material for loading docks
+      const mat = this.getCachedMaterial('loading_dock', () =>
+        new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 })
+      );
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const inst = new THREE.InstancedMesh(geom, mat, dockInstances.length);
+      const m = new THREE.Matrix4();
+      dockInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced roof HVAC boxes
+    if (hvacInstances.length > 0) {
+      // PERFORMANCE: Use cached material for HVAC
+      const mat = this.getCachedMaterial('roof_hvac', () =>
+        new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.2 })
+      );
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const inst = new THREE.InstancedMesh(geom, mat, hvacInstances.length);
+      const m = new THREE.Matrix4();
+      hvacInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced solar panels
+    if (solarInstances.length > 0) {
+      // PERFORMANCE: Use cached material for solar panels
+      const mat = this.getCachedMaterial('solar_panel', () =>
+        new THREE.MeshStandardMaterial({ color: 0x1a1f2e, roughness: 0.35, metalness: 0.8 })
+      );
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const inst = new THREE.InstancedMesh(geom, mat, solarInstances.length);
+      const m = new THREE.Matrix4();
+      const tiltQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 10, 0, 0, 'YXZ')); // gentle tilt toward +Z
+      solarInstances.forEach((d, i) => {
+        const pos = new THREE.Vector3(d.px, d.py, d.pz);
+        const scale = new THREE.Vector3(d.sx, d.sy, d.sz);
+        m.compose(pos, tiltQuat, scale);
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+
+    // Instanced solar bases (pedestals)
+    if (solarBaseInstances.length > 0) {
+      // PERFORMANCE: Use cached material for solar bases
+      const mat = this.getCachedMaterial('solar_base', () =>
+        new THREE.MeshStandardMaterial({ color: 0x2f3135, roughness: 0.5, metalness: 0.5 })
+      );
+      const geom = new THREE.BoxGeometry(1, 1, 1);
+      const inst = new THREE.InstancedMesh(geom, mat, solarBaseInstances.length);
+      const m = new THREE.Matrix4();
+      solarBaseInstances.forEach((d, i) => {
+        m.compose(
+          new THREE.Vector3(d.px, d.py, d.pz),
+          new THREE.Quaternion(),
+          new THREE.Vector3(d.sx, d.sy, d.sz)
+        );
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
+      structureGroup.add(inst);
+    }
+  }
+
+  buildBandRects(structure, decorations, facade, wallWidth, wallDepth, foundationHeight, buildingHeight) {
+    const MAX_BANDS = 8;
+    const totalWallHeight = foundationHeight + buildingHeight;
+    const wallCenterY = totalWallHeight / 2;
+    const decs = decorations.filter(
+      (d) => d && d.type === 'utility_band' && (d.facade || 'front') === facade
+    );
+    const rects = [];
+    decs.slice(0, MAX_BANDS).forEach((d) => {
+      const pos = d.position || [0, 0, 0]; // [x, depth, z]
+      const size = d.size || [0, 0, 0];    // [w, d, h]
+      let dx = 0;
+      let dw = 0;
+      if (facade === 'front' || facade === 'back') {
+        dx = (pos[0] || 0) / wallWidth;
+        dw = (size[0] || 0) / wallWidth;
+      } else {
+        // left/right: use depth axis for width
+        dx = (pos[1] || 0) / wallWidth;
+        dw = (size[0] || 0) / wallWidth;
+      }
+      const dy = ((pos[2] || 0) - wallCenterY) / totalWallHeight;
+      const dh = (size[2] || 0) / totalWallHeight;
+      rects.push(new THREE.Vector4(dx, dy, dw, dh));
+    });
+    while (rects.length < MAX_BANDS) {
+      rects.push(new THREE.Vector4(0, 0, 0, 0));
+    }
+    return { bandRects: rects, bandCount: Math.min(decs.length, MAX_BANDS) };
   }
 
   /**
@@ -171,8 +1108,18 @@ export class StructureManager {
     const activeFloor = this.gameState.getActiveFloor();
 
     structures.forEach(structure => {
+      // Debug: Log construction state for structures being added
+      if (window.earthring?.debug && chunkStructureSet.size < 3) {
+        console.log(`[StructureManager] handleStreamedStructures: structure ${structure.id}:`, {
+          construction_state: structure.construction_state,
+          construction_started_at: structure.construction_started_at,
+          construction_duration_seconds: structure.construction_duration_seconds,
+          floor: structure.floor,
+          activeFloor: activeFloor
+        });
+      }
 
-      // Upsert to game state
+      // Upsert to game state (preserves all fields including construction state)
       this.gameState.upsertStructure(structure);
 
       // Track for chunk cleanup
@@ -226,6 +1173,16 @@ export class StructureManager {
       if (existingMesh.userData.lastCameraXUsed !== cameraXWrapped) {
         this.updateStructurePosition(existingMesh, structure, cameraXWrapped);
       }
+      
+      // PERFORMANCE: Only re-register animation if it's not already registered
+      // This avoids expensive bounding box calculations on every frame
+      if (!this.constructionAnimations.has(structure.id)) {
+        // Re-register animation if construction state changed (e.g., loaded from database)
+        // Get latest structure from game state to ensure we have construction fields
+        const latestStructure = this.gameState.getStructure(structure.id) || structure;
+        this.registerConstructionAnimation(latestStructure, existingMesh);
+      }
+      
       return;
     }
 
@@ -255,7 +1212,7 @@ export class StructureManager {
     // Create structure mesh group
     const structureGroup = new THREE.Group();
     structureGroup.renderOrder = 10; // Render above zones
-    structureGroup.userData.structureID = structure.id;
+    structureGroup.userData.structureId = structure.id;
     structureGroup.userData.structureType = structureType;
     structureGroup.userData.structure = structure;
     structureGroup.userData.lastCameraXUsed = cameraXWrapped;
@@ -309,6 +1266,7 @@ export class StructureManager {
       threeJSPosWorld.y,
       threeJSPosWorld.z
     );
+    structureGroup.userData.structureId = structure.id;
 
     // Apply rotation
     if (structure.rotation !== undefined) {
@@ -344,11 +1302,209 @@ export class StructureManager {
       structureGroup.add(mesh);
     }
 
+    // Render decoration hints (vent stacks, loading docks) if present
+    this.addDecorations(structureGroup, structure, dimensions);
+
+    // Ensure every child of the group carries the structureId and structure for reliable picking/fallback
+    this.setStructureIdRecursive(structureGroup, structure.id, structure);
+
     // Add to scene
     this.scene.add(structureGroup);
     this.structureMeshes.set(structure.id, structureGroup);
 
+    // Get the latest structure data from game state (may have updated construction state)
+    // This ensures we use the most up-to-date structure data including construction fields
+    const latestStructure = this.gameState.getStructure(structure.id) || structure;
+    
+    // Check construction state and register animation if needed
+    // Use latestStructure to ensure we have construction fields from database
+    this.registerConstructionAnimation(latestStructure, structureGroup);
+
     this.lastCameraX = cameraXWrapped;
+  }
+
+  /**
+   * Register construction/demolition animation for a structure
+   * @param {Object} structure - Structure object
+   * @param {THREE.Group} meshGroup - Structure mesh group
+   */
+  registerConstructionAnimation(structure, meshGroup) {
+    if (!structure || !meshGroup) return;
+
+    const constructionState = structure.construction_state;
+    
+    // Debug logging for construction state
+    if (window.earthring?.debug && this.constructionAnimations.size <= 3) {
+      console.log(`[StructureManager] registerConstructionAnimation for ${structure.id}:`, {
+        construction_state: constructionState,
+        construction_started_at: structure.construction_started_at,
+        construction_duration_seconds: structure.construction_duration_seconds,
+        construction_completed_at: structure.construction_completed_at
+      });
+    }
+    
+    if (!constructionState || constructionState === 'completed') {
+      // No animation needed for completed structures
+      return;
+    }
+
+    // Parse construction timestamps
+    let startTime = null;
+    let durationMs = 300000; // Default: 5 minutes
+
+    if (structure.construction_started_at) {
+      // Parse ISO 8601 timestamp (from database) or timestamp string
+      const parsedTime = new Date(structure.construction_started_at).getTime();
+      if (!isNaN(parsedTime)) {
+        startTime = parsedTime;
+      } else {
+        console.warn(`[StructureManager] Invalid construction_started_at for structure ${structure.id}:`, structure.construction_started_at);
+      }
+    }
+
+    if (structure.construction_duration_seconds) {
+      durationMs = structure.construction_duration_seconds * 1000;
+    }
+
+    // If start time is missing, use current time (for structures just created)
+    if (!startTime || isNaN(startTime)) {
+      console.warn(`[StructureManager] Missing or invalid start time for structure ${structure.id}, using current time`);
+      startTime = Date.now();
+    }
+
+    const now = Date.now();
+
+    if (constructionState === 'constructing') {
+      // Check if construction is already complete
+      if (structure.construction_completed_at) {
+        const completedTime = new Date(structure.construction_completed_at).getTime();
+        if (!isNaN(completedTime) && now >= completedTime) {
+          // Construction already complete, no animation needed
+          if (window.earthring?.debug) {
+            console.log(`[StructureManager] Structure ${structure.id} construction already complete (completed at ${new Date(completedTime).toISOString()})`);
+          }
+          return;
+        }
+      }
+
+      // Register construction animation
+      const animation = new AnimationState(startTime, durationMs, 'construction');
+      
+      // Calculate bounding box for clipping plane (use world coordinates)
+      // Update world matrix first to ensure accurate bounding box
+      meshGroup.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      box.setFromObject(meshGroup);
+      animation.boundingBox = box.clone();
+      
+      // Check bounding box validity
+      const totalHeight = box.max.y - box.min.y;
+      if (totalHeight <= 0 || !isFinite(totalHeight)) {
+        console.warn(`[StructureManager] Invalid bounding box for structure ${structure.id}, skipping animation:`, {
+          min: box.min,
+          max: box.max,
+          height: totalHeight
+        });
+        return;
+      }
+      
+      // Store original mesh position and rotation for animation
+      animation.originalPosition = meshGroup.position.y;
+      animation.originalRotation = meshGroup.rotation.z;
+      
+      // Cache materials once to avoid traversing every frame (PERFORMANCE OPTIMIZATION)
+      animation.cachedMaterials = [];
+      meshGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat.transparent !== undefined) {
+                animation.cachedMaterials.push(mat);
+              }
+            });
+          } else {
+            if (child.material.transparent !== undefined) {
+              animation.cachedMaterials.push(child.material);
+            }
+          }
+        }
+      });
+      animation.lastOpacity = null; // Reset opacity tracking
+      
+      // Calculate initial progress and set initial scale
+      const initialProgress = animation.getProgress(now);
+      const easedInitialProgress = 1 - Math.pow(1 - initialProgress, 3);
+      const minScale = 0.01; // Minimum visible scale (1% to ensure something is visible)
+      const initialScaleY = Math.max(minScale, easedInitialProgress);
+      
+      // Set initial scale and adjust position for bottom-up growth
+      // The bounding box is in local coordinates relative to the group center
+      // box.min.y is the bottom of the mesh in local space (negative value)
+      // To keep the bottom fixed, move group by: box.min.y * (1 - scaleY)
+      meshGroup.scale.y = initialScaleY;
+      const bottomY = box.min.y;
+      const positionAdjustment = bottomY * (1 - initialScaleY);
+      meshGroup.position.y = animation.originalPosition + positionAdjustment;
+      
+      // Set initial opacity based on progress (ensure buildings are visible even at start)
+      // Fade in during first 10% of animation, but ensure minimum 30% opacity
+      const opacityProgress = Math.max(0.3, Math.min(1.0, initialProgress / 0.1));
+      meshGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat.transparent !== undefined) {
+                mat.transparent = opacityProgress < 1.0;
+                mat.opacity = opacityProgress;
+              }
+            });
+          } else {
+            if (child.material.transparent !== undefined) {
+              child.material.transparent = opacityProgress < 1.0;
+              child.material.opacity = opacityProgress;
+            }
+          }
+        }
+      });
+      
+      this.constructionAnimations.set(String(structure.id), animation);
+      
+      // Debug logging (only log first few structures to avoid spam)
+      if (window.earthring?.debug && this.constructionAnimations.size <= 3) {
+        console.log(`[StructureManager] Registered construction animation ${structure.id}:`, {
+          progress: initialProgress.toFixed(3),
+          scaleY: initialScaleY.toFixed(3),
+          height: totalHeight.toFixed(2),
+          duration: (durationMs / 1000).toFixed(1) + 's'
+        });
+      }
+    } else if (constructionState === 'demolishing') {
+      // Register demolition animation (from server state)
+      // Note: Client-side demolition is typically triggered by removeStructure(),
+      // but we handle server-sent 'demolishing' state here for consistency
+      
+      // Default demolition duration: 7.5 seconds (5-10 second range)
+      // Server might send a different duration, but default is quick
+      if (!structure.construction_duration_seconds) {
+        durationMs = 7500; // 7.5 seconds
+      }
+      
+      const animation = new AnimationState(startTime, durationMs, 'demolition');
+      
+      // Store bounding box for position calculations
+      meshGroup.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      box.setFromObject(meshGroup);
+      animation.boundingBox = box.clone();
+      animation.originalPosition = meshGroup.position.y;
+      animation.originalRotation = meshGroup.rotation.z;
+      
+      this.constructionAnimations.set(String(structure.id), animation);
+      
+      if (window.earthring?.debug) {
+        console.log(`[StructureManager] Registered demolition animation ${structure.id} from server state, duration: ${(durationMs / 1000).toFixed(1)}s`);
+      }
+    }
   }
 
   /**
@@ -535,6 +1691,7 @@ export class StructureManager {
   createDetailedBuilding(structureGroup, structure, dimensions) {
     const { width, depth, height } = dimensions;
     const buildingSubtype = structure.building_subtype || 'default';
+    const decorations = structure.decorations || structure.model_data?.decorations || [];
     
     // Extract windows from structure - check multiple possible locations
     let windows = [];
@@ -665,8 +1822,13 @@ export class StructureManager {
         if (Array.isArray(doorInfo)) {
           // Multiple doors on this facade (e.g., regular door + utility doors)
           doorInfo.forEach(door => {
+            // Map industrial_main to 'utility' so the shader pairing logic picks it up
+            const type =
+              door.type === 'industrial_main'
+                ? 'utility'
+                : (door.type || 'main');
             doorArray.push({
-              type: door.type || 'main',
+              type,
               x: door.x || 0,
               y: door.y || 0,
               width: door.width || 0.9,
@@ -675,8 +1837,12 @@ export class StructureManager {
           });
         } else {
           // Single door on this facade
+          const type =
+            doorInfo.type === 'industrial_main'
+              ? 'utility'
+              : (doorInfo.type || 'main');
           doorArray.push({
-            type: doorInfo.type || 'main',
+            type,
             x: doorInfo.x || 0,
             y: doorInfo.y || 0,
             width: doorInfo.width || 0.9,
@@ -705,7 +1871,12 @@ export class StructureManager {
     // Collect wall geometry definitions for merging
     const wallDefinitions = [];
     
-    // Front wall (positive Y) - with shader-based windows, doors, and trim
+    const frontBands = this.buildBandRects(structure, decorations, 'front', width, depth, foundationHeight, buildingHeight);
+    const backBands = this.buildBandRects(structure, decorations, 'back', width, depth, foundationHeight, buildingHeight);
+    const leftBands = this.buildBandRects(structure, decorations, 'left', depth, width, foundationHeight, buildingHeight);
+    const rightBands = this.buildBandRects(structure, decorations, 'right', depth, width, foundationHeight, buildingHeight);
+
+    // Front wall (positive Y) - with shader-based windows, doors, bands, and trim
     const frontDoor = getDoorInfoForFacade('front');
     wallDefinitions.push(this.createWallGeometryDefinition(
       width, 
@@ -722,7 +1893,9 @@ export class StructureManager {
       'front',
       colors,
       frontDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      frontBands.bandRects,
+      frontBands.bandCount
     ));
     
     // Back wall (negative Y) - with shader-based windows and trim
@@ -742,7 +1915,9 @@ export class StructureManager {
       'back',
       colors,
       backDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      backBands.bandRects,
+      backBands.bandCount
     ));
     
     // Left wall (negative X) - with shader-based rendering (includes trim)
@@ -762,7 +1937,9 @@ export class StructureManager {
       'left',
       colors,
       leftDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      leftBands.bandRects,
+      leftBands.bandCount
     ));
     
     // Right wall (positive X) - with shader-based rendering (includes trim)
@@ -782,7 +1959,9 @@ export class StructureManager {
       'right',
       colors,
       rightDoor,
-      cornerTrimWidth
+      cornerTrimWidth,
+      rightBands.bandRects,
+      rightBands.bandCount
     ));
     
     // Merge all wall geometries
@@ -827,19 +2006,98 @@ export class StructureManager {
     mergedWallMesh.receiveShadow = false;
     structureGroup.add(mergedWallMesh);
     
-    // Roof - use color from palette if available
+    // Roof with skylight overlay in shader (single draw, no skylight meshes)
     const roofColorHex = colors?.roofs?.hex ? colors.roofs.hex : '#4a4a4a';
     const roofColor = typeof roofColorHex === 'string' ? parseInt(roofColorHex.replace('#', ''), 16) : roofColorHex;
+    // PERFORMANCE: Use cached roof material (shared across buildings)
     const roofMaterialKey = `roof_${roofColor}`;
-    const roofMaterial = this.getCachedMaterial(roofMaterialKey, () =>
-      new THREE.MeshStandardMaterial({
+    const roofMaterial = this.getCachedMaterial(roofMaterialKey, () => {
+      // Roof material; skylights will lower opacity to window-like transparency
+      return new THREE.MeshStandardMaterial({
         color: roofColor,
         roughness: 0.8,
         metalness: 0.2,
         opacity: 1.0,
-        transparent: false,
-      })
-    );
+        transparent: true,
+      });
+    });
+
+    const skylights = decorations.filter((d) => d && d.type === 'skylight').slice(0, 16);
+    const greenRoof = decorations.find((d) => d && d.type === 'green_roof');
+    const skylightUniforms = skylights.map((d) => {
+      const pos = d.position || [0, 0, 0];
+      const size = d.size || [0, 0, 0];
+      // Normalize to roof face (x->width, y->depth)
+      const u = (pos[0] / (width + wallThickness * 2)) + 0.5;
+      const v = (pos[1] / (depth + wallThickness * 2)) + 0.5;
+      const su = (size[0] || 0) / (width + wallThickness * 2);
+      const sv = (size[1] || 0) / (depth + wallThickness * 2);
+      return new THREE.Vector4(u, v, su, sv);
+    });
+    while (skylightUniforms.length < 16) skylightUniforms.push(new THREE.Vector4(0, 0, 0, 0));
+
+    roofMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.skylightCount = { value: skylights.length };
+      shader.uniforms.skylightRects = { value: skylightUniforms };
+      shader.uniforms.roofSize = { value: new THREE.Vector2(width + wallThickness * 2, depth + wallThickness * 2) };
+      shader.uniforms.greenRect = {
+        value: greenRoof
+          ? new THREE.Vector4(
+              (greenRoof.position?.[0] || 0) / (width + wallThickness * 2) + 0.5,
+              (greenRoof.position?.[1] || 0) / (depth + wallThickness * 2) + 0.5,
+              (greenRoof.size?.[0] || width * 0.8) / (width + wallThickness * 2),
+              (greenRoof.size?.[1] || depth * 0.8) / (depth + wallThickness * 2)
+            )
+          : new THREE.Vector4(0, 0, 0, 0),
+      };
+      shader.uniforms.hasGreen = { value: !!greenRoof };
+
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n varying vec3 vPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n vPos = position;');
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `
+          #include <common>
+          varying vec3 vPos;
+          uniform int skylightCount;
+          uniform vec4 skylightRects[16]; // uv center (u,v), size (wu, hv)
+          uniform vec2 roofSize;
+          uniform vec4 greenRect; // uv center (u,v), size (wu, hv)
+          uniform bool hasGreen;
+          `
+        )
+        .replace(
+          'vec4 diffuseColor = vec4( diffuse, opacity );',
+          `
+          vec2 roofUV = (vPos.xz / roofSize) + 0.5;
+          float skylightMask = 0.0;
+          for (int i = 0; i < 16; i++) {
+            if (i >= skylightCount) break;
+            vec4 rect = skylightRects[i];
+            vec2 halfSize = rect.zw * 0.5;
+            vec2 d = abs(roofUV - rect.xy) - halfSize;
+            float inside = step(0.0, -max(d.x, d.y));
+            skylightMask = max(skylightMask, inside);
+          }
+          float greenMask = 0.0;
+          if (hasGreen) {
+            vec2 gHalf = greenRect.zw * 0.5;
+            vec2 gd = abs(roofUV - greenRect.xy) - gHalf;
+            greenMask = step(0.0, -max(gd.x, gd.y));
+          }
+          vec3 skylightTint = mix(diffuse, vec3(0.9, 0.95, 1.0), 0.4);
+          vec3 greenTint = mix(diffuse, vec3(0.23, 0.37, 0.25), 0.5);
+          vec3 finalDiffuse = mix(diffuse, greenTint, greenMask);
+          finalDiffuse = mix(finalDiffuse, skylightTint, skylightMask);
+          float finalAlpha = mix(opacity, 0.35, skylightMask); // skylights translucent like windows
+          vec4 diffuseColor = vec4( finalDiffuse, finalAlpha );
+          `
+        );
+    };
+
     const roofGeometry = new THREE.BoxGeometry(width + wallThickness * 2, 0.1, depth + wallThickness * 2);
     const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
     // Roof positioned at top of total wall height (foundation + building)
@@ -893,7 +2151,7 @@ export class StructureManager {
    * @param {number} cornerTrimWidth - Corner trim width
    * @returns {Object} Object with {geometry, material, facade}
    */
-  createWallGeometryDefinition(width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02) {
+  createWallGeometryDefinition(width, height, thickness, position, rotation, windows, baseMaterial, dimensions, foundationHeight, buildingHeight, buildingSubtype = null, facade = 'front', colors = null, doorInfo = null, cornerTrimWidth = 0.02, bandRects = [], bandCount = 0) {
     // Convert windows to shader-compatible format
     // Limit to 50 windows per wall for shader uniforms
     const MAX_WINDOWS = 50;
@@ -938,120 +2196,37 @@ export class StructureManager {
       windowData[idx + 3] = normalizedHeight;
     });
     
-    // Door data: use door info from structure if available
-    // doorInfo is now an array of doors (can include regular doors and multiple garage doors)
-    let hasDoor = false;
-    let doorNormalizedX = -999.0;
-    let doorNormalizedY = 0.0;
-    let doorNormalizedWidth = 0.0;
-    let doorNormalizedHeight = 0.0;
-    let isGarageDoor = false;
-    
-    // Support for second door (for truck bay + standard door pairs)
-    let hasDoor2 = false;
-    let door2NormalizedX = -999.0;
-    let door2NormalizedY = 0.0;
-    let door2NormalizedWidth = 0.0;
-    let door2NormalizedHeight = 0.0;
-    let isGarageDoor2 = false;
-    
-    if (doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
-      // Find truck bay door and standard door if both exist (warehouse case)
-      const truckBayDoor = doorInfo.find(d => d.type === 'truck_bay');
-      const standardDoor = doorInfo.find(d => d.type === 'standard' || d.type === 'utility');
-      
-      if (truckBayDoor && standardDoor) {
-        // Warehouse case: render both truck bay (as door1) and standard door (as door2)
-        // Door 1: Truck bay
-        const doorYWorld1 = wallCenterY + truckBayDoor.y;
-        doorNormalizedX = truckBayDoor.x / width;
-        doorNormalizedY = (doorYWorld1 - wallCenterY) / totalWallHeight;
-        doorNormalizedWidth = truckBayDoor.width / width;
-        doorNormalizedHeight = truckBayDoor.height / totalWallHeight;
-        isGarageDoor = true;
-        hasDoor = true;
-        
-        // Door 2: Standard door
-        const doorYWorld2 = wallCenterY + standardDoor.y;
-        door2NormalizedX = standardDoor.x / width;
-        door2NormalizedY = (doorYWorld2 - wallCenterY) / totalWallHeight;
-        door2NormalizedWidth = standardDoor.width / width;
-        door2NormalizedHeight = standardDoor.height / totalWallHeight;
-        isGarageDoor2 = false;
-        hasDoor2 = true;
-        
-        // Ensure door2 bottom doesn't overlap foundation
+    // Door data: pack up to MAX_DOORS for shader (front facade only for now)
+    const MAX_DOORS = 6;
+    const doorRects = [];
+    let doorCount = 0;
+    if (facade === 'front' && doorInfo && Array.isArray(doorInfo) && doorInfo.length > 0) {
+      doorInfo.slice(0, MAX_DOORS).forEach((d) => {
+        if (
+          typeof d.x === 'number' &&
+          typeof d.y === 'number' &&
+          typeof d.width === 'number' &&
+          typeof d.height === 'number'
+        ) {
+          const doorYWorld = wallCenterY + d.y;
+          let dx = d.x / width;
+          let dy = (doorYWorld - wallCenterY) / totalWallHeight;
+          let dw = d.width / width;
+          let dh = d.height / totalWallHeight;
+          // Ensure bottoms not below foundation
         const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-        const door2BottomNormalized = door2NormalizedY - door2NormalizedHeight / 2;
-        if (door2BottomNormalized < foundationTopNormalized) {
-          door2NormalizedY = foundationTopNormalized + door2NormalizedHeight / 2;
-        }
-        
-        // Also ensure door1 (truck bay) bottom doesn't overlap foundation
-        const door1BottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
-        if (door1BottomNormalized < foundationTopNormalized) {
-          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
-        }
-      } else {
-        // Single door case: use the appropriate door
-        let doorToUse;
-        if (truckBayDoor) {
-          doorToUse = truckBayDoor;
-        } else if (standardDoor) {
-          doorToUse = standardDoor;
-        } else {
-          // Fallback: prefer garage doors, or just use the first door
-          doorToUse = doorInfo.find(d => d.type === 'garage') || doorInfo[0];
-        }
-        
-        if (!doorToUse || typeof doorToUse.x !== 'number' || typeof doorToUse.y !== 'number' || 
-            typeof doorToUse.width !== 'number' || typeof doorToUse.height !== 'number') {
-          console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorToUse);
-        } else {
-          hasDoor = true;
-          isGarageDoor = doorToUse.type === 'garage' || doorToUse.type === 'truck_bay';
-          // Normalize door position and size to wall coordinates
-          doorNormalizedX = doorToUse.x / width;  // Normalize to -0.5 to 0.5 range
-          const doorYWorld = wallCenterY + doorToUse.y;
-          doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;  // Normalize to wall coordinates
-          doorNormalizedWidth = doorToUse.width / width;
-          doorNormalizedHeight = doorToUse.height / totalWallHeight;
-          
-          // Ensure door bottom doesn't overlap foundation
-          const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-          const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
+          const doorBottomNormalized = dy - dh / 2;
           if (doorBottomNormalized < foundationTopNormalized) {
-            // Shift door up so bottom aligns with foundation top
-            doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
+            dy = foundationTopNormalized + dh / 2;
           }
+          doorRects.push(new THREE.Vector4(dx, dy, dw, dh));
+          doorCount++;
         }
-      }
-    } else if (doorInfo && !Array.isArray(doorInfo)) {
-      // Legacy support: single door object (backwards compatibility)
-      if (typeof doorInfo.x !== 'number' || typeof doorInfo.y !== 'number' || 
-          typeof doorInfo.width !== 'number' || typeof doorInfo.height !== 'number') {
-        console.warn(`[Structures] Invalid door data for facade ${facade}:`, doorInfo);
-      } else {
-        hasDoor = true;
-        isGarageDoor = doorInfo.type === 'garage' || doorInfo.type === 'truck_bay';
-        doorNormalizedX = doorInfo.x / width;
-        // Convert door Y from building-center relative to wall-relative
-        // doorInfo.y is relative to true building center (at wallCenterY), so just add it directly
-        const doorYWorld = wallCenterY + doorInfo.y;
-        doorNormalizedY = (doorYWorld - wallCenterY) / totalWallHeight;
-        doorNormalizedWidth = doorInfo.width / width;
-        doorNormalizedHeight = doorInfo.height / totalWallHeight;
-        
-        // Ensure door bottom doesn't overlap foundation
-        // Foundation top in normalized coordinates: -0.5 + foundationHeightNormalized
-        // Door bottom in normalized coordinates: doorNormalizedY - doorNormalizedHeight / 2
-        const foundationTopNormalized = -0.5 + foundationHeightNormalized;
-        const doorBottomNormalized = doorNormalizedY - doorNormalizedHeight / 2;
-        if (doorBottomNormalized < foundationTopNormalized) {
-          // Shift door up so bottom aligns with foundation top
-          doorNormalizedY = foundationTopNormalized + doorNormalizedHeight / 2;
-        }
-      }
+      });
+    }
+    // Pad to MAX_DOORS with zero vectors for stable uniform array length
+    while (doorRects.length < MAX_DOORS) {
+      doorRects.push(new THREE.Vector4(0, 0, 0, 0));
     }
     
     // Create shader material with window, door, trim, and foundation rendering
@@ -1064,22 +2239,14 @@ export class StructureManager {
       windowCount, 
       width, 
       totalWallHeight, // Pass total wall height (includes foundation)
-      hasDoor,
-      doorNormalizedX,
-      doorNormalizedY,
-      doorNormalizedWidth,
-      doorNormalizedHeight,
-      isGarageDoor,
+      doorRects,
+      doorCount,
+      bandRects,
+      bandCount,
       buildingSubtype,
       colors,
       cornerTrimWidthNormalized,
-      foundationHeightNormalized,
-      hasDoor2,
-      door2NormalizedX,
-      door2NormalizedY,
-      door2NormalizedWidth,
-      door2NormalizedHeight,
-      isGarageDoor2
+      foundationHeightNormalized
     );
     
     // Create wall geometry
@@ -1133,15 +2300,12 @@ export class StructureManager {
    * @param {number} windowCount - Number of windows
    * @param {number} wallWidth - Wall width in meters
    * @param {number} wallHeight - Wall height in meters
-   * @param {boolean} hasDoor - Whether this wall has a door (front facade only)
-   * @param {number} doorX - Door center X in normalized coordinates (-0.5 to 0.5)
-   * @param {number} doorY - Door center Y in normalized coordinates (-0.5 to 0.5)
-   * @param {number} doorWidth - Door width in normalized coordinates (0 to 1)
-   * @param {number} doorHeight - Door height in normalized coordinates (0 to 1)
+   * @param {Array<THREE.Vector4>} doorRects - Packed doors (x,y,w,h normalized), front facade
+   * @param {number} doorCount - Number of packed doors
    * @param {string} buildingSubtype - Building subtype for material variation
    * @returns {THREE.ShaderMaterial} Shader material with window, door, trim, and foundation rendering
    */
-  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, hasDoor = false, doorX = 0, doorY = 0, doorWidth = 0, doorHeight = 0, isGarageDoor = false, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05, hasDoor2 = false, door2X = 0, door2Y = 0, door2Width = 0, door2Height = 0, isGarageDoor2 = false) {
+  createWallShaderMaterial(baseMaterialProps, windowData, windowCount, wallWidth, wallHeight, doorRects = [], doorCount = 0, bandRects = [], bandCount = 0, buildingSubtype = null, colors = null, cornerTrimWidthNormalized = 0.02, foundationHeightNormalized = 0.05) {
     // Helper function to convert hex color to RGB vec3
     const hexToRgb = (hex) => {
       if (!hex || typeof hex === 'number') return null;
@@ -1181,18 +2345,10 @@ export class StructureManager {
       uniform float windowCount;
       uniform sampler2D windowDataTexture;
       uniform float textureWidth;
-      uniform bool hasDoor;
-      uniform bool isGarageDoor;
-      uniform float doorX;
-      uniform float doorY;
-      uniform float doorWidth;
-      uniform float doorHeight;
-      uniform bool hasDoor2;
-      uniform bool isGarageDoor2;
-      uniform float door2X;
-      uniform float door2Y;
-      uniform float door2Width;
-      uniform float door2Height;
+      uniform int doorCount;
+      uniform vec4 doorRects[6]; // x,y,w,h normalized
+      uniform int bandCount;
+      uniform vec4 bandRects[8]; // x,y,w,h normalized
       
       varying vec2 vUv;
       
@@ -1262,80 +2418,68 @@ export class StructureManager {
         return vec4(0.0); // Not a window
       }
       
-      // Check if point is in door area
+      // Check if point is in any door area (supports multiple doors)
       vec4 checkDoor(vec2 uv) {
-        if (!hasDoor || doorWidth <= 0.0 || doorHeight <= 0.0) {
-          return vec4(0.0);
-        }
+        if (doorCount <= 0) return vec4(0.0);
         
         vec2 normalizedPos = (uv - 0.5);
-        
-        // Door bounds
-        vec2 doorMin = vec2(doorX - doorWidth * 0.5, doorY - doorHeight * 0.5);
-        vec2 doorMax = vec2(doorX + doorWidth * 0.5, doorY + doorHeight * 0.5);
+        for (int i = 0; i < 6; i++) {
+          if (i >= doorCount) break;
+          vec4 dr = doorRects[i];
+          float dx = dr.x;
+          float dy = dr.y;
+          float dw = dr.z;
+          float dh = dr.w;
+          if (dw <= 0.0 || dh <= 0.0) continue;
+          
+          vec2 doorMin = vec2(dx - dw * 0.5, dy - dh * 0.5);
+          vec2 doorMax = vec2(dx + dw * 0.5, dy + dh * 0.5);
         
         if (normalizedPos.x >= doorMin.x && normalizedPos.x <= doorMax.x &&
             normalizedPos.y >= doorMin.y && normalizedPos.y <= doorMax.y) {
           
-          // Calculate distance from door edge
           vec2 distFromEdge = min(normalizedPos - doorMin, doorMax - normalizedPos);
-          float distX = distFromEdge.x / doorWidth;
-          float distY = distFromEdge.y / doorHeight;
+            float distX = distFromEdge.x / dw;
+            float distY = distFromEdge.y / dh;
           float minDist = min(distX, distY);
           
-          // Check if in frame area
-          if (minDist < frameThickness) {
+            float doorFrameThickness = frameThickness * 1.2;
+        
+            if (minDist < doorFrameThickness) {
             return vec4(frameColorUniform, 1.0); // Door frame
           } else {
-            // Garage doors are darker/more metallic than regular doors
-            if (isGarageDoor) {
-              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
-              return vec4(garageColor, 1.0); // Garage door surface
-            } else {
-              return vec4(doorColorUniform, 1.0); // Regular door surface
+              vec3 doorPanelColor = doorColorUniform * 0.9;
+              return vec4(doorPanelColor, 1.0); // Door panel
             }
           }
         }
         
         return vec4(0.0); // Not a door
       }
-      
-      // Check if point is in second door area
-      vec4 checkDoor2(vec2 uv) {
-        if (!hasDoor2 || door2Width <= 0.0 || door2Height <= 0.0) {
-          return vec4(0.0);
-        }
-        
+
+      // Check if point is in any band area (utility bands)
+      vec4 checkBand(vec2 uv) {
+        if (bandCount <= 0) return vec4(0.0);
         vec2 normalizedPos = (uv - 0.5);
-        
-        // Door bounds
-        vec2 doorMin = vec2(door2X - door2Width * 0.5, door2Y - door2Height * 0.5);
-        vec2 doorMax = vec2(door2X + door2Width * 0.5, door2Y + door2Height * 0.5);
-        
-        if (normalizedPos.x >= doorMin.x && normalizedPos.x <= doorMax.x &&
-            normalizedPos.y >= doorMin.y && normalizedPos.y <= doorMax.y) {
-          
-          // Calculate distance from door edge
-          vec2 distFromEdge = min(normalizedPos - doorMin, doorMax - normalizedPos);
-          float distX = distFromEdge.x / door2Width;
-          float distY = distFromEdge.y / door2Height;
-          float minDist = min(distX, distY);
-          
-          // Check if in frame area
-          if (minDist < frameThickness) {
-            return vec4(frameColorUniform, 1.0); // Door frame
-          } else {
-            // Garage doors are darker/more metallic than regular doors
-            if (isGarageDoor2) {
-              vec3 garageColor = doorColorUniform * 0.6; // Darker than regular doors
-              return vec4(garageColor, 1.0); // Garage door surface
-            } else {
-              return vec4(doorColorUniform, 1.0); // Regular door surface
-            }
+        for (int i = 0; i < 8; i++) {
+          if (i >= bandCount) break;
+          vec4 br = bandRects[i];
+          float bx = br.x;
+          float by = br.y;
+          float bw = br.z;
+          float bh = br.w;
+          if (bw <= 0.0 || bh <= 0.0) continue;
+
+          vec2 bandMin = vec2(bx - bw * 0.5, by - bh * 0.5);
+          vec2 bandMax = vec2(bx + bw * 0.5, by + bh * 0.5);
+
+          if (normalizedPos.x >= bandMin.x && normalizedPos.x <= bandMax.x &&
+              normalizedPos.y >= bandMin.y && normalizedPos.y <= bandMax.y) {
+            // Use trim color for bands
+            return vec4(trimColorUniform, 1.0);
           }
         }
-        
-        return vec4(0.0); // Not a door
+        return vec4(0.0);
       }
       
       // Check for corner trim (vertical edges)
@@ -1395,21 +2539,23 @@ export class StructureManager {
             }
           } else {
             // Check for doors (only if not a window)
-            // Check first door, then second door if first doesn't match
             vec4 doorResult = checkDoor(vUv);
-            if (doorResult.a == 0.0 && hasDoor2) {
-              // If first door didn't match, check second door
-              doorResult = checkDoor2(vUv);
-            }
             if (doorResult.a > 0.0) {
               color = doorResult.rgb;
               alpha = doorResult.a;
             } else {
-              // Check for corner trim
-              vec3 trimResult = checkCornerTrim(vUv);
-              if (trimResult.r > 0.0 || trimResult.g > 0.0 || trimResult.b > 0.0) {
-                // Blend trim with base color for subtle effect
-                color = mix(baseColor, trimResult, 0.3);
+              // Check for bands
+              vec4 bandResult = checkBand(vUv);
+              if (bandResult.a > 0.0) {
+                color = bandResult.rgb;
+                alpha = bandResult.a;
+              } else {
+                // Check for corner trim
+                vec3 trimResult = checkCornerTrim(vUv);
+                if (trimResult.r > 0.0 || trimResult.g > 0.0 || trimResult.b > 0.0) {
+                  // Blend trim with base color for subtle effect
+                  color = mix(baseColor, trimResult, 0.3);
+                }
               }
             }
           }
@@ -1458,18 +2604,10 @@ export class StructureManager {
         windowCount: { value: windowCount },
         windowDataTexture: { value: windowDataTexture },
         textureWidth: { value: textureWidth },
-        hasDoor: { value: hasDoor },
-        isGarageDoor: { value: isGarageDoor },
-        doorX: { value: doorX },
-        doorY: { value: doorY },
-        doorWidth: { value: doorWidth },
-        doorHeight: { value: doorHeight },
-        hasDoor2: { value: hasDoor2 },
-        isGarageDoor2: { value: isGarageDoor2 },
-        door2X: { value: door2X },
-        door2Y: { value: door2Y },
-        door2Width: { value: door2Width },
-        door2Height: { value: door2Height },
+        doorCount: { value: doorCount },
+        doorRects: { value: doorRects },
+        bandCount: { value: bandCount },
+        bandRects: { value: bandRects },
         frameColorUniform: { value: new THREE.Vector3(frameColorValue.r, frameColorValue.g, frameColorValue.b) },
         glassColorUniform: { value: new THREE.Vector3(glassColorValue.r, glassColorValue.g, glassColorValue.b) },
         doorColorUniform: { value: new THREE.Vector3(doorColorValue.r, doorColorValue.g, doorColorValue.b) },
@@ -1789,17 +2927,94 @@ export class StructureManager {
   }
 
   /**
-   * Remove a structure from the scene
-   * @param {number} structureID - Structure ID to remove
+   * Start demolition animation for a structure
+   * @param {string|number} structureID - Structure ID to demolish
+   * @param {number} durationSeconds - Duration in seconds (default: 7.5 seconds)
    */
-  removeStructure(structureID) {
-    const mesh = this.structureMeshes.get(structureID);
+  startDemolitionAnimation(structureID, durationSeconds = 7.5) {
+    const structureIDStr = String(structureID);
+    const mesh = this.structureMeshes.get(structureIDStr);
+    
+    if (!mesh) {
+      // No mesh to animate, just remove immediately
+      this.removeStructureImmediate(structureID);
+      return;
+    }
+    
+    // If there's already a demolition animation, skip
+    const existingAnimation = this.constructionAnimations.get(structureIDStr);
+    if (existingAnimation && existingAnimation.type === 'demolition') {
+      return; // Already demolishing
+    }
+    
+    // Cancel any construction animation
+    if (existingAnimation && existingAnimation.type === 'construction') {
+      this.constructionAnimations.delete(structureIDStr);
+    }
+    
+    // Register demolition animation
+    const startTime = Date.now();
+    const durationMs = durationSeconds * 1000;
+    const animation = new AnimationState(startTime, durationMs, 'demolition');
+    
+    // Calculate bounding box for position calculations during demolition
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    box.setFromObject(mesh);
+    animation.boundingBox = box.clone();
+    
+    // Store original rotation and position for animation
+    animation.originalPosition = mesh.position.y;
+    animation.originalRotation = mesh.rotation.z;
+    
+    // Cache materials once to avoid traversing every frame (PERFORMANCE OPTIMIZATION)
+    animation.cachedMaterials = [];
+    mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(mat => {
+            if (mat.transparent !== undefined) {
+              animation.cachedMaterials.push(mat);
+            }
+          });
+        } else {
+          if (child.material.transparent !== undefined) {
+            animation.cachedMaterials.push(child.material);
+          }
+        }
+      }
+    });
+    animation.lastOpacity = null; // Reset opacity tracking
+    
+    this.constructionAnimations.set(structureIDStr, animation);
+    
+    if (window.earthring?.debug) {
+      console.log(`[StructureManager] Started demolition animation for structure ${structureIDStr}, duration: ${durationSeconds}s`);
+    }
+  }
+
+  /**
+   * Immediately remove a structure from the scene (no animation)
+   * Used internally after demolition animation completes, or when animation is not desired
+   * @param {string|number} structureID - Structure ID to remove
+   */
+  removeStructureImmediate(structureID) {
+    const structureIDStr = String(structureID);
+    
+    // Clean up any active animations
+    if (this.constructionAnimations.has(structureIDStr)) {
+      this.constructionAnimations.delete(structureIDStr);
+    }
+    
+    const mesh = this.structureMeshes.get(structureIDStr);
     if (mesh) {
       this.scene.remove(mesh);
       // Dispose of geometry and materials
       mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
+          if (child.geometry) {
+            child.geometry.dispose();
+          }
           if (child.material) {
             if (Array.isArray(child.material)) {
               child.material.forEach(mat => mat.dispose());
@@ -1809,11 +3024,26 @@ export class StructureManager {
           }
         }
       });
-      this.structureMeshes.delete(structureID);
+      this.structureMeshes.delete(structureIDStr);
     }
 
     // Remove from game state
-    this.gameState.removeStructure(structureID);
+    this.gameState.removeStructure(structureIDStr);
+  }
+
+  /**
+   * Remove a structure from the scene with demolition animation
+   * @param {number|string} structureID - Structure ID to remove
+   * @param {boolean} animate - Whether to animate demolition (default: true)
+   */
+  removeStructure(structureID, animate = true) {
+    if (animate) {
+      // Start demolition animation, which will remove the structure when complete
+      this.startDemolitionAnimation(structureID);
+    } else {
+      // Remove immediately without animation
+      this.removeStructureImmediate(structureID);
+    }
   }
 
   /**
@@ -1892,6 +3122,308 @@ export class StructureManager {
           child.material.emissive.setHex(0x000000);
         }
       });
+    }
+  }
+
+  /**
+   * Apply construction animation to a structure mesh
+   * Uses scale-based vertical reveal: building grows from bottom up
+   * Works with all material types including ShaderMaterials
+   * @param {THREE.Group} mesh - Structure mesh group
+   * @param {number} progress - Animation progress (0.0 to 1.0)
+   * @param {string} structureId - Structure ID
+   */
+  applyConstructionAnimation(mesh, progress, structureId) {
+    if (!mesh) return;
+
+    const animation = this.constructionAnimations.get(structureId);
+    if (!animation || !animation.boundingBox) {
+      return;
+    }
+
+    // Use easing function for smooth animation (ease-out)
+    const easedProgress = 1 - Math.pow(1 - progress, 3);
+
+    // Calculate the reveal height based on progress
+    // Progress 0 = only bottom visible, Progress 1 = entire building visible
+    const box = animation.boundingBox;
+    const totalHeight = box.max.y - box.min.y;
+    
+    // Scale Y from 0 to 1 to reveal building from bottom
+    const scaleY = easedProgress;
+    const minScale = 0.01; // Minimum visible scale (1% to ensure something is visible)
+    
+    // Store original position on first frame
+    if (animation.originalPosition === null) {
+      animation.originalPosition = mesh.position.y;
+    }
+    
+    const originalY = animation.originalPosition;
+    
+    // Scale the mesh vertically
+    mesh.scale.y = Math.max(minScale, scaleY);
+    
+    // Adjust position so building grows from bottom up
+    // The bounding box is in local coordinates relative to the group center
+    // box.min.y is the bottom of the mesh in local space (negative value, e.g., -6.5)
+    // Original world bottom = originalY + box.min.y
+    // When scaled, local bottom = box.min.y * scaleY
+    // To keep world bottom fixed: newPositionY + (box.min.y * scaleY) = originalY + box.min.y
+    // Solving: newPositionY = originalY + box.min.y - (box.min.y * scaleY)
+    //         = originalY + box.min.y * (1 - scaleY)
+    // Since box.min.y is negative, as scaleY increases, the adjustment decreases (moves up)
+    const bottomY = box.min.y;
+    const positionAdjustment = bottomY * (1 - scaleY);
+    mesh.position.y = originalY + positionAdjustment;
+
+    // Fade in opacity during first 10% of animation for smooth appearance
+    // But ensure minimum opacity so buildings are visible even at very small scale
+    const opacityProgress = Math.max(0.3, Math.min(1.0, progress / 0.1)); // Min 30% opacity
+    
+    // Debug logging (only for first structure, first few frames)
+    if (window.earthring?.debug && structureId.includes('_1_1') && progress < 0.05) {
+      console.log(`[StructureManager] Construction ${structureId}:`, {
+        progress: progress.toFixed(3),
+        scaleY: scaleY.toFixed(3),
+        actualScaleY: mesh.scale.y.toFixed(3),
+        originalY: originalY.toFixed(2),
+        newY: mesh.position.y.toFixed(2),
+        adjustment: positionAdjustment.toFixed(2),
+        bottomY: bottomY.toFixed(2),
+        height: totalHeight.toFixed(2),
+        opacity: opacityProgress.toFixed(3)
+      });
+    }
+    
+    // PERFORMANCE: Only update materials if opacity changed (avoids expensive traverse + unnecessary updates)
+    if (animation.lastOpacity !== opacityProgress) {
+      // Use cached materials if available (set during registration), otherwise fall back to traverse
+      const materials = animation.cachedMaterials || [];
+      if (materials.length === 0) {
+        // Fallback: cache materials if not already cached (shouldn't happen in normal flow)
+        mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if (mat.transparent !== undefined && !materials.includes(mat)) {
+                  materials.push(mat);
+                }
+              });
+            } else {
+              if (child.material.transparent !== undefined && !materials.includes(child.material)) {
+                materials.push(child.material);
+              }
+            }
+          }
+        });
+        animation.cachedMaterials = materials;
+      }
+      
+      // Update all cached materials
+      const needsTransparency = opacityProgress < 1.0;
+      for (const mat of materials) {
+        mat.transparent = needsTransparency;
+        mat.opacity = opacityProgress;
+      }
+      
+      animation.lastOpacity = opacityProgress;
+    }
+  }
+
+  /**
+   * Apply demolition animation to a structure mesh
+   * Uses scale down + rotation + opacity fade
+   * @param {THREE.Group} mesh - Structure mesh group
+   * @param {number} progress - Animation progress (0.0 to 1.0)
+   * @param {string} structureId - Structure ID
+   */
+  applyDemolitionAnimation(mesh, progress, structureId) {
+    if (!mesh) return;
+
+    const animation = this.constructionAnimations.get(structureId);
+    if (!animation) return;
+
+    // Ensure original values are stored (should be set in startDemolitionAnimation)
+    if (animation.originalPosition === null) {
+      animation.originalPosition = mesh.position.y;
+    }
+    if (animation.originalRotation === null || animation.originalRotation === undefined) {
+      animation.originalRotation = mesh.rotation.z;
+    }
+
+    // Use easing for smoother animation (ease-in for demolition)
+    const easedProgress = Math.pow(progress, 2); // Quadratic ease-in
+
+    // Shrink vertically: scale Y from 1 to 0
+    const scaleProgress = 1.0 - easedProgress;
+    const minScale = 0.01;
+    mesh.scale.y = Math.max(minScale, scaleProgress);
+
+    // Adjust position so building shrinks from bottom up (opposite of construction)
+    // Keep bottom fixed while top shrinks down
+    const bottomY = animation.boundingBox ? animation.boundingBox.min.y : 0;
+    const originalY = animation.originalPosition;
+    // As scale decreases, move position down to keep bottom fixed
+    const positionAdjustment = bottomY * (1 - scaleProgress);
+    mesh.position.y = originalY + positionAdjustment;
+
+    // Add rotation as it falls (tilt forward)
+    // Start tilting after 20% progress, increase tilting as it progresses
+    if (easedProgress > 0.2) {
+      const tiltProgress = (easedProgress - 0.2) / 0.8; // 0 to 1 over remaining 80%
+      const rotationAmount = tiltProgress * Math.PI * 0.15; // Max 15 degrees tilt
+      if (animation.originalRotation !== null && animation.originalRotation !== undefined) {
+        mesh.rotation.z = animation.originalRotation + rotationAmount;
+      }
+    }
+
+    // Fade out opacity (faster fade than scale)
+    // Opacity drops more quickly to make it feel like it's disappearing
+    const opacityProgress = Math.pow(easedProgress, 1.5); // Faster fade
+    const opacity = Math.max(0, 1.0 - opacityProgress);
+    
+    // PERFORMANCE: Only update materials if opacity changed (avoids expensive traverse + unnecessary updates)
+    if (animation.lastOpacity !== opacity) {
+      // Use cached materials if available (set during registration), otherwise fall back to traverse
+      const materials = animation.cachedMaterials || [];
+      if (materials.length === 0) {
+        // Fallback: cache materials if not already cached (shouldn't happen in normal flow)
+        mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if (mat.transparent !== undefined && !materials.includes(mat)) {
+                  materials.push(mat);
+                }
+              });
+            } else {
+              if (child.material.transparent !== undefined && !materials.includes(child.material)) {
+                materials.push(child.material);
+              }
+            }
+          }
+        });
+        animation.cachedMaterials = materials;
+      }
+      
+      // Update all cached materials
+      for (const mat of materials) {
+        mat.transparent = true; // Demolition always uses transparency
+        mat.opacity = opacity;
+      }
+      
+      animation.lastOpacity = opacity;
+    }
+
+    // Debug logging for first few frames
+    if (window.earthring?.debug && easedProgress < 0.1) {
+      console.log(`[StructureManager] Demolition ${structureId}:`, {
+        progress: easedProgress.toFixed(3),
+        scaleY: mesh.scale.y.toFixed(3),
+        opacity: opacity.toFixed(3),
+        rotation: mesh.rotation.z.toFixed(3)
+      });
+    }
+  }
+
+  /**
+   * Update all construction/demolition animations
+   * Should be called every frame in the render loop
+   * @param {number} deltaTime - Time since last frame in seconds (unused, we use absolute time)
+   */
+  updateConstructionAnimations(deltaTime) {
+    const now = Date.now();
+
+    for (const [structureId, animation] of this.constructionAnimations.entries()) {
+      const progress = animation.getProgress(now);
+      const mesh = this.structureMeshes.get(structureId);
+
+      if (!mesh) {
+        // Mesh was removed, clean up animation
+        this.constructionAnimations.delete(structureId);
+        continue;
+      }
+
+      if (animation.type === 'construction') {
+        this.applyConstructionAnimation(mesh, progress, structureId);
+      } else if (animation.type === 'demolition') {
+        this.applyDemolitionAnimation(mesh, progress, structureId);
+      }
+
+      // Clean up completed animations
+      if (animation.completed) {
+        if (animation.type === 'construction') {
+          // Reset scale and position when complete
+          mesh.scale.set(1, 1, 1);
+          if (animation.originalPosition !== null) {
+            mesh.position.y = animation.originalPosition;
+          }
+          mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => {
+                  if (mat.transparent !== undefined) {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                });
+              } else {
+                if (child.material.transparent !== undefined) {
+                  child.material.transparent = false;
+                  child.material.opacity = 1.0;
+                }
+              }
+            }
+          });
+        } else if (animation.type === 'demolition') {
+          // Demolition complete - remove mesh and clean up
+          if (window.earthring?.debug) {
+            console.log(`[StructureManager] Demolition complete for structure ${structureId}, removing from scene`);
+          }
+          this.removeStructureImmediate(structureId);
+        }
+        this.constructionAnimations.delete(structureId);
+      }
+    }
+  }
+
+  /**
+   * Check if there are any active demolition animations
+   * @returns {boolean} True if demolition animations are in progress
+   */
+  hasActiveDemolitionAnimations() {
+    for (const [structureId, animation] of this.constructionAnimations.entries()) {
+      if (animation.type === 'demolition' && !animation.completed) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Wait for all demolition animations to complete
+   * @param {number} maxWaitTime - Maximum time to wait in milliseconds (default: 10 seconds)
+   * @param {number} checkInterval - Interval to check in milliseconds (default: 100ms)
+   * @returns {Promise<void>} Resolves when all demolitions complete or timeout
+   */
+  async waitForDemolitionAnimations(maxWaitTime = 10000, checkInterval = 100) {
+    const startTime = Date.now();
+    let elapsed = 0;
+
+    while (elapsed < maxWaitTime) {
+      if (!this.hasActiveDemolitionAnimations()) {
+        if (window.earthring?.debug) {
+          console.log(`[StructureManager] All demolition animations complete after ${elapsed}ms`);
+        }
+        return;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      elapsed = Date.now() - startTime;
+    }
+
+    if (window.earthring?.debug) {
+      console.warn(`[StructureManager] Timeout waiting for demolition animations (${maxWaitTime}ms), continuing anyway`);
     }
   }
 }

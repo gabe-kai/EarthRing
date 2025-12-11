@@ -239,6 +239,11 @@ sceneManager.onRender((deltaTime) => {
   
   // Update debug info panel
   debugPanel.update();
+  
+  // Update construction/demolition animations
+  if (structureManager) {
+    structureManager.updateConstructionAnimations();
+  }
 });
 
   // Initialize bottom toolbar

@@ -1,0 +1,23 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "shapes": {
+      "rectangle": {
+        "type": "footprint",
+        "aspect_ratio_range": [0.8, 1.2],
+        "description": "Basic rectangle footprint"
+      },
+      "bar": {
+        "type": "footprint",
+        "aspect_ratio_range": [2.0, 4.0],
+        "description": "Elongated bar footprint for warehouses and logistics"
+      },
+      "plate": {
+        "type": "footprint",
+        "aspect_ratio_range": [1.2, 3.0],
+        "description": "Low, broad plate for yards and platforms"
+      }
+    }
+  },
+  "hub_overrides": {}
+}

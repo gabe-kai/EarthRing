@@ -11,20 +11,24 @@ import (
 
 // Structure represents a stored structure record.
 type Structure struct {
-	ID             int64           `json:"id"`
-	StructureType  string          `json:"structure_type"`
-	Floor          int             `json:"floor"`
-	OwnerID        *int64          `json:"owner_id,omitempty"`
-	ZoneID         *int64          `json:"zone_id,omitempty"`
-	IsProcedural   bool            `json:"is_procedural"`
-	ProceduralSeed *int64          `json:"procedural_seed,omitempty"`
-	Position       Position        `json:"position"` // (ring_position, width_position)
-	Rotation       float64         `json:"rotation"` // Rotation in degrees
-	Scale          float64         `json:"scale"`
-	Properties     json.RawMessage `json:"properties,omitempty"`
-	ModelData      json.RawMessage `json:"model_data,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                        int64           `json:"id"`
+	StructureType             string          `json:"structure_type"`
+	Floor                     int             `json:"floor"`
+	OwnerID                   *int64          `json:"owner_id,omitempty"`
+	ZoneID                    *int64          `json:"zone_id,omitempty"`
+	IsProcedural              bool            `json:"is_procedural"`
+	ProceduralSeed            *int64          `json:"procedural_seed,omitempty"`
+	Position                  Position        `json:"position"` // (ring_position, width_position)
+	Rotation                  float64         `json:"rotation"` // Rotation in degrees
+	Scale                     float64         `json:"scale"`
+	Properties                json.RawMessage `json:"properties,omitempty"`
+	ModelData                 json.RawMessage `json:"model_data,omitempty"`
+	ConstructionState         *string         `json:"construction_state,omitempty"`         // 'pending', 'constructing', 'completed', 'demolishing', 'demolished'
+	ConstructionStartedAt     *time.Time      `json:"construction_started_at,omitempty"`
+	ConstructionCompletedAt   *time.Time      `json:"construction_completed_at,omitempty"`
+	ConstructionDurationSecs  *int            `json:"construction_duration_seconds,omitempty"`
+	CreatedAt                 time.Time       `json:"created_at"`
+	UpdatedAt                 time.Time       `json:"updated_at"`
 }
 
 // Position represents a 2D point (ring_position, width_position).
@@ -128,15 +132,39 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 		modelDataJSON = nil
 	}
 
+	// Set construction state for buildings (non-procedural)
+	// For buildings, start in 'constructing' state; for others, 'completed'
+	var constructionState string
+	var constructionStartedAt *time.Time
+	var constructionCompletedAt *time.Time
+	var constructionDurationSecs int
+	now := time.Now()
+	
+	if input.StructureType == "building" && !input.IsProcedural {
+		constructionState = "constructing"
+		constructionStartedAt = &now
+		constructionDurationSecs = 300 // Default: 5 minutes
+		completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
+		constructionCompletedAt = &completionTime
+	} else {
+		// For non-building structures or procedural structures, use 'completed' state
+		constructionState = "completed"
+		constructionStartedAt = &now
+		constructionCompletedAt = &now
+		constructionDurationSecs = 0 // Instant for non-buildings
+	}
+	
 	// Convert Position to PostGIS geometry POINT using ST_MakePoint
 	query := `
 		INSERT INTO structures (
 			structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
-			position, rotation, scale, properties, model_data
-		) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12)
+			position, rotation, scale, properties, model_data,
+			construction_state, construction_started_at, construction_completed_at, construction_duration_seconds
+		) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
 		          ST_X(position)::float, ST_Y(position)::float, rotation, scale,
-		          properties, model_data, created_at, updated_at
+		          properties, model_data, construction_state, construction_started_at, 
+		          construction_completed_at, construction_duration_seconds, created_at, updated_at
 	`
 
 	var structure Structure
@@ -146,6 +174,10 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 	var proceduralSeedOut sql.NullInt64
 	var propertiesOut sql.NullString
 	var modelDataOut sql.NullString
+	var constructionStateOut sql.NullString
+	var constructionStartedAtOut sql.NullTime
+	var constructionCompletedAtOut sql.NullTime
+	var constructionDurationSecsOut sql.NullInt64
 
 	err := s.db.QueryRow(
 		query,
@@ -161,6 +193,10 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 		input.Scale,
 		propertiesJSON,
 		modelDataJSON,
+		constructionState,
+		constructionStartedAt,
+		constructionCompletedAt,
+		constructionDurationSecs,
 	).Scan(
 		&structure.ID,
 		&structure.StructureType,
@@ -175,6 +211,10 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 		&structure.Scale,
 		&propertiesOut,
 		&modelDataOut,
+		&constructionStateOut,
+		&constructionStartedAtOut,
+		&constructionCompletedAtOut,
+		&constructionDurationSecsOut,
 		&structure.CreatedAt,
 		&structure.UpdatedAt,
 	)
@@ -198,6 +238,19 @@ func (s *StructureStorage) CreateStructure(input *StructureCreateInput) (*Struct
 	if modelDataOut.Valid {
 		structure.ModelData = json.RawMessage(modelDataOut.String)
 	}
+	if constructionStateOut.Valid {
+		structure.ConstructionState = &constructionStateOut.String
+	}
+	if constructionStartedAtOut.Valid {
+		structure.ConstructionStartedAt = &constructionStartedAtOut.Time
+	}
+	if constructionCompletedAtOut.Valid {
+		structure.ConstructionCompletedAt = &constructionCompletedAtOut.Time
+	}
+	if constructionDurationSecsOut.Valid {
+		duration := int(constructionDurationSecsOut.Int64)
+		structure.ConstructionDurationSecs = &duration
+	}
 
 	return &structure, nil
 }
@@ -207,7 +260,8 @@ func (s *StructureStorage) GetStructure(id int64) (*Structure, error) {
 	query := `
 		SELECT id, structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
 		       ST_X(position)::float, ST_Y(position)::float, rotation, scale,
-		       properties, model_data, created_at, updated_at
+		       properties, model_data, construction_state, construction_started_at,
+		       construction_completed_at, construction_duration_seconds, created_at, updated_at
 		FROM structures
 		WHERE id = $1
 	`
@@ -219,6 +273,10 @@ func (s *StructureStorage) GetStructure(id int64) (*Structure, error) {
 	var proceduralSeed sql.NullInt64
 	var properties sql.NullString
 	var modelData sql.NullString
+	var constructionState sql.NullString
+	var constructionStartedAt sql.NullTime
+	var constructionCompletedAt sql.NullTime
+	var constructionDurationSecs sql.NullInt64
 
 	err := s.db.QueryRow(query, id).Scan(
 		&structure.ID,
@@ -234,6 +292,10 @@ func (s *StructureStorage) GetStructure(id int64) (*Structure, error) {
 		&structure.Scale,
 		&properties,
 		&modelData,
+		&constructionState,
+		&constructionStartedAt,
+		&constructionCompletedAt,
+		&constructionDurationSecs,
 		&structure.CreatedAt,
 		&structure.UpdatedAt,
 	)
@@ -259,6 +321,19 @@ func (s *StructureStorage) GetStructure(id int64) (*Structure, error) {
 	}
 	if modelData.Valid {
 		structure.ModelData = json.RawMessage(modelData.String)
+	}
+	if constructionState.Valid {
+		structure.ConstructionState = &constructionState.String
+	}
+	if constructionStartedAt.Valid {
+		structure.ConstructionStartedAt = &constructionStartedAt.Time
+	}
+	if constructionCompletedAt.Valid {
+		structure.ConstructionCompletedAt = &constructionCompletedAt.Time
+	}
+	if constructionDurationSecs.Valid {
+		duration := int(constructionDurationSecs.Int64)
+		structure.ConstructionDurationSecs = &duration
 	}
 
 	return &structure, nil
@@ -514,12 +589,54 @@ func (s *StructureStorage) DeleteAllProceduralStructures() (int64, error) {
 	return rowsAffected, nil
 }
 
+// DeleteAllStructures deletes every structure and optionally resets the id sequence.
+func (s *StructureStorage) DeleteAllStructures(resetSequence bool) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin delete transaction: %w", err)
+	}
+
+	deleteResult, err := tx.Exec(`DELETE FROM structures`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("failed to delete structures: %w", err)
+	}
+
+	deletedCount, err := deleteResult.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("failed to get deleted structure count: %w", err)
+	}
+
+	if resetSequence {
+		var seqName sql.NullString
+		if err := tx.QueryRow(`SELECT pg_get_serial_sequence('structures', 'id')`).Scan(&seqName); err != nil {
+			_ = tx.Rollback()
+			return 0, fmt.Errorf("failed to look up structures id sequence: %w", err)
+		}
+
+		if seqName.Valid && seqName.String != "" {
+			if _, err := tx.Exec(`ALTER SEQUENCE ` + seqName.String + ` RESTART WITH 1`); err != nil {
+				_ = tx.Rollback()
+				return 0, fmt.Errorf("failed to reset structures id sequence: %w", err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit structure deletion: %w", err)
+	}
+
+	return deletedCount, nil
+}
+
 // ListStructuresByArea retrieves structures within a bounding box.
 func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, floor int) ([]*Structure, error) {
 	query := `
 		SELECT id, structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
 		       ST_X(position)::float, ST_Y(position)::float, rotation, scale,
-		       properties, model_data, created_at, updated_at
+		       properties, model_data, construction_state, construction_started_at,
+		       construction_completed_at, construction_duration_seconds, created_at, updated_at
 		FROM structures
 		WHERE floor = $1
 		  AND ST_X(position) BETWEEN $2 AND $3
@@ -546,6 +663,10 @@ func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, 
 		var proceduralSeed sql.NullInt64
 		var properties sql.NullString
 		var modelData sql.NullString
+		var constructionState sql.NullString
+		var constructionStartedAt sql.NullTime
+		var constructionCompletedAt sql.NullTime
+		var constructionDurationSecs sql.NullInt64
 
 		err := rows.Scan(
 			&structure.ID,
@@ -561,6 +682,10 @@ func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, 
 			&structure.Scale,
 			&properties,
 			&modelData,
+			&constructionState,
+			&constructionStartedAt,
+			&constructionCompletedAt,
+			&constructionDurationSecs,
 			&structure.CreatedAt,
 			&structure.UpdatedAt,
 		)
@@ -584,6 +709,19 @@ func (s *StructureStorage) ListStructuresByArea(minX, maxX, minY, maxY float64, 
 		if modelData.Valid {
 			structure.ModelData = json.RawMessage(modelData.String)
 		}
+		if constructionState.Valid {
+			structure.ConstructionState = &constructionState.String
+		}
+		if constructionStartedAt.Valid {
+			structure.ConstructionStartedAt = &constructionStartedAt.Time
+		}
+		if constructionCompletedAt.Valid {
+			structure.ConstructionCompletedAt = &constructionCompletedAt.Time
+		}
+		if constructionDurationSecs.Valid {
+			duration := int(constructionDurationSecs.Int64)
+			structure.ConstructionDurationSecs = &duration
+		}
 
 		structures = append(structures, &structure)
 	}
@@ -600,7 +738,8 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 	query := `
 		SELECT id, structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
 		       ST_X(position)::float, ST_Y(position)::float, rotation, scale,
-		       properties, model_data, created_at, updated_at
+		       properties, model_data, construction_state, construction_started_at,
+		       construction_completed_at, construction_duration_seconds, created_at, updated_at
 		FROM structures
 		WHERE owner_id = $1
 		ORDER BY id
@@ -625,6 +764,10 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 		var proceduralSeed sql.NullInt64
 		var properties sql.NullString
 		var modelData sql.NullString
+		var constructionState sql.NullString
+		var constructionStartedAt sql.NullTime
+		var constructionCompletedAt sql.NullTime
+		var constructionDurationSecs sql.NullInt64
 
 		err := rows.Scan(
 			&structure.ID,
@@ -640,6 +783,10 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 			&structure.Scale,
 			&properties,
 			&modelData,
+			&constructionState,
+			&constructionStartedAt,
+			&constructionCompletedAt,
+			&constructionDurationSecs,
 			&structure.CreatedAt,
 			&structure.UpdatedAt,
 		)
@@ -662,6 +809,19 @@ func (s *StructureStorage) ListStructuresByOwner(ownerID int64) ([]*Structure, e
 		}
 		if modelData.Valid {
 			structure.ModelData = json.RawMessage(modelData.String)
+		}
+		if constructionState.Valid {
+			structure.ConstructionState = &constructionState.String
+		}
+		if constructionStartedAt.Valid {
+			structure.ConstructionStartedAt = &constructionStartedAt.Time
+		}
+		if constructionCompletedAt.Valid {
+			structure.ConstructionCompletedAt = &constructionCompletedAt.Time
+		}
+		if constructionDurationSecs.Valid {
+			duration := int(constructionDurationSecs.Int64)
+			structure.ConstructionDurationSecs = &duration
 		}
 
 		structures = append(structures, &structure)

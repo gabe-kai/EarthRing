@@ -124,6 +124,23 @@ type Claims struct {
 }
 ```
 
+**Role-Based Access Control:**
+
+User roles are stored in the `players` table (`role` column, added in migration 000025) and included in JWT tokens. The server validates roles for admin-only endpoints:
+
+- `"player"`: Default role for regular users (default value)
+- `"admin"`: Administrative access for admin panel and management operations
+
+Roles are read from the database during login and included in JWT claims. Admin endpoints check for `authRole == "admin"` before allowing access.
+
+**Database Schema:**
+```sql
+ALTER TABLE players
+ADD COLUMN role VARCHAR(50) DEFAULT 'player' NOT NULL;
+
+CREATE INDEX idx_players_role ON players(role);
+```
+
 **Registered Claims Used:**
 - `iss` (Issuer): "earthring-server"
 - `sub` (Subject): User ID

@@ -79,25 +79,21 @@ def get_hub_colors(hub_name: str, zone_type: str) -> Optional[Dict[str, str]]:
     try:
         palettes = load_color_palettes()
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Warning: Failed to load color palettes: {e}")
         return None
     
     # Map hub name to JSON key
     hub_key = HUB_NAME_MAPPING.get(hub_name)
     if hub_key is None:
-        print(f"Warning: Unknown hub name: {hub_name}")
         return None
     
     # Get hub palette
     hub_palette = palettes.get(hub_key)
     if hub_palette is None:
-        print(f"Warning: Hub palette not found: {hub_key}")
         return None
     
     # Get zone type palette
     zone_palette = hub_palette.get(zone_type)
     if zone_palette is None:
-        print(f"Warning: Zone type palette not found: {zone_type} for hub {hub_key}")
         return None
     
     return zone_palette

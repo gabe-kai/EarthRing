@@ -274,14 +274,12 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Extract zone properties
 				props, ok := zoneMap["properties"].(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: zone properties not found or invalid, skipping")
 					continue
 				}
 
 				// Extract geometry
 				geometry, ok := zoneMap["geometry"].(map[string]interface{})
 				if !ok {
-					log.Printf("[StoreChunk] Warning: zone geometry not found or invalid, skipping")
 					continue
 				}
 
@@ -453,6 +451,10 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				if windows, ok := structureMap["windows"].([]interface{}); ok {
 					modelDataMap["windows"] = windows
 				}
+				// Include decorations if present (list)
+				if decorations, ok := structureMap["decorations"].([]interface{}); ok {
+					modelDataMap["decorations"] = decorations
+				}
 				// Include doors (dictionary mapping facade to door info)
 				// Check if doors key exists, even if empty
 				if doorsVal, exists := structureMap["doors"]; exists {
@@ -477,25 +479,102 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				if buildingSubtype, ok := structureMap["building_subtype"].(string); ok {
 					modelDataMap["building_subtype"] = buildingSubtype
 				}
+				// Include building_class, category, subcategory if present (new structure library fields)
+				if buildingClass, ok := structureMap["building_class"].(string); ok {
+					modelDataMap["class"] = buildingClass
+				}
+				if category, ok := structureMap["category"].(string); ok {
+					modelDataMap["category"] = category
+				}
+				if subcategory, ok := structureMap["subcategory"].(string); ok {
+					modelDataMap["subcategory"] = subcategory
+				}
+				// Include color_palette, shader_patterns, decorative_elements from model_data if present
+				if modelDataVal, exists := structureMap["model_data"]; exists {
+					if modelDataObj, ok := modelDataVal.(map[string]interface{}); ok {
+						if colorPalette, ok := modelDataObj["color_palette"].(map[string]interface{}); ok {
+							modelDataMap["color_palette"] = colorPalette
+						}
+						if shaderPatterns, ok := modelDataObj["shader_patterns"].([]interface{}); ok {
+							modelDataMap["shader_patterns"] = shaderPatterns
+						}
+						if decorativeElements, ok := modelDataObj["decorative_elements"].([]interface{}); ok {
+							modelDataMap["decorative_elements"] = decorativeElements
+						}
+						if decorations, ok := modelDataObj["decorations"].([]interface{}); ok {
+							modelDataMap["decorations"] = decorations
+						}
+						if shape, ok := modelDataObj["shape"].(string); ok {
+							modelDataMap["shape"] = shape
+						}
+						if sizeClass, ok := modelDataObj["size_class"].(string); ok {
+							modelDataMap["size_class"] = sizeClass
+						}
+						if height, ok := modelDataObj["height"].(float64); ok {
+							modelDataMap["height"] = height
+						}
+					}
+				}
 				if len(modelDataMap) > 0 {
 					if modelBytes, err := json.Marshal(modelDataMap); err == nil {
 						modelDataJSON = modelBytes
 					}
 				}
 
-				// For procedural structures, we don't need to link them to zones
-				// They're deterministic and guaranteed to be within their zones
-				var zoneID *int64 // nil for procedural structures
+				// Match structure to zone by position using PostGIS
+				// Find which zone contains this structure's position
+				var zoneID *int64
+				if len(zoneIDs) > 0 && structFloor == floor {
+					matchZoneQuery := `
+						SELECT id FROM zones
+						WHERE id = ANY($1)
+						  AND floor = $2
+						  AND ST_Contains(geometry, ST_SetSRID(ST_MakePoint($3, $4), 0))
+						LIMIT 1
+					`
+					var matchedZoneID int64
+					err := tx.QueryRow(matchZoneQuery, pq.Array(zoneIDs), structFloor, posX, posY).Scan(&matchedZoneID)
+					if err == nil {
+						zoneID = &matchedZoneID
+					} else if err != sql.ErrNoRows {
+						// Log non-expected errors but don't fail structure creation
+						log.Printf("[StoreChunk] Warning: Failed to match structure to zone at (%.1f, %.1f): %v", posX, posY, err)
+					}
+					// If no match found (sql.ErrNoRows), zoneID remains nil (structure not in any zone)
+				}
 
 				// Insert structure directly into database within transaction
 				// Bypass validation for procedural structures (they're deterministic and guaranteed valid)
 				// Use ST_SetSRID(ST_MakePoint(...), 0) for PostGIS GEOMETRY(POINT, 0) type
 				// (Migration 000023 converts structures.position from POINT to GEOMETRY)
+				// Procedural buildings also use construction animations (same as player-placed)
+				now := time.Now()
+				var constructionState string
+				var constructionStartedAt *time.Time
+				var constructionCompletedAt *time.Time
+				var constructionDurationSecs int
+				
+				// For buildings (procedural or not), use construction animation
+				if structureType == "building" {
+					constructionState = "constructing"
+					constructionStartedAt = &now
+					constructionDurationSecs = 300 // Default: 5 minutes
+					completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
+					constructionCompletedAt = &completionTime
+				} else {
+					// Non-building structures spawn instantly
+					constructionState = "completed"
+					constructionStartedAt = &now
+					constructionCompletedAt = &now
+					constructionDurationSecs = 0
+				}
+				
 				structureQuery := `
 					INSERT INTO structures (
 						structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
-						position, rotation, scale, properties, model_data
-					) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12)
+						position, rotation, scale, properties, model_data,
+						construction_state, construction_started_at, construction_completed_at, construction_duration_seconds
+					) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12, $13, $14, $15, $16)
 					RETURNING id
 				`
 
@@ -532,7 +611,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				savepointName := fmt.Sprintf("sp_structure_%d", len(structureIDs))
 				_, spErr := tx.Exec(fmt.Sprintf("SAVEPOINT %s", savepointName))
 				if spErr != nil {
-					log.Printf("[StoreChunk] Warning: failed to create savepoint for structure: %v", spErr)
 					continue
 				}
 
@@ -550,6 +628,10 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					scale,
 					propertiesJSONInterface,
 					modelDataJSONInterface,
+					constructionState,
+					constructionStartedAt,
+					constructionCompletedAt,
+					constructionDurationSecs,
 				).Scan(&structID)
 				if err != nil {
 					// Rollback to savepoint to recover from the error
@@ -564,7 +646,6 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Release the savepoint on success
 				_, releaseErr := tx.Exec(fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName))
 				if releaseErr != nil {
-					log.Printf("[StoreChunk] Warning: failed to release savepoint: %v", releaseErr)
 				}
 
 				structureIDs = append(structureIDs, structID)

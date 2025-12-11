@@ -62,6 +62,11 @@ export class ZoneInfoTags {
     this.toolbarExpanded = false;
     this.zonesVisible = false;
     
+    // PERFORMANCE: Cache zone bounds to avoid recalculating every frame
+    this.zoneBoundsCache = new Map(); // Map<zoneId, { center, bounds }>
+    this.lastZoneCount = 0; // Track when zones change
+    this.lastTagUpdateTime = 0; // Throttle tag updates
+    
     this.setupContainer();
     this.setupStyles();
     this.setupEventListeners();
@@ -240,7 +245,14 @@ export class ZoneInfoTags {
       // Wrap both camera and zone positions to [0, RING_CIRCUMFERENCE) first
       const cameraXWrapped = wrapArcLength(cameraPos.x);
       const zonesWithDistance = visibleZones.map(zone => {
-        const bounds = calculateZoneBounds(zone.geometry);
+        // PERFORMANCE: Use cached bounds if available
+        let bounds = this.zoneBoundsCache.get(zone.id);
+        if (!bounds) {
+          bounds = calculateZoneBounds(zone.geometry);
+          if (bounds) {
+            this.zoneBoundsCache.set(zone.id, bounds);
+          }
+        }
         if (!bounds) return { zone, distance: Infinity };
         
         // Wrap zone X to [0, RING_CIRCUMFERENCE)
@@ -323,7 +335,14 @@ export class ZoneInfoTags {
       if (!visibleZoneIds.has(zoneId)) {
         tag.remove();
         this.tags.delete(zoneId);
+        // Clean up cached bounds when zone is removed
+        this.zoneBoundsCache.delete(zoneId);
       }
+    }
+    
+    // Update zone count tracker
+    if (this.gameStateManager) {
+      this.lastZoneCount = this.gameStateManager.getAllZones().length;
     }
 
     // Create or update tags for visible zones
@@ -458,8 +477,13 @@ export class ZoneInfoTags {
       }
     }
     
-    // Update tags first (in case zones changed)
-    this.updateTags();
+    // PERFORMANCE: Only update tags if zones changed or enough time has passed (throttle)
+    const now = performance.now();
+    const zonesChanged = this.gameStateManager && this.gameStateManager.getAllZones().length !== this.lastZoneCount;
+    if (zonesChanged || (now - this.lastTagUpdateTime) >= 500) {
+      this.updateTags();
+      this.lastTagUpdateTime = now;
+    }
     
     if (!this.visible) return;
 
@@ -538,9 +562,19 @@ export class ZoneInfoTags {
       : 'Unknown';
     
     // Format area for display
+    // Area comes from PostGIS ST_Area which returns square meters
     let areaDisplay = 'N/A';
-    if (zone.area !== undefined && zone.area !== null) {
+    if (zone.area !== undefined && zone.area !== null && !isNaN(zone.area) && zone.area > 0) {
+      // Area is in square meters from PostGIS
       areaDisplay = `${zone.area.toFixed(2)} m²`;
+    } else {
+      // Try to get area from properties if not in main zone object
+      if (zone.properties && typeof zone.properties === 'object' && zone.properties.area) {
+        const propArea = zone.properties.area;
+        if (typeof propArea === 'number' && propArea > 0) {
+          areaDisplay = `${propArea.toFixed(2)} m²`;
+        }
+      }
     }
     
     // Fetch owner username for tooltip
@@ -565,11 +599,38 @@ export class ZoneInfoTags {
     }
     const tooltip = tooltipParts.join('\n');
     
+    // Count structures in this zone
+    let structureCount = 0;
+    if (this.gameStateManager) {
+      const structures = this.gameStateManager.getAllStructures();
+      
+      // Normalize zone ID to number for comparison
+      const zoneIdNum = typeof zone.id === 'string' ? parseInt(zone.id, 10) : Number(zone.id);
+      const zoneIdStr = String(zone.id);
+      
+      // Count structures that match this zone ID
+      // Handle both number and string comparisons, and null/undefined zone_id
+      structureCount = structures.filter(s => {
+        if (!s || s.zone_id === null || s.zone_id === undefined) {
+          return false;
+        }
+        
+        // Normalize structure zone_id to number for comparison
+        const sZoneIdNum = typeof s.zone_id === 'string' ? parseInt(s.zone_id, 10) : Number(s.zone_id);
+        const sZoneIdStr = String(s.zone_id);
+        
+        // Compare as both number and string to handle type mismatches
+        return sZoneIdNum === zoneIdNum || sZoneIdStr === zoneIdStr;
+      }).length;
+    }
+    
     // Build zone info object for info box
     const zoneInfo = {
       'Name': zone.name || `Zone ${zone.id}`,
+      'Zone ID': zone.id.toString(),
       'Floor': (zone.floor ?? 0).toString(),
       'Area': areaDisplay,
+      'Structures': structureCount.toString(),
     };
     
     // Define name save handler

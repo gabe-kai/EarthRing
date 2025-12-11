@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "defaults": {
+    "patterns": {
+      "industrial_panel": {
+        "type": "panel",
+        "scale": 2.0,
+        "roughness": 0.7
+      },
+      "industrial_strip": {
+        "type": "stripe",
+        "scale": 4.0,
+        "roughness": 0.6
+      }
+    }
+  },
+  "hub_overrides": {}
+}

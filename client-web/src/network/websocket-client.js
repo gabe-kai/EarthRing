@@ -229,41 +229,58 @@ class WebSocketClient {
 
   /**
    * Handle incoming messages
+   * Supports both single JSON messages and NDJSON (newline-delimited JSON) format
    */
   handleMessage(data) {
-    try {
-      const message = JSON.parse(data);
+    // Split by newlines to handle NDJSON format (multiple JSON objects separated by \n)
+    const lines = typeof data === 'string' ? data.split('\n').filter(line => line.trim()) : [data];
+    
+    for (const line of lines) {
+      if (!line || !line.trim()) continue;
+      
+      try {
+        const message = JSON.parse(line);
+        this.processMessage(message);
+      } catch (error) {
+        console.error('Failed to parse WebSocket message:', error, { 
+          raw: typeof line === 'string' ? line.slice(0, 500) : line,
+          lineLength: typeof line === 'string' ? line.length : 'N/A'
+        });
+      }
+    }
+  }
 
-      // Handle responses to pending requests
-      if (message.id && this.pendingRequests.has(message.id)) {
-        const pending = this.pendingRequests.get(message.id);
-        this.pendingRequests.delete(message.id);
+  /**
+   * Process a single parsed message
+   */
+  processMessage(message) {
+    // Handle responses to pending requests
+    if (message.id && this.pendingRequests.has(message.id)) {
+      const pending = this.pendingRequests.get(message.id);
+      this.pendingRequests.delete(message.id);
 
-        if (message.type === 'error') {
-          const error = new Error(message.message || message.error);
-          // Check if it's an authentication error
-          if (message.code === 'InvalidToken' || message.code === 'MissingToken' || 
-              message.message?.includes('authentication') || message.message?.includes('unauthorized')) {
-            // Import and call handleAuthenticationFailure
-            import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
-              handleAuthenticationFailure('WebSocket authentication failed');
-            });
-            this.disconnect();
-          }
-          pending.reject(error);
-        } else {
-          pending.resolve(message.data);
+      if (message.type === 'error') {
+        const error = new Error(message.message || message.error);
+        // Check if it's an authentication error
+        if (message.code === 'InvalidToken' || message.code === 'MissingToken' || 
+            message.message?.includes('authentication') || message.message?.includes('unauthorized')) {
+          // Import and call handleAuthenticationFailure
+          import('../auth/auth-service.js').then(({ handleAuthenticationFailure }) => {
+            handleAuthenticationFailure('WebSocket authentication failed');
+          });
+          this.disconnect();
         }
-        // Don't return - continue to handle as event too (for chunk_data, etc.)
+        pending.reject(error);
+      } else {
+        pending.resolve(message.data);
       }
+      // Don't return - continue to handle as event too (for chunk_data, etc.)
+    }
 
-      // Handle message type handlers (always process, even if it was a response)
-      if (this.messageHandlers.has(message.type)) {
-        const handlers = this.messageHandlers.get(message.type);
-        handlers.forEach(handler => handler(message.data, message));
-      }
-    } catch (error) {
-      console.error('Failed to parse WebSocket message:', error);
+    // Handle message type handlers (always process, even if it was a response)
+    if (this.messageHandlers.has(message.type)) {
+      const handlers = this.messageHandlers.get(message.type);
+      handlers.forEach(handler => handler(message.data, message));
     }
   }
 

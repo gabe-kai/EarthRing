@@ -174,6 +174,7 @@ CREATE TABLE players (
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'player' NOT NULL, -- User role: 'player', 'admin', etc.
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP,
     level INTEGER DEFAULT 1,
@@ -186,6 +187,7 @@ CREATE TABLE players (
 
 CREATE INDEX idx_players_username ON players(username);
 CREATE INDEX idx_players_email ON players(email);
+CREATE INDEX idx_players_role ON players(role);
 ```
 
 **Note on POINT Type Queries:**
@@ -539,6 +541,31 @@ CREATE INDEX idx_player_actions_player ON player_actions(player_id);
 CREATE INDEX idx_player_actions_type ON player_actions(action_type);
 CREATE INDEX idx_player_actions_timestamp ON player_actions(timestamp DESC);
 ```
+
+### Structure Regeneration Config
+
+Stores configuration for structure regeneration, including a counter that affects building placement during complete regeneration.
+
+```sql
+CREATE TABLE structure_regeneration_config (
+    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    regeneration_counter INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Purpose**: 
+- Tracks how many times "Complete Regeneration" has been performed
+- Counter is included in procedural generation seed calculation
+- Ensures different building placements each time complete regeneration is triggered
+
+**Usage**:
+- Counter increments each time admin performs "Complete Regeneration"
+- Counter value is retrieved and passed to procedural service during chunk generation
+- Included in seed calculation: `hash((chunk_seed, floor, chunk_index, idx, STRUCTURE_PLACEMENT_VERSION, regeneration_counter))`
+- Different counter value = different seed = different building types and positions
+
+**Migration**: `000026_add_regeneration_counter`
 
 ## Spatial Queries
 

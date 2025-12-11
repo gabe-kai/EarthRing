@@ -1029,8 +1029,9 @@ export class ChunkManager {
       });
 
       this.streamingSubscriptionID = response.subscription_id;
-      // Store wrapped position for consistent distance calculations
-      this.lastSubscriptionPosition = wrappedRingPosition;
+      // Store raw position (not wrapped) for accurate tracking
+      this.lastSubscriptionPosition = ringPosition;
+      this.lastSubscriptionFloor = floor;
       this.subscriptionRadiusMeters = radiusMeters;
       this.subscriptionWidthMeters = widthMeters;
       return response.subscription_id;
@@ -1049,7 +1050,17 @@ export class ChunkManager {
    * @param {string|number} lodLevel - Level of detail: "low", "medium", "high" or 0-3 (default: "medium")
    * @returns {Promise} Promise that resolves when request is sent
    */
-  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium') {
+  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium', forceReload = false) {
+    // If forceReload is true, clear subscription state to force a fresh subscription
+    // This ensures chunks are regenerated from the database
+    if (forceReload && this.useStreaming) {
+      // Clear subscription state - this will cause a fresh subscription below
+      this.streamingSubscriptionID = null;
+      this.lastSubscriptionPosition = null;
+      this.lastSubscriptionFloor = null;
+      console.log('[Chunks] Force reload: cleared subscription state to trigger fresh chunk load');
+    }
+    
     // If streaming is enabled and we have a subscription, update subscription if camera moved significantly
     if (this.useStreaming && this.streamingSubscriptionID) {
       // Check if camera has moved significantly (more than 1000m, different chunk, or different floor)
@@ -1094,6 +1105,7 @@ export class ChunkManager {
         // Update pose using stream_update_pose instead of re-subscribing
         try {
           await this.updateStreamingPose(ringPosition, floor);
+          this.lastSubscriptionPosition = ringPosition;
           this.lastSubscriptionFloor = floor;
         } catch (error) {
           console.error('[Chunks] Failed to update streaming pose:', error);
@@ -1106,6 +1118,8 @@ export class ChunkManager {
     // If we don't have a subscription, create one
     if (!this.streamingSubscriptionID) {
       await this.subscribeToStreaming(ringPosition, floor, radius * 1000, radius * 1000);
+      this.lastSubscriptionPosition = ringPosition;
+      this.lastSubscriptionFloor = floor;
       return;
     }
     
@@ -1152,7 +1166,7 @@ export class ChunkManager {
       const floor = this.getFloorFromChunkID(chunkID);
       
       // Handle different zone formats
-      let zoneID, name, zoneType, zoneFloor, isSystemZone, geometry, properties, metadata;
+      let zoneID, name, zoneType, zoneFloor, isSystemZone, geometry, properties, metadata, area;
       
       if (zoneFeature && zoneFeature.type === 'Feature' && zoneFeature.properties) {
         // GeoJSON Feature format
@@ -1161,6 +1175,8 @@ export class ChunkManager {
         zoneType = zoneFeature.properties.zone_type;
         zoneFloor = zoneFeature.properties.floor !== undefined ? zoneFeature.properties.floor : floor;
         isSystemZone = zoneFeature.properties.is_system_zone || false;
+        // Area is in properties at the top level (not in properties.properties)
+        area = zoneFeature.properties.area !== undefined ? zoneFeature.properties.area : null;
         geometry = zoneFeature.geometry;
         properties = zoneFeature.properties.properties;
         metadata = zoneFeature.properties.metadata;
@@ -1171,6 +1187,8 @@ export class ChunkManager {
         zoneType = zoneFeature.zone_type || zoneFeature.zoneType;
         zoneFloor = zoneFeature.floor !== undefined ? zoneFeature.floor : floor;
         isSystemZone = zoneFeature.is_system_zone || zoneFeature.isSystemZone || false;
+        // Area might be at top level or in properties
+        area = zoneFeature.area !== undefined ? zoneFeature.area : (zoneFeature.properties?.area !== undefined ? zoneFeature.properties.area : null);
         geometry = zoneFeature.geometry;
         properties = zoneFeature.properties;
         metadata = zoneFeature.metadata;
@@ -1232,7 +1250,7 @@ export class ChunkManager {
         return null;
       }
       
-      return {
+      const zoneObj = {
         id: zoneID,
         name: name || `Zone (${chunkID})`,
         zone_type: zoneType || 'restricted',
@@ -1242,6 +1260,13 @@ export class ChunkManager {
         properties: properties,
         metadata: metadata,
       };
+      
+      // Only include area if it's defined and valid
+      if (area !== undefined && area !== null && !isNaN(area) && area > 0) {
+        zoneObj.area = area;
+      }
+      
+      return zoneObj;
     }).filter(zone => zone !== null); // Filter out null zones
     
     if (zones.length === 0) {
@@ -1330,6 +1355,11 @@ export class ChunkManager {
             procedural_seed: properties.procedural_seed,
             properties: properties.properties,
             model_data: properties.model_data,
+            // Extract construction state fields for animations
+            construction_state: properties.construction_state,
+            construction_started_at: properties.construction_started_at,
+            construction_completed_at: properties.construction_completed_at,
+            construction_duration_seconds: properties.construction_duration_seconds,
           };
           
           // Extract doors and garage_doors from model_data if present (for structures loaded from database)
@@ -1367,7 +1397,7 @@ export class ChunkManager {
           return null;
         }
       } else {
-        // Direct structure object format
+        // Direct structure object format (from database via WebSocket)
         structure = structureFeature;
         
         // Ensure position is an object with x, y
@@ -1379,6 +1409,27 @@ export class ChunkManager {
             console.warn(`[Chunks] Failed to parse structure position from chunk ${chunkID}:`, e);
             return null;
           }
+        }
+        
+        // Ensure zone_id is preserved (should already be there from server, but verify)
+        // zone_id comes from database and should be a number
+        if (structure.zone_id !== undefined && structure.zone_id !== null) {
+          // Ensure it's a number (server sends as int64)
+          if (typeof structure.zone_id === 'string') {
+            structure.zone_id = parseInt(structure.zone_id, 10);
+          }
+        }
+        
+        // Ensure construction state fields are preserved (critical for animations)
+        // These should already be present from server when loaded from database
+        // Debug log to verify they're present
+        if (window.earthring?.debug && idx < 3) {
+          console.log(`[Chunks] Direct format structure ${structure.id} construction fields:`, {
+            construction_state: structure.construction_state,
+            construction_started_at: structure.construction_started_at,
+            construction_duration_seconds: structure.construction_duration_seconds,
+            construction_completed_at: structure.construction_completed_at
+          });
         }
         
         // Extract doors and garage_doors from model_data if present (for structures loaded from database)
@@ -1434,6 +1485,26 @@ export class ChunkManager {
       return;
     }
 
+    // Debug: Log zone_id information for structures
+    if (window.earthring?.debug && structures.length > 0) {
+      const structuresWithZoneId = structures.filter(s => s && s.zone_id != null);
+      if (structuresWithZoneId.length > 0) {
+        console.log(`[Chunks] Extracted ${structures.length} structures from chunk ${chunkID}, ${structuresWithZoneId.length} have zone_id:`, {
+          chunkID,
+          totalStructures: structures.length,
+          withZoneId: structuresWithZoneId.length,
+          sampleZoneIds: structuresWithZoneId.slice(0, 5).map(s => ({
+            id: s.id,
+            zone_id: s.zone_id,
+            zone_id_type: typeof s.zone_id,
+            structure_type: s.structure_type
+          }))
+        });
+      } else if (window.earthring?.debug) {
+        console.warn(`[Chunks] Extracted ${structures.length} structures from chunk ${chunkID}, but NONE have zone_id set`);
+      }
+    }
+    
     // Pass structures to structure manager with chunkID for tracking
     if (this.structureManager) {
       this.structureManager.handleStreamedStructures(structures, chunkID);

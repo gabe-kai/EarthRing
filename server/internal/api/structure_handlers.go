@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,20 +61,24 @@ type updateStructureRequest struct {
 }
 
 type structureResponse struct {
-	ID             int64             `json:"id"`
-	StructureType  string            `json:"structure_type"`
-	Floor          int               `json:"floor"`
-	OwnerID        *int64            `json:"owner_id,omitempty"`
-	ZoneID         *int64            `json:"zone_id,omitempty"`
-	IsProcedural   bool              `json:"is_procedural"`
-	ProceduralSeed *int64            `json:"procedural_seed,omitempty"`
-	Position       database.Position `json:"position"`
-	Rotation       float64           `json:"rotation"`
-	Scale          float64           `json:"scale"`
-	Properties     json.RawMessage   `json:"properties,omitempty"`
-	ModelData      json.RawMessage   `json:"model_data,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	ID                        int64             `json:"id"`
+	StructureType             string            `json:"structure_type"`
+	Floor                     int               `json:"floor"`
+	OwnerID                   *int64            `json:"owner_id,omitempty"`
+	ZoneID                    *int64            `json:"zone_id,omitempty"`
+	IsProcedural              bool              `json:"is_procedural"`
+	ProceduralSeed            *int64            `json:"procedural_seed,omitempty"`
+	Position                  database.Position `json:"position"`
+	Rotation                  float64           `json:"rotation"`
+	Scale                     float64           `json:"scale"`
+	Properties                json.RawMessage   `json:"properties,omitempty"`
+	ModelData                 json.RawMessage   `json:"model_data,omitempty"`
+	ConstructionState         *string           `json:"construction_state,omitempty"`
+	ConstructionStartedAt     *time.Time        `json:"construction_started_at,omitempty"`
+	ConstructionCompletedAt   *time.Time        `json:"construction_completed_at,omitempty"`
+	ConstructionDurationSecs  *int              `json:"construction_duration_seconds,omitempty"`
+	CreatedAt                 time.Time         `json:"created_at"`
+	UpdatedAt                 time.Time         `json:"updated_at"`
 }
 
 // CreateStructure handles POST /api/structures
@@ -320,8 +325,14 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 	}
 
 	// Check admin role
-	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
+	authRole, ok := r.Context().Value(auth.RoleKey).(string)
+	if !ok || authRole == "" {
+		log.Printf("DeleteAllProceduralStructures: Role not found in context or empty")
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
 	if authRole != "admin" {
+		log.Printf("DeleteAllProceduralStructures: User does not have admin role (got: %q, want: admin)", authRole)
 		respondWithError(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -345,6 +356,103 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 		"message":                "Procedural structures deleted and chunks reset",
 		"structures_deleted":     count,
 		"chunks_deleted":         chunksDeleted,
+		"regeneration_triggered": true,
+	})
+}
+
+// CompleteRegeneration handles POST /api/structures/regenerate
+// Admin-only endpoint that increments regeneration counter and deletes all procedural structures and chunks.
+// This ensures different buildings in different positions on next generation.
+func (h *StructureHandlers) CompleteRegeneration(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Check admin role
+	authRole, ok := r.Context().Value(auth.RoleKey).(string)
+	if !ok || authRole == "" {
+		log.Printf("CompleteRegeneration: Role not found in context or empty")
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+	if authRole != "admin" {
+		log.Printf("CompleteRegeneration: User does not have admin role (got: %q, want: admin)", authRole)
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	// Increment regeneration counter first (this affects building placement)
+	configStorage := database.NewConfigStorage(h.db)
+	regenerationCounter, err := configStorage.IncrementRegenerationCounter()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to increment regeneration counter: %v", err))
+		return
+	}
+
+	// Delete all procedural structures
+	count, err := h.storage.DeleteAllProceduralStructures()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete procedural structures: %v", err))
+		return
+	}
+
+	// Also delete all chunks to force regeneration with new building placements
+	chunkStorage := database.NewChunkStorage(h.db)
+	chunksDeleted, err := chunkStorage.DeleteAllChunks()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete chunks: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":                "Complete regeneration triggered - buildings will be in different positions",
+		"regeneration_counter":    regenerationCounter,
+		"structures_deleted":     count,
+		"chunks_deleted":         chunksDeleted,
+		"regeneration_triggered":  true,
+	})
+}
+
+// DeleteAllStructures handles DELETE /api/structures/all
+// Admin-only endpoint that deletes all structures (procedural and player), resets ids, and triggers regeneration.
+func (h *StructureHandlers) DeleteAllStructures(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Check admin role
+	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
+	if authRole != "admin" {
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	// Delete all structures and reset the id sequence
+	count, err := h.storage.DeleteAllStructures(true)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete structures: %v", err))
+		return
+	}
+
+	// Also delete all chunks to force regeneration with empty structures
+	chunkStorage := database.NewChunkStorage(h.db)
+	chunksDeleted, err := chunkStorage.DeleteAllChunks()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete chunks: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":                "All structures deleted, sequence reset, and chunks reset",
+		"structures_deleted":     count,
+		"chunks_deleted":         chunksDeleted,
+		"sequence_reset":         true,
 		"regeneration_triggered": true,
 	})
 }
@@ -449,19 +557,23 @@ func (h *StructureHandlers) ListStructuresByOwner(w http.ResponseWriter, r *http
 // structureToResponse converts a database.Structure to a structureResponse.
 func structureToResponse(s *database.Structure) structureResponse {
 	return structureResponse{
-		ID:             s.ID,
-		StructureType:  s.StructureType,
-		Floor:          s.Floor,
-		OwnerID:        s.OwnerID,
-		ZoneID:         s.ZoneID,
-		IsProcedural:   s.IsProcedural,
-		ProceduralSeed: s.ProceduralSeed,
-		Position:       s.Position,
-		Rotation:       s.Rotation,
-		Scale:          s.Scale,
-		Properties:     s.Properties,
-		ModelData:      s.ModelData,
-		CreatedAt:      s.CreatedAt,
-		UpdatedAt:      s.UpdatedAt,
+		ID:                       s.ID,
+		StructureType:            s.StructureType,
+		Floor:                    s.Floor,
+		OwnerID:                  s.OwnerID,
+		ZoneID:                   s.ZoneID,
+		IsProcedural:             s.IsProcedural,
+		ProceduralSeed:           s.ProceduralSeed,
+		Position:                 s.Position,
+		Rotation:                 s.Rotation,
+		Scale:                    s.Scale,
+		Properties:               s.Properties,
+		ModelData:                s.ModelData,
+		ConstructionState:        s.ConstructionState,
+		ConstructionStartedAt:    s.ConstructionStartedAt,
+		ConstructionCompletedAt:  s.ConstructionCompletedAt,
+		ConstructionDurationSecs: s.ConstructionDurationSecs,
+		CreatedAt:                s.CreatedAt,
+		UpdatedAt:                s.UpdatedAt,
 	}
 }

@@ -6,10 +6,38 @@
 import { deleteZone } from '../api/zone-service.js';
 
 let infoWindow = null;
+let currentZone = null; // Track current zone for structure count updates
+let currentGameStateManager = null; // Track gameStateManager for updates
+let structureUpdateListeners = []; // Track listeners for cleanup
 
-export function showZoneInfoWindow(zone, onDelete) {
+/**
+ * Hide the zone info window
+ */
+export function hideZoneInfoWindow() {
+  // Clean up structure update listeners
+  if (currentGameStateManager && structureUpdateListeners.length > 0) {
+    structureUpdateListeners.forEach(({ event, callback }) => {
+      currentGameStateManager.off(event, callback);
+    });
+    structureUpdateListeners = [];
+  }
+  
+  if (infoWindow) {
+    infoWindow.remove();
+    infoWindow = null;
+  }
+  
+  currentZone = null;
+  currentGameStateManager = null;
+}
+
+export function showZoneInfoWindow(zone, onDelete, gameStateManager = null) {
   // Remove existing window if present
   hideZoneInfoWindow();
+  
+  // Store current zone and gameStateManager for updates
+  currentZone = zone;
+  currentGameStateManager = gameStateManager;
   
   // Debug: Log zone data to verify area field
   console.log('[ZoneInfoWindow] Zone data:', {
@@ -44,7 +72,7 @@ export function showZoneInfoWindow(zone, onDelete) {
   infoWindow.innerHTML = `
     <div class="zone-info-content">
       <div class="zone-info-header">
-        <h3>${zone.name || `Zone ${zone.id}`}</h3>
+        <h3>${zone.name || `Zone ${zone.id}`} <span style="color: #888; font-size: 0.85rem; font-weight: normal;">(ID: ${zone.id})</span></h3>
         <button class="zone-info-close" id="zone-info-close">×</button>
       </div>
       <div class="zone-info-body">
@@ -53,16 +81,16 @@ export function showZoneInfoWindow(zone, onDelete) {
           <span class="zone-info-value">${zoneTypeDisplay}</span>
         </div>
         <div class="zone-info-row">
-          <span class="zone-info-label">ID:</span>
-          <span class="zone-info-value">${zone.id}</span>
-        </div>
-        <div class="zone-info-row">
           <span class="zone-info-label">Floor:</span>
           <span class="zone-info-value">${zone.floor ?? 0}</span>
         </div>
         <div class="zone-info-row">
           <span class="zone-info-label">Area:</span>
           <span class="zone-info-value">${areaDisplay}</span>
+        </div>
+        <div class="zone-info-row">
+          <span class="zone-info-label">Structures:</span>
+          <span class="zone-info-value" id="zone-structure-count">Loading...</span>
         </div>
         ${zone.owner_id ? `
         <div class="zone-info-row">
@@ -189,6 +217,63 @@ export function showZoneInfoWindow(zone, onDelete) {
   document.head.appendChild(style);
   document.body.appendChild(infoWindow);
   
+  // Initial structure count
+  updateStructureCount();
+  
+  // Listen for structure additions/updates to update count dynamically
+  if (gameStateManager) {
+    const onStructureAdded = () => updateStructureCount();
+    const onStructureUpdated = () => updateStructureCount();
+    
+    gameStateManager.on('structureAdded', onStructureAdded);
+    gameStateManager.on('structureUpdated', onStructureUpdated);
+    
+    // Store listeners for cleanup
+    structureUpdateListeners = [
+      { event: 'structureAdded', callback: onStructureAdded },
+      { event: 'structureUpdated', callback: onStructureUpdated }
+    ];
+    
+    // Debug logging (always log when debug mode is on, not just when window opens)
+    if (window.earthring?.debug) {
+      const structures = gameStateManager.getAllStructures();
+      const zoneIdNum = typeof zone.id === 'string' ? parseInt(zone.id, 10) : Number(zone.id);
+      
+      // Get all structures with zone_id and their IDs
+      const structuresWithZoneId = structures.filter(s => s && s.zone_id != null);
+      const matchingStructures = structures.filter(s => {
+        if (!s || s.zone_id === null || s.zone_id === undefined) {
+          return false;
+        }
+        const sZoneIdNum = typeof s.zone_id === 'string' ? parseInt(s.zone_id, 10) : Number(s.zone_id);
+        const sZoneIdStr = String(s.zone_id);
+        return sZoneIdNum === zoneIdNum || sZoneIdStr === String(zone.id);
+      });
+      
+      console.log(`[ZoneInfo] Zone ${zone.id} structure count analysis:`, {
+        zoneId: zone.id,
+        zoneIdType: typeof zone.id,
+        zoneIdNum,
+        totalStructures: structures.length,
+        structuresWithZoneId: structuresWithZoneId.length,
+        matchingCount: matchingStructures.length,
+        sampleStructureZoneIds: structures.slice(0, 20).map(s => ({
+          id: s?.id,
+          zone_id: s?.zone_id,
+          zone_id_type: typeof s?.zone_id,
+          structure_type: s?.structure_type
+        })),
+        matchingStructureIds: matchingStructures.map(s => s.id),
+        allUniqueZoneIds: [...new Set(structuresWithZoneId.map(s => String(s.zone_id)))].slice(0, 10)
+      });
+    }
+  } else {
+    const countElement = document.getElementById('zone-structure-count');
+    if (countElement) {
+      countElement.textContent = 'N/A';
+    }
+  }
+  
   // Set up event listeners
   document.getElementById('zone-info-close').addEventListener('click', () => {
     hideZoneInfoWindow();
@@ -228,10 +313,4 @@ export function showZoneInfoWindow(zone, onDelete) {
   }
 }
 
-export function hideZoneInfoWindow() {
-  if (infoWindow) {
-    infoWindow.remove();
-    infoWindow = null;
-  }
-}
 

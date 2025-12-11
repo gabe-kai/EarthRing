@@ -151,6 +151,7 @@ type WebSocketHandlers struct {
 	chunkStorage     *database.ChunkStorage
 	zoneStorage      *database.ZoneStorage
 	structureStorage *database.StructureStorage
+	configStorage    *database.ConfigStorage
 	streamManager    *streaming.Manager
 	profiler         *performance.Profiler
 	upgrader         websocket.Upgrader
@@ -164,6 +165,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 	jwtService := auth.NewJWTService(cfg)
 	proceduralClient := procedural.NewProceduralClient(cfg)
 	chunkStorage := database.NewChunkStorage(db)
+	configStorage := database.NewConfigStorage(db)
 
 	// Get allowed origins from config or use defaults
 	allowedOrigins := []string{
@@ -177,6 +179,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 		hub:              NewWebSocketHub(),
 		db:               db,
 		config:           cfg,
+		configStorage:    configStorage,
 		jwtService:       jwtService,
 		proceduralClient: proceduralClient,
 		chunkStorage:     chunkStorage,
@@ -570,6 +573,219 @@ type ChunkDataResponse struct {
 	Chunks []ChunkData `json:"chunks"`
 }
 
+// loadStructuresAndZonesFromDB loads structures and zones from the database for a chunk
+// Returns (zones, structures) as []interface{} in the format expected by the client
+func (h *WebSocketHandlers) loadStructuresAndZonesFromDB(chunkDBID int64, floor int, chunkData *database.StoredChunkData) ([]interface{}, []interface{}) {
+	var zones []interface{}
+	var structures []interface{}
+	zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
+
+	// Load zones from chunk_data.zone_ids (system zones)
+	if chunkData != nil && len(chunkData.ZoneIDs) > 0 {
+		zoneRecords, err := h.zoneStorage.GetZonesByIDs(chunkData.ZoneIDs)
+		if err == nil {
+			for _, zone := range zoneRecords {
+				zoneIDMap[zone.ID] = true
+				zoneFeature := map[string]interface{}{
+					"type": "Feature",
+					"properties": map[string]interface{}{
+						"id":             zone.ID,
+						"name":           zone.Name,
+						"zone_type":      zone.ZoneType,
+						"floor":          zone.Floor,
+						"is_system_zone": zone.IsSystemZone,
+					},
+					"geometry": json.RawMessage(zone.Geometry),
+				}
+				// Add area explicitly (always include, even if 0)
+				if zone.Area >= 0 {
+					zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+				} else {
+					zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+				}
+				// Add properties and metadata if present
+				if len(zone.Properties) > 0 {
+					zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck
+				}
+				if len(zone.Metadata) > 0 {
+					zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck
+				}
+				zones = append(zones, zoneFeature)
+			}
+		} else {
+			log.Printf("[Chunks] Warning: Failed to load zones by IDs for chunk %d: %v", chunkDBID, err)
+		}
+	}
+
+	// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
+	overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(chunkDBID, floor)
+	if err == nil {
+		for _, zone := range overlappingZones {
+			// Skip if we already added this zone from zone_ids
+			if zoneIDMap[zone.ID] {
+				continue
+			}
+			zoneIDMap[zone.ID] = true
+			zoneFeature := map[string]interface{}{
+				"type": "Feature",
+				"properties": map[string]interface{}{
+					"id":             zone.ID,
+					"name":           zone.Name,
+					"zone_type":      zone.ZoneType,
+					"floor":          zone.Floor,
+					"is_system_zone": zone.IsSystemZone,
+				},
+				"geometry": json.RawMessage(zone.Geometry),
+			}
+			// Add area explicitly (always include, even if 0)
+			if zone.Area >= 0 {
+				zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+			} else {
+				zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+			}
+			// Add properties and metadata if present
+			if len(zone.Properties) > 0 {
+				zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck
+			}
+			if len(zone.Metadata) > 0 {
+				zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck
+			}
+			zones = append(zones, zoneFeature)
+		}
+	} else {
+		log.Printf("[Chunks] Warning: Failed to load overlapping zones for chunk %d: %v", chunkDBID, err)
+	}
+
+	// Load structures from chunk_data.structure_ids
+	if chunkData != nil && len(chunkData.StructureIDs) > 0 {
+		for _, structID := range chunkData.StructureIDs {
+			structure, err := h.structureStorage.GetStructure(structID)
+			if err != nil {
+				log.Printf("[Chunks] Warning: Failed to load structure %d for chunk %d: %v", structID, chunkDBID, err)
+				continue
+			}
+
+			// Convert structure to format expected by client
+			structureFeature := map[string]interface{}{
+				"id":             fmt.Sprintf("%d", structure.ID),
+				"type":           "building",
+				"structure_type": structure.StructureType,
+				"floor":          structure.Floor,
+				"position": map[string]interface{}{
+					"x": structure.Position.X,
+					"y": structure.Position.Y,
+				},
+				"rotation":      structure.Rotation,
+				"scale":         structure.Scale,
+				"is_procedural": structure.IsProcedural,
+			}
+
+			// Extract dimensions, windows, doors, and garage doors from model_data if present
+			if len(structure.ModelData) > 0 {
+				var modelDataMap map[string]interface{}
+				if err := json.Unmarshal(structure.ModelData, &modelDataMap); err == nil {
+					if dimensions, ok := modelDataMap["dimensions"].(map[string]interface{}); ok {
+						structureFeature["dimensions"] = dimensions
+					}
+					if windows, ok := modelDataMap["windows"].([]interface{}); ok {
+						structureFeature["windows"] = windows
+					}
+					if doorsVal, exists := modelDataMap["doors"]; exists {
+						if doors, ok := doorsVal.(map[string]interface{}); ok {
+							structureFeature["doors"] = doors
+						}
+					}
+					if garageDoorsVal, exists := modelDataMap["garage_doors"]; exists {
+						if garageDoors, ok := garageDoorsVal.([]interface{}); ok {
+							structureFeature["garage_doors"] = garageDoors
+						}
+					}
+					if decorationsVal, exists := modelDataMap["decorations"]; exists {
+						if decorations, ok := decorationsVal.([]interface{}); ok {
+							structureFeature["decorations"] = decorations
+						}
+					}
+					if className, ok := modelDataMap["class"].(string); ok {
+						structureFeature["building_class"] = className
+					}
+					if category, ok := modelDataMap["category"].(string); ok {
+						structureFeature["category"] = category
+					}
+					if subcategory, ok := modelDataMap["subcategory"].(string); ok {
+						structureFeature["subcategory"] = subcategory
+					}
+					if shape, ok := modelDataMap["shape"].(string); ok {
+						structureFeature["shape"] = shape
+					}
+					if sizeClass, ok := modelDataMap["size_class"].(string); ok {
+						structureFeature["size_class"] = sizeClass
+					}
+					if height, ok := modelDataMap["height"].(float64); ok {
+						structureFeature["height"] = height
+					}
+					if colorPalette, ok := modelDataMap["color_palette"].(map[string]interface{}); ok {
+						structureFeature["color_palette"] = colorPalette
+					}
+					if shaderPatterns, ok := modelDataMap["shader_patterns"].([]interface{}); ok {
+						structureFeature["shader_patterns"] = shaderPatterns
+					}
+					if decorativeElements, ok := modelDataMap["decorative_elements"].([]interface{}); ok {
+						structureFeature["decorative_elements"] = decorativeElements
+					}
+					if _, hasSubtype := structureFeature["building_subtype"]; !hasSubtype {
+						if subtype, ok := modelDataMap["building_subtype"].(string); ok {
+							structureFeature["building_subtype"] = subtype
+						}
+					}
+				}
+			}
+
+			// Extract properties and parse as JSON object
+			var propertiesMap map[string]interface{}
+			if len(structure.Properties) > 0 {
+				if err := json.Unmarshal(structure.Properties, &propertiesMap); err == nil {
+					if buildingSubtype, ok := propertiesMap["building_subtype"].(string); ok {
+						structureFeature["building_subtype"] = buildingSubtype
+					}
+					structureFeature["properties"] = propertiesMap
+				} else {
+					structureFeature["properties"] = structure.Properties
+				}
+			} else {
+				structureFeature["properties"] = map[string]interface{}{}
+			}
+
+			// Add procedural seed if present
+			if structure.ProceduralSeed != nil {
+				structureFeature["procedural_seed"] = *structure.ProceduralSeed
+			}
+
+			// Add zone_id if present
+			if structure.ZoneID != nil {
+				structureFeature["zone_id"] = *structure.ZoneID
+			}
+
+			// Add construction state fields if present
+			if structure.ConstructionState != nil {
+				structureFeature["construction_state"] = *structure.ConstructionState
+			}
+			if structure.ConstructionStartedAt != nil {
+				structureFeature["construction_started_at"] = structure.ConstructionStartedAt.Format(time.RFC3339)
+			}
+			if structure.ConstructionCompletedAt != nil {
+				structureFeature["construction_completed_at"] = structure.ConstructionCompletedAt.Format(time.RFC3339)
+			}
+			if structure.ConstructionDurationSecs != nil {
+				structureFeature["construction_duration_seconds"] = *structure.ConstructionDurationSecs
+			}
+
+			structures = append(structures, structureFeature)
+		}
+	}
+
+	return zones, structures
+}
+
 // loadChunksForIDs loads chunk data for the given chunk IDs and LOD level.
 // This is the server-side chunk processing pipeline that handles database lookup,
 // generation, compression, and wrapping.
@@ -635,7 +851,13 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 			}
 		} else if storedMetadata == nil {
 			// Chunk doesn't exist - generate it using procedural service
-			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+			// Get regeneration counter for building placement variation
+			regenerationCounter, err := h.configStorage.GetRegenerationCounter()
+			if err != nil {
+				log.Printf("Warning: Failed to get regeneration counter, using 0: %v", err)
+				regenerationCounter = 0
+			}
+			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil, &regenerationCounter)
 			if err != nil {
 				log.Printf("Failed to generate chunk %s: %v", chunkID, err)
 				// Return empty chunk on generation failure
@@ -657,30 +879,82 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 				// Store the generated chunk in the database
 				if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 					log.Printf("Failed to store chunk %s: %v", chunkID, err)
-				}
+					// Return empty chunk on storage failure
+					chunk = ChunkData{
+						ID:         chunkID,
+						Geometry:   nil,
+						Structures: []interface{}{},
+						Zones:      []interface{}{},
+						Metadata: &ChunkMetadata{
+							ID:           chunkID,
+							Floor:        floor,
+							ChunkIndex:   chunkIndex,
+							Version:      1,
+							LastModified: time.Time{},
+							IsDirty:      false,
+						},
+					}
+				} else {
+						// Reload chunk from database to get proper IDs and calculated fields (area, etc.)
+						reloadedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
+						if err != nil || reloadedMetadata == nil {
+							log.Printf("Failed to reload chunk metadata %s after storing: %v", chunkID, err)
+							// Fall back to using genResponse data
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   genResponse.Geometry,
+								Structures: []interface{}{},
+								Zones:      []interface{}{},
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        floor,
+									ChunkIndex:   chunkIndex,
+									Version:      genResponse.Chunk.Version,
+									LastModified: time.Now(),
+									IsDirty:      false,
+								},
+							}
+						} else {
+							// Load structures and zones from database with proper IDs
+							chunkData, err := h.chunkStorage.GetChunkData(reloadedMetadata.ID)
+							if err != nil {
+								log.Printf("Failed to load chunk data %s after storing: %v", chunkID, err)
+							}
 
-				// Convert procedural service response to chunk data
-				chunk = ChunkData{
-					ID:         chunkID,
-					Geometry:   genResponse.Geometry,
-					Structures: genResponse.Structures,
-					Zones:      genResponse.Zones,
-					Metadata: &ChunkMetadata{
-						ID:           chunkID,
-						Floor:        floor,
-						ChunkIndex:   chunkIndex,
-						Version:      genResponse.Chunk.Version,
-						LastModified: time.Now(),
-						IsDirty:      false,
-					},
-				}
+							// Load zones and structures from database
+							zones, structures := h.loadStructuresAndZonesFromDB(reloadedMetadata.ID, reloadedMetadata.Floor, chunkData)
+
+							// Use geometry from genResponse (not stored as PostGIS, stored as JSONB)
+							geometry := genResponse.Geometry
+
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   geometry,
+								Structures: structures,
+								Zones:      zones,
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        reloadedMetadata.Floor,
+									ChunkIndex:   reloadedMetadata.ChunkIndex,
+									Version:      reloadedMetadata.Version,
+									LastModified: reloadedMetadata.LastModified,
+									IsDirty:      reloadedMetadata.IsDirty,
+								},
+							}
+						}
+					}
 			}
 		} else {
 			// Chunk exists in database - check if version is current
 			if storedMetadata.Version < CurrentGeometryVersion {
 				// Chunk is outdated - regenerate it
-				log.Printf("Chunk %s has outdated version %d (current: %d), regenerating...", chunkID, storedMetadata.Version, CurrentGeometryVersion)
-				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+				// Get regeneration counter for building placement variation
+				regenerationCounter, err := h.configStorage.GetRegenerationCounter()
+				if err != nil {
+					log.Printf("Warning: Failed to get regeneration counter, using 0: %v", err)
+					regenerationCounter = 0
+				}
+				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil, &regenerationCounter)
 				if err != nil {
 					log.Printf("Failed to regenerate outdated chunk %s: %v", chunkID, err)
 					// Fall back to loading old geometry if regeneration fails
@@ -711,6 +985,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 										"is_system_zone": zone.IsSystemZone,
 									},
 									"geometry": json.RawMessage(zone.Geometry),
+								}
+								// Add area explicitly (always include, even if 0)
+								if zone.Area >= 0 {
+									zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+								} else {
+									zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
 								}
 								if len(zone.Properties) > 0 {
 									zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
@@ -743,6 +1023,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								},
 								"geometry": json.RawMessage(zone.Geometry),
 							}
+							// Add area explicitly (always include, even if 0)
+							if zone.Area >= 0 {
+								zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+							} else {
+								zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+							}
 							if len(zone.Properties) > 0 {
 								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
 							}
@@ -772,21 +1058,69 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					// Store the regenerated chunk in the database
 					if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 						log.Printf("Failed to store regenerated chunk %s: %v", chunkID, err)
-					}
-					// Convert procedural service response to chunk data
-					chunk = ChunkData{
-						ID:         chunkID,
-						Geometry:   genResponse.Geometry,
-						Structures: genResponse.Structures,
-						Zones:      genResponse.Zones,
-						Metadata: &ChunkMetadata{
-							ID:           chunkID,
-							Floor:        floor,
-							ChunkIndex:   chunkIndex,
-							Version:      genResponse.Chunk.Version,
-							LastModified: time.Now(),
-							IsDirty:      false,
-						},
+						// Fall back to using genResponse data if storage fails
+						chunk = ChunkData{
+							ID:         chunkID,
+							Geometry:   genResponse.Geometry,
+							Structures: []interface{}{},
+							Zones:      []interface{}{},
+							Metadata: &ChunkMetadata{
+								ID:           chunkID,
+								Floor:        floor,
+								ChunkIndex:   chunkIndex,
+								Version:      genResponse.Chunk.Version,
+								LastModified: time.Now(),
+								IsDirty:      false,
+							},
+						}
+					} else {
+						// Reload chunk from database to get proper IDs and calculated fields (area, etc.)
+						reloadedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
+						if err != nil || reloadedMetadata == nil {
+							log.Printf("Failed to reload chunk metadata %s after regenerating: %v", chunkID, err)
+							// Fall back to using genResponse data
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   genResponse.Geometry,
+								Structures: []interface{}{},
+								Zones:      []interface{}{},
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        floor,
+									ChunkIndex:   chunkIndex,
+									Version:      genResponse.Chunk.Version,
+									LastModified: time.Now(),
+									IsDirty:      false,
+								},
+							}
+						} else {
+							// Load structures and zones from database with proper IDs
+							chunkData, err := h.chunkStorage.GetChunkData(reloadedMetadata.ID)
+							if err != nil {
+								log.Printf("Failed to load chunk data %s after regenerating: %v", chunkID, err)
+							}
+
+							// Load zones and structures from database
+							zones, structures := h.loadStructuresAndZonesFromDB(reloadedMetadata.ID, reloadedMetadata.Floor, chunkData)
+
+							// Use geometry from genResponse (not stored as PostGIS, stored as JSONB)
+							geometry := genResponse.Geometry
+
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   geometry,
+								Structures: structures,
+								Zones:      zones,
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        reloadedMetadata.Floor,
+									ChunkIndex:   reloadedMetadata.ChunkIndex,
+									Version:      reloadedMetadata.Version,
+									LastModified: reloadedMetadata.LastModified,
+									IsDirty:      reloadedMetadata.IsDirty,
+								},
+							}
+						}
 					}
 				}
 			} else {
@@ -821,6 +1155,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								},
 								"geometry": json.RawMessage(zone.Geometry),
 							}
+							// Add area explicitly (always include, even if 0)
+							if zone.Area >= 0 {
+								zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+							} else {
+								zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+							}
 							// Add properties and metadata if present
 							if len(zone.Properties) > 0 {
 								zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck // Type assertion is safe - we control the map structure
@@ -854,6 +1194,12 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 								"is_system_zone": zone.IsSystemZone,
 							},
 							"geometry": json.RawMessage(zone.Geometry),
+						}
+						// Add area explicitly (always include, even if 0)
+						if zone.Area >= 0 {
+							zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+						} else {
+							zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
 						}
 						// Add properties and metadata if present
 						if len(zone.Properties) > 0 {
@@ -918,6 +1264,40 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 										structureFeature["garage_doors"] = garageDoors
 									}
 								}
+								// Decorations (render hints)
+								if decorationsVal, exists := modelDataMap["decorations"]; exists {
+									if decorations, ok := decorationsVal.([]interface{}); ok {
+										structureFeature["decorations"] = decorations
+									}
+								}
+								// Library metadata
+								if className, ok := modelDataMap["class"].(string); ok {
+									structureFeature["building_class"] = className
+								}
+								if category, ok := modelDataMap["category"].(string); ok {
+									structureFeature["category"] = category
+								}
+								if subcategory, ok := modelDataMap["subcategory"].(string); ok {
+									structureFeature["subcategory"] = subcategory
+								}
+								if shape, ok := modelDataMap["shape"].(string); ok {
+									structureFeature["shape"] = shape
+								}
+								if sizeClass, ok := modelDataMap["size_class"].(string); ok {
+									structureFeature["size_class"] = sizeClass
+								}
+								if height, ok := modelDataMap["height"].(float64); ok {
+									structureFeature["height"] = height
+								}
+								if colorPalette, ok := modelDataMap["color_palette"].(map[string]interface{}); ok {
+									structureFeature["color_palette"] = colorPalette
+								}
+								if shaderPatterns, ok := modelDataMap["shader_patterns"].([]interface{}); ok {
+									structureFeature["shader_patterns"] = shaderPatterns
+								}
+								if decorativeElements, ok := modelDataMap["decorative_elements"].([]interface{}); ok {
+									structureFeature["decorative_elements"] = decorativeElements
+								}
 								// Building subtype may also be stored in model_data (fallback)
 								if _, hasSubtype := structureFeature["building_subtype"]; !hasSubtype {
 									if subtype, ok := modelDataMap["building_subtype"].(string); ok {
@@ -950,9 +1330,27 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 							structureFeature["procedural_seed"] = *structure.ProceduralSeed
 						}
 
+						// Add zone_id if present
+						if structure.ZoneID != nil {
+							structureFeature["zone_id"] = *structure.ZoneID
+						}
+
+						// Add construction state fields if present
+						if structure.ConstructionState != nil {
+							structureFeature["construction_state"] = *structure.ConstructionState
+						}
+						if structure.ConstructionStartedAt != nil {
+							structureFeature["construction_started_at"] = structure.ConstructionStartedAt.Format(time.RFC3339)
+						}
+						if structure.ConstructionCompletedAt != nil {
+							structureFeature["construction_completed_at"] = structure.ConstructionCompletedAt.Format(time.RFC3339)
+						}
+						if structure.ConstructionDurationSecs != nil {
+							structureFeature["construction_duration_seconds"] = *structure.ConstructionDurationSecs
+						}
+
 						structures = append(structures, structureFeature)
 					}
-					log.Printf("[Chunks] Loaded %d structures for chunk %s from database", len(structures), chunkID)
 				}
 
 				metadata := ChunkMetadata{
@@ -976,11 +1374,8 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 
 		// Compress geometry if present
 		if chunk.Geometry != nil {
-			if compressedGeom, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
+			if _, ok := chunk.Geometry.(*compression.CompressedGeometry); ok {
 				// Already compressed
-				compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-				log.Printf("Chunk %s geometry already compressed (size: %d bytes, ratio: %.2f:1)",
-					chunkID, compressedGeom.Size, compressionRatio)
 			} else {
 				// Compress the geometry
 				var chunkGeometry *procedural.ChunkGeometry
@@ -989,24 +1384,15 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					chunkGeometry = geom
 				case map[string]interface{}:
 					// Skip compression for map types (database-loaded geometry)
-					log.Printf("Chunk %s geometry is map type, skipping compression", chunkID)
 				default:
-					log.Printf("Chunk %s geometry has unknown type, skipping compression", chunkID)
+					// Skip compression for unknown types
 				}
 
 				if chunkGeometry != nil {
-					uncompressedSize := compression.EstimateUncompressedSize(chunkGeometry)
 					compressedGeometry, err := compressChunkGeometry(chunk.Geometry)
 					if err != nil {
 						log.Printf("Failed to compress geometry for chunk %s: %v", chunkID, err)
 					} else {
-						if compressedGeom, ok := compressedGeometry.(*compression.CompressedGeometry); ok {
-							compressionRatio := float64(compressedGeom.UncompressedSize) / float64(compressedGeom.Size)
-							log.Printf("✓ Compressed chunk %s geometry: %d → %d bytes (%.2f:1 ratio, estimated uncompressed: %d bytes)",
-								chunkID, compressedGeom.UncompressedSize, compressedGeom.Size, compressionRatio, uncompressedSize)
-						} else {
-							log.Printf("✓ Compressed chunk %s geometry (estimated uncompressed: %d bytes)", chunkID, uncompressedSize)
-						}
 						chunk.Geometry = compressedGeometry
 					}
 				}
@@ -1153,9 +1539,6 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 		return
 	}
 
-	log.Printf("[Stream] stream_update_pose received: user_id=%d, subscription_id=%s, ring_position=%d, arc_length=%.0f, theta=%.6f, r=%.2f, z=%.2f, active_floor=%d",
-		conn.userID, req.SubscriptionID, req.Pose.RingPosition, req.Pose.ArcLength, req.Pose.Theta, req.Pose.R, req.Pose.Z, req.Pose.ActiveFloor)
-
 	// Update pose and get chunk deltas
 	op := h.profiler.Start("stream_update_pose")
 	chunkDelta, err := h.streamManager.UpdatePose(conn.userID, req.SubscriptionID, req.Pose)
@@ -1229,7 +1612,6 @@ func (h *WebSocketHandlers) handleStreamUpdatePose(conn *WebSocketConnection, ms
 
 	select {
 	case conn.send <- bytes:
-		log.Printf("[Stream] Sent stream_pose_ack for subscription %s", req.SubscriptionID)
 	default:
 		log.Printf("Failed to send stream_pose_ack: channel full")
 	}
@@ -1262,7 +1644,6 @@ func (h *WebSocketHandlers) loadZonesForArea(bbox streaming.ZoneBoundingBox, pos
 		} else {
 			// Convert RingPolar to RingArc for query
 			// This is a fallback - should use RingArc directly when available
-			log.Printf("[Stream] Warning: Using RingPolar coordinates, should use RingArc directly")
 			// For now, fall back to legacy coordinates
 			if bbox.MinX >= bbox.MaxX || bbox.MinY >= bbox.MaxY {
 				log.Printf("Invalid zone bounding box: minX=%f, maxX=%f, minY=%f, maxY=%f", bbox.MinX, bbox.MaxX, bbox.MinY, bbox.MaxY)

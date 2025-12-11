@@ -27,6 +27,9 @@ export class SceneManager {
       alpha: false,
     });
     
+    // Enable local clipping planes for construction animations (bottom-to-top reveal)
+    this.renderer.localClippingEnabled = true;
+    
     // Set up renderer
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
