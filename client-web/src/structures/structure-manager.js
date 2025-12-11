@@ -14,6 +14,8 @@ class AnimationState {
     this.completed = false;
     this.originalPosition = null; // Store original Y position for scale-based reveal
     this.boundingBox = null; // Store bounding box for height calculations
+    this.cachedMaterials = null; // Cache materials for this structure to avoid traversing every frame
+    this.lastOpacity = null; // Track last opacity value to avoid unnecessary updates
   }
 
   /**
@@ -975,10 +977,14 @@ export class StructureManager {
         this.updateStructurePosition(existingMesh, structure, cameraXWrapped);
       }
       
-      // Re-register animation if construction state changed (e.g., loaded from database)
-      // Get latest structure from game state to ensure we have construction fields
-      const latestStructure = this.gameState.getStructure(structure.id) || structure;
-      this.registerConstructionAnimation(latestStructure, existingMesh);
+      // PERFORMANCE: Only re-register animation if it's not already registered
+      // This avoids expensive bounding box calculations on every frame
+      if (!this.constructionAnimations.has(structure.id)) {
+        // Re-register animation if construction state changed (e.g., loaded from database)
+        // Get latest structure from game state to ensure we have construction fields
+        const latestStructure = this.gameState.getStructure(structure.id) || structure;
+        this.registerConstructionAnimation(latestStructure, existingMesh);
+      }
       
       return;
     }
@@ -1208,6 +1214,25 @@ export class StructureManager {
       // Store original mesh position and rotation for animation
       animation.originalPosition = meshGroup.position.y;
       animation.originalRotation = meshGroup.rotation.z;
+      
+      // Cache materials once to avoid traversing every frame (PERFORMANCE OPTIMIZATION)
+      animation.cachedMaterials = [];
+      meshGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if (mat.transparent !== undefined) {
+                animation.cachedMaterials.push(mat);
+              }
+            });
+          } else {
+            if (child.material.transparent !== undefined) {
+              animation.cachedMaterials.push(child.material);
+            }
+          }
+        }
+      });
+      animation.lastOpacity = null; // Reset opacity tracking
       
       // Calculate initial progress and set initial scale
       const initialProgress = animation.getProgress(now);
@@ -1787,13 +1812,17 @@ export class StructureManager {
     // Roof with skylight overlay in shader (single draw, no skylight meshes)
     const roofColorHex = colors?.roofs?.hex ? colors.roofs.hex : '#4a4a4a';
     const roofColor = typeof roofColorHex === 'string' ? parseInt(roofColorHex.replace('#', ''), 16) : roofColorHex;
-    // Roof material; skylights will lower opacity to window-like transparency
-    const roofMaterial = new THREE.MeshStandardMaterial({
-      color: roofColor,
-      roughness: 0.8,
-      metalness: 0.2,
-      opacity: 1.0,
-      transparent: true,
+    // PERFORMANCE: Use cached roof material (shared across buildings)
+    const roofMaterialKey = `roof_${roofColor}`;
+    const roofMaterial = this.getCachedMaterial(roofMaterialKey, () => {
+      // Roof material; skylights will lower opacity to window-like transparency
+      return new THREE.MeshStandardMaterial({
+        color: roofColor,
+        roughness: 0.8,
+        metalness: 0.2,
+        opacity: 1.0,
+        transparent: true,
+      });
     });
 
     const skylights = decorations.filter((d) => d && d.type === 'skylight').slice(0, 16);
@@ -2741,6 +2770,25 @@ export class StructureManager {
     animation.originalPosition = mesh.position.y;
     animation.originalRotation = mesh.rotation.z;
     
+    // Cache materials once to avoid traversing every frame (PERFORMANCE OPTIMIZATION)
+    animation.cachedMaterials = [];
+    mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(mat => {
+            if (mat.transparent !== undefined) {
+              animation.cachedMaterials.push(mat);
+            }
+          });
+        } else {
+          if (child.material.transparent !== undefined) {
+            animation.cachedMaterials.push(child.material);
+          }
+        }
+      }
+    });
+    animation.lastOpacity = null; // Reset opacity tracking
+    
     this.constructionAnimations.set(structureIDStr, animation);
     
     if (window.earthring?.debug) {
@@ -2950,23 +2998,39 @@ export class StructureManager {
       });
     }
     
-    mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach(mat => {
-            if (mat.transparent !== undefined) {
-              mat.transparent = opacityProgress < 1.0;
-              mat.opacity = opacityProgress;
+    // PERFORMANCE: Only update materials if opacity changed (avoids expensive traverse + unnecessary updates)
+    if (animation.lastOpacity !== opacityProgress) {
+      // Use cached materials if available (set during registration), otherwise fall back to traverse
+      const materials = animation.cachedMaterials || [];
+      if (materials.length === 0) {
+        // Fallback: cache materials if not already cached (shouldn't happen in normal flow)
+        mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if (mat.transparent !== undefined && !materials.includes(mat)) {
+                  materials.push(mat);
+                }
+              });
+            } else {
+              if (child.material.transparent !== undefined && !materials.includes(child.material)) {
+                materials.push(child.material);
+              }
             }
-          });
-        } else {
-          if (child.material.transparent !== undefined) {
-            child.material.transparent = opacityProgress < 1.0;
-            child.material.opacity = opacityProgress;
           }
-        }
+        });
+        animation.cachedMaterials = materials;
       }
-    });
+      
+      // Update all cached materials
+      const needsTransparency = opacityProgress < 1.0;
+      for (const mat of materials) {
+        mat.transparent = needsTransparency;
+        mat.opacity = opacityProgress;
+      }
+      
+      animation.lastOpacity = opacityProgress;
+    }
   }
 
   /**
@@ -3019,25 +3083,40 @@ export class StructureManager {
     // Fade out opacity (faster fade than scale)
     // Opacity drops more quickly to make it feel like it's disappearing
     const opacityProgress = Math.pow(easedProgress, 1.5); // Faster fade
-    const opacity = 1.0 - opacityProgress;
+    const opacity = Math.max(0, 1.0 - opacityProgress);
     
-    mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach(mat => {
-            if (mat.transparent !== undefined) {
-              mat.transparent = true;
-              mat.opacity = Math.max(0, opacity);
+    // PERFORMANCE: Only update materials if opacity changed (avoids expensive traverse + unnecessary updates)
+    if (animation.lastOpacity !== opacity) {
+      // Use cached materials if available (set during registration), otherwise fall back to traverse
+      const materials = animation.cachedMaterials || [];
+      if (materials.length === 0) {
+        // Fallback: cache materials if not already cached (shouldn't happen in normal flow)
+        mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => {
+                if (mat.transparent !== undefined && !materials.includes(mat)) {
+                  materials.push(mat);
+                }
+              });
+            } else {
+              if (child.material.transparent !== undefined && !materials.includes(child.material)) {
+                materials.push(child.material);
+              }
             }
-          });
-        } else {
-          if (child.material.transparent !== undefined) {
-            child.material.transparent = true;
-            child.material.opacity = Math.max(0, opacity);
           }
-        }
+        });
+        animation.cachedMaterials = materials;
       }
-    });
+      
+      // Update all cached materials
+      for (const mat of materials) {
+        mat.transparent = true; // Demolition always uses transparency
+        mat.opacity = opacity;
+      }
+      
+      animation.lastOpacity = opacity;
+    }
 
     // Debug logging for first few frames
     if (window.earthring?.debug && easedProgress < 0.1) {
