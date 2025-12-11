@@ -38,6 +38,7 @@ export class DebugInfoPanel {
         <div class="debug-header">
           <h3>Debug Info</h3>
           <div style="display: flex; gap: 4px;">
+            <button id="debug-copy-all" class="debug-copy" title="Copy all debug info to clipboard">📋</button>
             <button id="debug-toggle" class="debug-toggle">−</button>
             <button id="debug-close" class="debug-close">×</button>
           </div>
@@ -137,6 +138,43 @@ export class DebugInfoPanel {
       .debug-close:hover {
         background: rgba(255, 68, 68, 0.2);
       }
+      .debug-copy {
+        background: transparent;
+        border: 1px solid #00aaff;
+        color: #00aaff;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .debug-copy:hover {
+        background: rgba(0, 170, 255, 0.2);
+      }
+      .debug-section-copy {
+        background: transparent;
+        border: 1px solid #00aaff;
+        color: #00aaff;
+        width: 18px;
+        height: 18px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .debug-section-copy:hover {
+        background: rgba(0, 170, 255, 0.2);
+      }
       #debug-info-panel.hidden {
         display: none;
       }
@@ -211,7 +249,10 @@ export class DebugInfoPanel {
       <div class="debug-section" data-section="${id}">
         <div class="debug-section-header" data-toggle="${id}">
           <h4>${title}</h4>
-          <span class="debug-section-toggle" data-icon="${id}">−</span>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button class="debug-section-copy" data-copy-section="${id}" title="Copy ${title} section to clipboard">📋</button>
+            <span class="debug-section-toggle" data-icon="${id}">−</span>
+          </div>
         </div>
         <div class="debug-section-content" id="debug-${id}-content">
           ${lines.map(line => `<div class="debug-line">${line}</div>`).join('')}
@@ -235,10 +276,33 @@ export class DebugInfoPanel {
       this.hidePanel();
     });
 
+    // Copy all button
+    const copyAllBtn = this.panel.querySelector('#debug-copy-all');
+    if (copyAllBtn) {
+      copyAllBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.copyAllToClipboard();
+      });
+    }
+
+    // Copy section buttons
+    const sectionCopyBtns = this.panel.querySelectorAll('.debug-section-copy');
+    sectionCopyBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sectionId = btn.getAttribute('data-copy-section');
+        this.copySectionToClipboard(sectionId);
+      });
+    });
+
     // Toggle individual sections
     const sectionHeaders = this.panel.querySelectorAll('.debug-section-header');
     sectionHeaders.forEach(header => {
       header.addEventListener('click', (e) => {
+        // Don't toggle if clicking on copy button
+        if (e.target.classList.contains('debug-section-copy')) {
+          return;
+        }
         e.stopPropagation();
         const sectionId = header.getAttribute('data-toggle');
         this.toggleSection(sectionId);
@@ -608,6 +672,144 @@ Renderer Size: ${rendererSize}`;
       const height = renderer.domElement.height;
       sizeEl.textContent = `${width}×${height}`;
     }
+  }
+
+  /**
+   * Copy all debug info to clipboard
+   */
+  async copyAllToClipboard() {
+    const timestamp = new Date().toISOString();
+    const allData = `EARTHRING DEBUG INFO
+Generated: ${timestamp}
+========================================
+
+${this.getFormattedSectionData('Performance', 'performance')}
+
+${this.getFormattedSectionData('Camera', 'camera')}
+
+${this.getFormattedSectionData('Cursor', 'cursor')}
+
+${this.getFormattedSectionData('Rendering', 'rendering')}
+`;
+
+    try {
+      await navigator.clipboard.writeText(allData);
+      this.showCopyFeedback('All debug info copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      this.showCopyFeedback('Failed to copy to clipboard', true);
+    }
+  }
+
+  /**
+   * Copy a specific section to clipboard
+   */
+  async copySectionToClipboard(sectionId) {
+    const sectionTitles = {
+      'performance': 'Performance',
+      'camera': 'Camera',
+      'cursor': 'Cursor',
+      'rendering': 'Rendering'
+    };
+    const title = sectionTitles[sectionId] || sectionId;
+    const timestamp = new Date().toISOString();
+    const data = `EARTHRING DEBUG INFO - ${title.toUpperCase()} SECTION
+Generated: ${timestamp}
+========================================
+
+${this.getFormattedSectionData(title, sectionId)}
+`;
+
+    try {
+      await navigator.clipboard.writeText(data);
+      this.showCopyFeedback(`${title} section copied to clipboard`);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      this.showCopyFeedback('Failed to copy to clipboard', true);
+    }
+  }
+
+  /**
+   * Get formatted section data as string
+   */
+  getFormattedSectionData(title, sectionId) {
+    let data = '';
+    
+    switch (sectionId) {
+      case 'performance':
+        data = `[${title}]
+${this.getPerformanceData()}`;
+        break;
+      case 'camera':
+        data = `[${title}]
+${this.getCameraData()}`;
+        break;
+      case 'cursor':
+        data = `[${title}]
+${this.getCursorData()}`;
+        break;
+      case 'rendering':
+        data = `[${title}]
+${this.getRenderingData()}`;
+        break;
+      default:
+        data = `[${title}]
+Data unavailable`;
+    }
+    
+    return data;
+  }
+
+  /**
+   * Show copy feedback message
+   */
+  showCopyFeedback(message, isError = false) {
+    // Remove existing feedback if any
+    const existing = this.panel.querySelector('.debug-copy-feedback');
+    if (existing) {
+      existing.remove();
+    }
+
+    // Create feedback element
+    const feedback = document.createElement('div');
+    feedback.className = 'debug-copy-feedback';
+    feedback.textContent = message;
+    feedback.style.cssText = `
+      position: absolute;
+      top: 40px;
+      right: 10px;
+      background: ${isError ? 'rgba(255, 68, 68, 0.9)' : 'rgba(0, 170, 255, 0.9)'};
+      color: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      z-index: 10000;
+      pointer-events: none;
+      animation: fadeOut 2s forwards;
+    `;
+
+    // Add fade out animation
+    const style = document.createElement('style');
+    if (!document.querySelector('#debug-copy-feedback-style')) {
+      style.id = 'debug-copy-feedback-style';
+      style.textContent = `
+        @keyframes fadeOut {
+          0% { opacity: 1; }
+          70% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    this.panel.appendChild(feedback);
+
+    // Remove after animation
+    setTimeout(() => {
+      if (feedback.parentNode) {
+        feedback.remove();
+      }
+    }, 2000);
   }
 
   dispose() {
