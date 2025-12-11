@@ -862,12 +862,34 @@ function setupAdminStructuresListeners(container) {
         resultDiv.className = 'result-display show success';
         resultDiv.textContent = `Success! Deleted ${data.structures_deleted || 0} procedural structures. Chunks have been reset and will regenerate with new structures when visited.`;
         
-        // Reload the page after a short delay to see the changes
-        setTimeout(() => {
-          if (confirm('Structures have been rebuilt. Reload the page to see changes?')) {
-            window.location.reload();
-          }
-        }, 2000);
+        // Clear local chunks and trigger reload to see new structures with animations
+        if (window.earthring && window.earthring.chunkManager) {
+          const chunkManager = window.earthring.chunkManager;
+          const gameStateManager = window.earthring.gameStateManager;
+          
+          // Clear all chunks from client (this will trigger cleanup of structures)
+          const allChunkIDs = Array.from(gameStateManager.chunks.keys());
+          allChunkIDs.forEach(chunkID => {
+            gameStateManager.removeChunk(chunkID);
+          });
+          
+          // Reload chunks at current position to see new structures with construction animations
+          // Zones will automatically reload with chunks (they're embedded in chunk data)
+          setTimeout(() => {
+            if (window.earthring && window.earthring.cameraController) {
+              const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+              const floor = gameStateManager.getActiveFloor();
+              chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true) // Force reload
+                .catch(error => {
+                  console.error('[Chunks] Failed to reload chunks after rebuild:', error);
+                });
+            }
+            // Re-render zones to ensure they are displayed properly (zones come with chunks)
+            if (window.earthring && window.earthring.zoneManager) {
+              window.earthring.zoneManager.reRenderAllZones();
+            }
+          }, 500);
+        }
         
       } catch (error) {
         resultDiv.className = 'result-display show error';
@@ -1667,7 +1689,22 @@ async function handleAdminResetAllZones(container, cascade = false) {
       window.earthring.zoneManager.clearAllZones();
     }
     
-    // Refresh zones by floor
+    // Zones come embedded in chunks, so trigger chunk reload to get zones back
+    // This ensures zones appear immediately without page refresh
+    if (window.earthring && window.earthring.chunkManager && window.earthring.cameraController) {
+      const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+      const floor = window.earthring.gameStateManager?.getActiveFloor() || 0;
+      window.earthring.chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true) // Force reload
+        .catch(error => {
+          console.error('[Chunks] Failed to reload chunks after zone reset:', error);
+        });
+    }
+    // Re-render zones to ensure they are displayed properly
+    if (window.earthring && window.earthring.zoneManager) {
+      window.earthring.zoneManager.reRenderAllZones();
+    }
+    
+    // Refresh zones by floor (for admin UI display)
     await loadZonesByFloor(container);
   } catch (error) {
     resultDisplay.textContent = `Error: ${error.message}`;
@@ -1719,12 +1756,86 @@ async function handleAdminResetAllChunks(container) {
   
   try {
     const result = await deleteAllChunks();
-    resultDisplay.textContent = JSON.stringify(result, null, 2);
-    resultDisplay.className = 'result-display show success';
+    
+    // Clear local chunks, zones, and structures immediately
+    if (window.earthring) {
+      const gameStateManager = window.earthring.gameStateManager;
+      const chunkManager = window.earthring.chunkManager;
+      const zoneManager = window.earthring.zoneManager;
+      const structureManager = window.earthring.structureManager;
+      
+      // Clear all zones first
+      if (zoneManager) {
+        zoneManager.clearAllZones();
+      }
+      
+      // Clear all structures
+      if (structureManager) {
+        const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
+        allStructureIDs.forEach(structureID => {
+          structureManager.removeStructure(structureID);
+        });
+      }
+      
+      // Clear all chunks from client (this will also trigger cleanup of structures/zones)
+      const allChunkIDs = Array.from(gameStateManager.chunks.keys());
+      allChunkIDs.forEach(chunkID => {
+        gameStateManager.removeChunk(chunkID);
+      });
+      
+      // Reload chunks at current position - wait for it to complete
+      if (chunkManager && window.earthring.cameraController) {
+        const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+        const floor = gameStateManager.getActiveFloor();
+        
+        console.log('[Admin] Requesting chunk reload at position:', cameraPos.x, 'floor:', floor);
+        
+        // Request chunks and wait for them to load (force reload clears subscription and creates new one)
+        await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true); // Force reload
+        
+        console.log('[Admin] Chunk reload requested, waiting for chunks to arrive...');
+        
+        // Wait for chunks to arrive via WebSocket and be processed
+        // Chunks are sent asynchronously after subscription, so we need to wait
+        // Check every 200ms for up to 5 seconds to see if chunks have arrived
+        let chunksReceived = false;
+        const maxWaitTime = 5000; // 5 seconds
+        const checkInterval = 200;
+        let elapsed = 0;
+        
+        while (elapsed < maxWaitTime && !chunksReceived) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          elapsed += checkInterval;
+          
+          // Check if we have chunks loaded
+          const loadedChunkCount = gameStateManager.chunks.size;
+          if (loadedChunkCount > 0) {
+            chunksReceived = true;
+            console.log(`[Admin] Chunks received! Loaded ${loadedChunkCount} chunks`);
+            break;
+          }
+        }
+        
+        if (!chunksReceived) {
+          console.warn('[Admin] Warning: No chunks received after waiting', elapsed, 'ms');
+        }
+        
+        // Give a bit more time for zones/structures to be extracted from chunks
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Re-render zones to ensure they are displayed properly (zones come with chunks)
+        if (zoneManager) {
+          zoneManager.reRenderAllZones();
+          console.log('[Admin] Zones re-rendered');
+        }
+      }
+    }
+    
+    // Close the modal after successful reset
+    hideAdminModal();
   } catch (error) {
     resultDisplay.textContent = `Error: ${error.message}`;
     resultDisplay.className = 'result-display show error';
-  } finally {
     resetButton.disabled = false;
   }
 }

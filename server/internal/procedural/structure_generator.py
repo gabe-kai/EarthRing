@@ -633,14 +633,17 @@ def generate_structures_for_zones(
 ) -> List[Dict[str, Any]]:
     """
     Generate structures for zones using the new structure libraries.
-    Currently supports industrial zones only. Places multiple non-overlapping
-    buildings per industrial zone when possible.
+    Supports all zone types (industrial, residential, commercial, etc.).
+    Places multiple non-overlapping buildings per zone when possible.
     """
     structures: List[Dict[str, Any]] = []
 
     for idx, zone in enumerate(zones):
         zone_type = zone.get("properties", {}).get("zone_type", "").lower()
-        if zone_type != "industrial":
+        
+        # Skip zones that don't have structure generation support
+        # Restricted zones typically don't have buildings
+        if zone_type in ("restricted", ""):
             continue
 
         geometry = zone.get("geometry", {})
@@ -669,15 +672,28 @@ def generate_structures_for_zones(
         rng_seed = hash((chunk_seed, floor, chunk_index, idx, STRUCTURE_PLACEMENT_VERSION)) % (2**31)
         rng = random.Random(rng_seed)
 
-        class_name = _weighted_choice(libs.get_zone_distribution("industrial"), "weight", rng)
+        # Get zone distribution for this zone type
+        zone_dist = libs.get_zone_distribution(zone_type)
+        if not zone_dist:
+            # If no specific distribution for this zone type, skip it
+            continue
+        
+        class_name = _weighted_choice(zone_dist, "weight", rng)
         if not class_name:
             continue
         class_def = libs.get_building_class(class_name, hub_name)
         if not class_def:
             continue
 
-        size_dist = libs.get_size_distribution("industrial")
-        size_class_name = _weighted_choice(size_dist, "weight", rng) or class_def.get("size_class")
+        size_dist = libs.get_size_distribution(zone_type)
+        if not size_dist:
+            # If no size distribution for this zone type, try a default
+            size_dist = libs.get_size_distribution("industrial")
+        if not size_dist:
+            # Still no distribution - use class default size_class if available
+            size_class_name = class_def.get("size_class")
+        else:
+            size_class_name = _weighted_choice(size_dist, "weight", rng) or class_def.get("size_class")
         size_def = libs.get_size_class(size_class_name, hub_name) if size_class_name else None
         if not size_def:
             continue
@@ -700,7 +716,9 @@ def generate_structures_for_zones(
         main_door_y = main_door_center - building_center
         truck_door_y = truck_door_center - building_center
 
-        color_palette = libs.get_color_palette(class_def.get("color_palette_zone", "Industrial"), hub_name)
+        # Use zone-specific color palette, fallback to class default or "Industrial"
+        color_palette_zone = class_def.get("color_palette_zone") or zone_type.capitalize() or "Industrial"
+        color_palette = libs.get_color_palette(color_palette_zone, hub_name)
         shader_patterns = libs.get_shader_patterns(class_def.get("shader_patterns", []), hub_name)
         decorative_elements = libs.get_decorative_elements(class_def.get("decorative_elements", []), hub_name)
 

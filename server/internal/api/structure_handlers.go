@@ -60,20 +60,24 @@ type updateStructureRequest struct {
 }
 
 type structureResponse struct {
-	ID             int64             `json:"id"`
-	StructureType  string            `json:"structure_type"`
-	Floor          int               `json:"floor"`
-	OwnerID        *int64            `json:"owner_id,omitempty"`
-	ZoneID         *int64            `json:"zone_id,omitempty"`
-	IsProcedural   bool              `json:"is_procedural"`
-	ProceduralSeed *int64            `json:"procedural_seed,omitempty"`
-	Position       database.Position `json:"position"`
-	Rotation       float64           `json:"rotation"`
-	Scale          float64           `json:"scale"`
-	Properties     json.RawMessage   `json:"properties,omitempty"`
-	ModelData      json.RawMessage   `json:"model_data,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	ID                        int64             `json:"id"`
+	StructureType             string            `json:"structure_type"`
+	Floor                     int               `json:"floor"`
+	OwnerID                   *int64            `json:"owner_id,omitempty"`
+	ZoneID                    *int64            `json:"zone_id,omitempty"`
+	IsProcedural              bool              `json:"is_procedural"`
+	ProceduralSeed            *int64            `json:"procedural_seed,omitempty"`
+	Position                  database.Position `json:"position"`
+	Rotation                  float64           `json:"rotation"`
+	Scale                     float64           `json:"scale"`
+	Properties                json.RawMessage   `json:"properties,omitempty"`
+	ModelData                 json.RawMessage   `json:"model_data,omitempty"`
+	ConstructionState         *string           `json:"construction_state,omitempty"`
+	ConstructionStartedAt     *time.Time        `json:"construction_started_at,omitempty"`
+	ConstructionCompletedAt   *time.Time        `json:"construction_completed_at,omitempty"`
+	ConstructionDurationSecs  *int              `json:"construction_duration_seconds,omitempty"`
+	CreatedAt                 time.Time         `json:"created_at"`
+	UpdatedAt                 time.Time         `json:"updated_at"`
 }
 
 // CreateStructure handles POST /api/structures
@@ -490,19 +494,23 @@ func (h *StructureHandlers) ListStructuresByOwner(w http.ResponseWriter, r *http
 // structureToResponse converts a database.Structure to a structureResponse.
 func structureToResponse(s *database.Structure) structureResponse {
 	return structureResponse{
-		ID:             s.ID,
-		StructureType:  s.StructureType,
-		Floor:          s.Floor,
-		OwnerID:        s.OwnerID,
-		ZoneID:         s.ZoneID,
-		IsProcedural:   s.IsProcedural,
-		ProceduralSeed: s.ProceduralSeed,
-		Position:       s.Position,
-		Rotation:       s.Rotation,
-		Scale:          s.Scale,
-		Properties:     s.Properties,
-		ModelData:      s.ModelData,
-		CreatedAt:      s.CreatedAt,
-		UpdatedAt:      s.UpdatedAt,
+		ID:                       s.ID,
+		StructureType:            s.StructureType,
+		Floor:                    s.Floor,
+		OwnerID:                  s.OwnerID,
+		ZoneID:                   s.ZoneID,
+		IsProcedural:             s.IsProcedural,
+		ProceduralSeed:           s.ProceduralSeed,
+		Position:                 s.Position,
+		Rotation:                 s.Rotation,
+		Scale:                    s.Scale,
+		Properties:               s.Properties,
+		ModelData:                s.ModelData,
+		ConstructionState:        s.ConstructionState,
+		ConstructionStartedAt:    s.ConstructionStartedAt,
+		ConstructionCompletedAt:  s.ConstructionCompletedAt,
+		ConstructionDurationSecs: s.ConstructionDurationSecs,
+		CreatedAt:                s.CreatedAt,
+		UpdatedAt:                s.UpdatedAt,
 	}
 }

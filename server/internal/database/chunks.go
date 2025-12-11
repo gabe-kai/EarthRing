@@ -547,11 +547,34 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 				// Bypass validation for procedural structures (they're deterministic and guaranteed valid)
 				// Use ST_SetSRID(ST_MakePoint(...), 0) for PostGIS GEOMETRY(POINT, 0) type
 				// (Migration 000023 converts structures.position from POINT to GEOMETRY)
+				// Procedural buildings also use construction animations (same as player-placed)
+				now := time.Now()
+				var constructionState string
+				var constructionStartedAt *time.Time
+				var constructionCompletedAt *time.Time
+				var constructionDurationSecs int
+				
+				// For buildings (procedural or not), use construction animation
+				if structureType == "building" {
+					constructionState = "constructing"
+					constructionStartedAt = &now
+					constructionDurationSecs = 300 // Default: 5 minutes
+					completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
+					constructionCompletedAt = &completionTime
+				} else {
+					// Non-building structures spawn instantly
+					constructionState = "completed"
+					constructionStartedAt = &now
+					constructionCompletedAt = &now
+					constructionDurationSecs = 0
+				}
+				
 				structureQuery := `
 					INSERT INTO structures (
 						structure_type, floor, owner_id, zone_id, is_procedural, procedural_seed,
-						position, rotation, scale, properties, model_data
-					) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12)
+						position, rotation, scale, properties, model_data,
+						construction_state, construction_started_at, construction_completed_at, construction_duration_seconds
+					) VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 0), $9, $10, $11, $12, $13, $14, $15, $16)
 					RETURNING id
 				`
 
@@ -605,6 +628,10 @@ func (s *ChunkStorage) StoreChunk(floor, chunkIndex int, genResponse *procedural
 					scale,
 					propertiesJSONInterface,
 					modelDataJSONInterface,
+					constructionState,
+					constructionStartedAt,
+					constructionCompletedAt,
+					constructionDurationSecs,
 				).Scan(&structID)
 				if err != nil {
 					// Rollback to savepoint to recover from the error

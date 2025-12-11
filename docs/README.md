@@ -6,6 +6,7 @@ This document provides a comprehensive index of all EarthRing project documentat
 - [Architecture & Design](#architecture--design-documents)
 - [System Specifications](#system-specifications)
 - [Game Mechanics](#game-mechanics)
+- [Implementations](#implementations)
 - [Development & Operations](#development--operations)
 - [Testing](#testing-documentation)
 - [Reference](#reference-documentation)
@@ -151,6 +152,19 @@ Development workflow, deployment, and operational documentation.
 **Status**: ✅ **ACTIVE**  
 **Description**: Detailed implementation roadmap with phases, priorities, and dependencies.  
 **Key Topics**: Phase breakdown, feature priorities, deliverables, dependencies
+
+---
+
+## Implementations
+
+Completed feature implementations with technical details and migration guides.
+
+### Building Construction & Demolition Animations
+**File**: [`implementations/building-construction-animations.md`](implementations/building-construction-animations.md)  
+**Status**: ✅ **COMPLETED** (December 2024)  
+**Description**: Real-time building construction and demolition animations with server-state tracking. Includes multi-zone type support and automatic chunk/zone reloading.  
+**Key Topics**: Construction animations, demolition animations, database schema changes, WebSocket synchronization, admin reload improvements  
+**Related**: [Building Construction Animation Strategies](strategies/building-construction-animation.md), [Structure System](11-structure-system.md)
 
 ---
 

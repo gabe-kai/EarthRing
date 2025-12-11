@@ -659,11 +659,50 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					log.Printf("Failed to store chunk %s: %v", chunkID, err)
 				}
 
+				// Add construction state to structures from procedural generation
+				// Structures from procedural service don't have construction state, but we set it when storing
+				// Add it here so client can animate construction
+				now := time.Now()
+				structuresWithState := make([]interface{}, 0, len(genResponse.Structures))
+				for _, structObj := range genResponse.Structures {
+					structMap, ok := structObj.(map[string]interface{})
+					if !ok {
+						structuresWithState = append(structuresWithState, structObj)
+						continue
+					}
+
+					// Check if it's a building type
+					structureType, _ := structMap["structure_type"].(string)
+					if structureType == "" {
+						if typeVal, ok := structMap["type"].(string); ok {
+							structureType = typeVal
+						}
+					}
+
+					// Set construction state for buildings
+					if structureType == "building" {
+						structMap["construction_state"] = "constructing"
+						structMap["construction_started_at"] = now.Format(time.RFC3339)
+						constructionDurationSecs := 300 // 5 minutes default
+						structMap["construction_duration_seconds"] = constructionDurationSecs
+						completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
+						structMap["construction_completed_at"] = completionTime.Format(time.RFC3339)
+					} else {
+						// Non-building structures spawn instantly
+						structMap["construction_state"] = "completed"
+						structMap["construction_started_at"] = now.Format(time.RFC3339)
+						structMap["construction_completed_at"] = now.Format(time.RFC3339)
+						structMap["construction_duration_seconds"] = 0
+					}
+
+					structuresWithState = append(structuresWithState, structMap)
+				}
+
 				// Convert procedural service response to chunk data
 				chunk = ChunkData{
 					ID:         chunkID,
 					Geometry:   genResponse.Geometry,
-					Structures: genResponse.Structures,
+					Structures: structuresWithState,
 					Zones:      genResponse.Zones,
 					Metadata: &ChunkMetadata{
 						ID:           chunkID,
@@ -784,11 +823,49 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 						log.Printf("Failed to store regenerated chunk %s: %v", chunkID, err)
 					}
+
+					// Add construction state to structures from procedural generation
+					now := time.Now()
+					structuresWithState := make([]interface{}, 0, len(genResponse.Structures))
+					for _, structObj := range genResponse.Structures {
+						structMap, ok := structObj.(map[string]interface{})
+						if !ok {
+							structuresWithState = append(structuresWithState, structObj)
+							continue
+						}
+
+						// Check if it's a building type
+						structureType, _ := structMap["structure_type"].(string)
+						if structureType == "" {
+							if typeVal, ok := structMap["type"].(string); ok {
+								structureType = typeVal
+							}
+						}
+
+						// Set construction state for buildings
+						if structureType == "building" {
+							structMap["construction_state"] = "constructing"
+							structMap["construction_started_at"] = now.Format(time.RFC3339)
+							constructionDurationSecs := 300 // 5 minutes default
+							structMap["construction_duration_seconds"] = constructionDurationSecs
+							completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
+							structMap["construction_completed_at"] = completionTime.Format(time.RFC3339)
+						} else {
+							// Non-building structures spawn instantly
+							structMap["construction_state"] = "completed"
+							structMap["construction_started_at"] = now.Format(time.RFC3339)
+							structMap["construction_completed_at"] = now.Format(time.RFC3339)
+							structMap["construction_duration_seconds"] = 0
+						}
+
+						structuresWithState = append(structuresWithState, structMap)
+					}
+
 					// Convert procedural service response to chunk data
 					chunk = ChunkData{
 						ID:         chunkID,
 						Geometry:   genResponse.Geometry,
-						Structures: genResponse.Structures,
+						Structures: structuresWithState,
 						Zones:      genResponse.Zones,
 						Metadata: &ChunkMetadata{
 							ID:           chunkID,
@@ -1010,6 +1087,20 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 						// Add zone_id if present
 						if structure.ZoneID != nil {
 							structureFeature["zone_id"] = *structure.ZoneID
+						}
+
+						// Add construction state fields if present
+						if structure.ConstructionState != nil {
+							structureFeature["construction_state"] = *structure.ConstructionState
+						}
+						if structure.ConstructionStartedAt != nil {
+							structureFeature["construction_started_at"] = structure.ConstructionStartedAt.Format(time.RFC3339)
+						}
+						if structure.ConstructionCompletedAt != nil {
+							structureFeature["construction_completed_at"] = structure.ConstructionCompletedAt.Format(time.RFC3339)
+						}
+						if structure.ConstructionDurationSecs != nil {
+							structureFeature["construction_duration_seconds"] = *structure.ConstructionDurationSecs
 						}
 
 						structures = append(structures, structureFeature)
