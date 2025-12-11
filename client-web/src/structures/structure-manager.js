@@ -133,6 +133,8 @@ export class StructureManager {
       
       // Extract attributes
       const posAttr = geom.attributes.position;
+      if (!posAttr) continue;
+      
       const normalAttr = geom.attributes.normal;
       const uvAttr = geom.attributes.uv;
       const indexAttr = geom.index;
@@ -140,8 +142,12 @@ export class StructureManager {
       // Add vertices with offset indices
       for (let i = 0; i < posAttr.count; i++) {
         positions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-        normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
-        uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+        if (normalAttr) {
+          normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
+        }
+        if (uvAttr) {
+          uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+        }
       }
       
       // Add indices with offset
@@ -149,16 +155,29 @@ export class StructureManager {
         for (let i = 0; i < indexAttr.count; i++) {
           indices.push(indexAttr.getX(i) + indexOffset);
         }
+      } else {
+        // No indices - create them sequentially
+        for (let i = 0; i < posAttr.count; i++) {
+          indices.push(indexOffset + i);
+        }
       }
       
       indexOffset += posAttr.count;
     }
     
     // Set merged attributes
-    mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    mergedGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    mergedGeometry.setIndex(indices);
+    if (positions.length > 0) {
+      mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    }
+    if (normals.length > 0) {
+      mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    }
+    if (uvs.length > 0) {
+      mergedGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    }
+    if (indices.length > 0) {
+      mergedGeometry.setIndex(indices);
+    }
     
     return mergedGeometry;
   }
@@ -174,6 +193,19 @@ export class StructureManager {
       this.materialCache.set(key, createFn());
     }
     return this.materialCache.get(key);
+  }
+
+  /**
+   * Get or create cached geometry
+   * @param {string} key - Geometry cache key
+   * @param {Function} createFn - Function to create geometry if not cached
+   * @returns {THREE.BufferGeometry} Cached or new geometry
+   */
+  getCachedGeometry(key, createFn) {
+    if (!this.geometryCache.has(key)) {
+      this.geometryCache.set(key, createFn());
+    }
+    return this.geometryCache.get(key);
   }
 
   setupListeners() {
@@ -579,8 +611,9 @@ export class StructureManager {
     if (!decorations || decorations.length === 0) return;
 
     const { width, depth, height } = dimensions;
-    const defaultMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.1 });
-
+    
+    // PERFORMANCE: Collect all decorations by material type for merging
+    const decorationsByMaterial = new Map(); // Map<materialKey, Array<{geometry, position, rotation, scale}>>
     const dockInstances = [];
     const hvacInstances = [];
     const solarInstances = [];
@@ -605,13 +638,25 @@ export class StructureManager {
         const radius = Math.min(sx, sz) * 0.35;
         const stackHeight = sy;
         py = (height || 0) + stackHeight * 0.5 + 0.05;
-        const geom = new THREE.CylinderGeometry(radius, radius * 0.9, stackHeight, 10);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.castShadow = false;
-        mesh.receiveShadow = false;
-        mesh.position.set(px, py, pz);
-        structureGroup.add(mesh);
+        // PERFORMANCE: Collect for merging instead of creating individual meshes
+        const materialKey = 'vent_stack';
+        if (!decorationsByMaterial.has(materialKey)) {
+          decorationsByMaterial.set(materialKey, []);
+        }
+        // Use cached geometry with standard size, scale it in the merge
+        const baseRadius = 0.35;
+        const baseHeight = 1.0;
+        const scaleX = radius / baseRadius;
+        const scaleZ = radius * 0.9 / baseRadius;
+        const scaleY = stackHeight / baseHeight;
+        decorationsByMaterial.get(materialKey).push({
+          geometry: this.getCachedGeometry('cylinder_10seg', () => 
+            new THREE.CylinderGeometry(baseRadius, baseRadius * 0.9, baseHeight, 10)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [scaleX, scaleY, scaleZ]
+        });
       } else if (type === 'skylight') {
         // Rendered in roof shader; skip mesh
         return;
@@ -632,56 +677,75 @@ export class StructureManager {
         // Rendered in roof shader; skip mesh
         return;
       } else if (type === 'roof_access') {
-        const geom = new THREE.BoxGeometry(sx, sy, sz);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.65, metalness: 0.15 });
-        const group = new THREE.Group();
-        const hut = new THREE.Mesh(geom, mat);
-        hut.castShadow = false;
-        hut.receiveShadow = false;
-        group.add(hut);
-
-        // Simple door on front face (+z)
+        // PERFORMANCE: Collect for merging - roof access hut
+        const hutMaterialKey = 'roof_access_hut';
+        if (!decorationsByMaterial.has(hutMaterialKey)) {
+          decorationsByMaterial.set(hutMaterialKey, []);
+        }
+        decorationsByMaterial.get(hutMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, sy, sz]
+        });
+        
+        // Door (different material, collect separately)
         const doorW = Math.min(0.9, sx * 0.6);
         const doorH = Math.min(2.0, sy * 0.9);
         const doorD = 0.08;
-        const doorGeom = new THREE.BoxGeometry(doorW, doorH, doorD);
-        const doorMat = new THREE.MeshStandardMaterial({ color: 0x3a2b1a, roughness: 0.6, metalness: 0.1 });
-        const door = new THREE.Mesh(doorGeom, doorMat);
-        door.position.set(0, -sy * 0.5 + doorH * 0.5 + 0.02, sz * 0.5 + doorD * 0.5);
-        door.castShadow = false;
-        door.receiveShadow = false;
-        group.add(door);
-
-        group.position.set(px, py, pz);
-        structureGroup.add(group);
+        const doorX = px;
+        const doorY = py - sy * 0.5 + doorH * 0.5 + 0.02;
+        const doorZ = pz + sz * 0.5 + doorD * 0.5;
+        const doorMaterialKey = 'roof_access_door';
+        if (!decorationsByMaterial.has(doorMaterialKey)) {
+          decorationsByMaterial.set(doorMaterialKey, []);
+        }
+        decorationsByMaterial.get(doorMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [doorX, doorY, doorZ],
+          rotation: [0, 0, 0],
+          scale: [doorW, doorH, doorD]
+        });
       } else if (type === 'roof_railing') {
         const railW = sx;
         const railH = sy; // sy is height from generator
         const railD = sz;
         const t = 0.05; // thickness
-        const group = new THREE.Group();
-        const mat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.6, metalness: 0.2 });
-        const barGeomH = new THREE.BoxGeometry(railW, railH, t);
-        const barGeomV = new THREE.BoxGeometry(t, railH, railD);
-
-        const front = new THREE.Mesh(barGeomH, mat);
-        front.position.set(0, 0, railD * 0.5);
-        const back = new THREE.Mesh(barGeomH, mat);
-        back.position.set(0, 0, -railD * 0.5);
-        const left = new THREE.Mesh(barGeomV, mat);
-        left.position.set(-railW * 0.5, 0, 0);
-        const right = new THREE.Mesh(barGeomV, mat);
-        right.position.set(railW * 0.5, 0, 0);
-
-        [front, back, left, right].forEach((m) => {
-          m.castShadow = false;
-          m.receiveShadow = false;
-          group.add(m);
+        // PERFORMANCE: Collect all railing bars for merging
+        const railingMaterialKey = 'roof_railing';
+        if (!decorationsByMaterial.has(railingMaterialKey)) {
+          decorationsByMaterial.set(railingMaterialKey, []);
+        }
+        const bars = decorationsByMaterial.get(railingMaterialKey);
+        
+        // Front bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz + railD * 0.5],
+          rotation: [0, 0, 0],
+          scale: [railW, railH, t]
         });
-
-        // Position so base sits on roof
-        group.position.set(px, py, pz);
-        structureGroup.add(group);
+        // Back bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz - railD * 0.5],
+          rotation: [0, 0, 0],
+          scale: [railW, railH, t]
+        });
+        // Left bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px - railW * 0.5, py, pz],
+          rotation: [0, 0, 0],
+          scale: [t, railH, railD]
+        });
+        // Right bar
+        bars.push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px + railW * 0.5, py, pz],
+          rotation: [0, 0, 0],
+          scale: [t, railH, railD]
+        });
       } else if (type === 'piping') {
         const facade = dec.facade || 'front';
         const radius = Math.min(sx, sz) * 0.5;
@@ -698,13 +762,21 @@ export class StructureManager {
           pz = dec.position?.[1] || 0;
           px = (width || 0) * 0.5 + depthOffset;
         }
-        const geom = new THREE.CylinderGeometry(radius, radius, pipeHeight, 12);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.15, metalness: 0.85 });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.castShadow = false;
-        mesh.receiveShadow = false;
-        mesh.position.set(px, py, pz);
-        structureGroup.add(mesh);
+        // PERFORMANCE: Collect for merging
+        const pipingMaterialKey = 'piping';
+        if (!decorationsByMaterial.has(pipingMaterialKey)) {
+          decorationsByMaterial.set(pipingMaterialKey, []);
+        }
+        const baseRadius = 0.5;
+        const baseHeight = 1.0;
+        decorationsByMaterial.get(pipingMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_12seg', () => 
+            new THREE.CylinderGeometry(baseRadius, baseRadius, baseHeight, 12)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [radius / baseRadius, pipeHeight / baseHeight, radius / baseRadius]
+        });
       } else if (type === 'loading_dock') {
         const facade = dec.facade || 'front';
         const zOffset = sz * 0.5 + 0.05;
@@ -721,34 +793,58 @@ export class StructureManager {
         const radiusBottom = Math.min(sx, sz) * 0.4;
         const radiusTop = radiusBottom * 0.8;
         const towerHeight = sy;
-        const geom = new THREE.CylinderGeometry(radiusTop, radiusBottom, towerHeight, 32, 1, false);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6, metalness: 0.15 });
-        const tower = new THREE.Mesh(geom, mat);
+        // PERFORMANCE: Collect for merging - tower base
+        const towerMaterialKey = 'cooling_tower';
+        if (!decorationsByMaterial.has(towerMaterialKey)) {
+          decorationsByMaterial.set(towerMaterialKey, []);
+        }
+        const baseRadiusTop = 0.8;
+        const baseRadiusBottom = 1.0;
+        const baseHeight = 1.0;
+        decorationsByMaterial.get(towerMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_32seg_tapered', () => 
+            new THREE.CylinderGeometry(baseRadiusTop, baseRadiusBottom, baseHeight, 32, 1, false)
+          ),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [radiusTop / baseRadiusTop, towerHeight / baseHeight, radiusTop / baseRadiusTop]
+        });
 
+        // Stripe (different material, collect separately)
         const stripeH = Math.min(0.8, towerHeight * 0.15);
-        const stripeGeom = new THREE.CylinderGeometry(radiusTop * 1.05, radiusTop * 1.05, stripeH, 32, 1, false);
-        const stripeMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.2 });
-        const stripe = new THREE.Mesh(stripeGeom, stripeMat);
-        stripe.position.y = (towerHeight * 0.5) - (stripeH * 0.5) - 0.2;
-
-        const group = new THREE.Group();
-        group.add(tower);
-        group.add(stripe);
-        group.castShadow = false;
-        group.receiveShadow = false;
-        group.position.set(px, py, pz);
-        structureGroup.add(group);
+        const stripeRadius = radiusTop * 1.05;
+        const stripeY = py + (towerHeight * 0.5) - (stripeH * 0.5) - 0.2;
+        const stripeMaterialKey = 'cooling_tower_stripe';
+        if (!decorationsByMaterial.has(stripeMaterialKey)) {
+          decorationsByMaterial.set(stripeMaterialKey, []);
+        }
+        const baseStripeRadius = 1.0;
+        const baseStripeHeight = 0.15;
+        decorationsByMaterial.get(stripeMaterialKey).push({
+          geometry: this.getCachedGeometry('cylinder_32seg', () => 
+            new THREE.CylinderGeometry(baseStripeRadius, baseStripeRadius, baseStripeHeight, 32, 1, false)
+          ),
+          position: [px, stripeY, pz],
+          rotation: [0, 0, 0],
+          scale: [stripeRadius / baseStripeRadius, stripeH / baseStripeHeight, stripeRadius / baseStripeRadius]
+        });
       } else if (type === 'reactor_turbine_hall') {
         const baseH = sy * 0.6;
         const roofH = sy * 0.4;
-        const group = new THREE.Group();
-
-        const baseGeom = new THREE.BoxGeometry(sx, baseH, sz);
-        const baseMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.65, metalness: 0.2 });
-        const base = new THREE.Mesh(baseGeom, baseMat);
-        base.position.y = baseH * 0.5;
-        group.add(base);
-
+        // PERFORMANCE: Collect for merging - base
+        const baseMaterialKey = 'reactor_base';
+        if (!decorationsByMaterial.has(baseMaterialKey)) {
+          decorationsByMaterial.set(baseMaterialKey, []);
+        }
+        decorationsByMaterial.get(baseMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py + baseH * 0.5, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, baseH, sz]
+        });
+        
+        // Roof (arc shape - more complex, keep as separate for now, but could be merged with similar roofs)
+        // Note: ExtrudeGeometry is complex to merge, so we'll leave it as-is for now
         const radius = sx * 0.5;
         const roofShape = new THREE.Shape();
         roofShape.moveTo(-radius, 0);
@@ -760,31 +856,123 @@ export class StructureManager {
           steps: 1,
         });
         roofGeom.translate(0, 0, -sz * 0.5);
-
-        const roofMat = new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 0.6, metalness: 0.2 });
+        const roofMat = this.getCachedMaterial('reactor_roof', () =>
+          new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 0.6, metalness: 0.2 })
+        );
         const roof = new THREE.Mesh(roofGeom, roofMat);
         roof.rotation.x = Math.PI; // arc up
-        roof.position.y = baseH;
-        group.add(roof);
-
-        group.castShadow = false;
-        group.receiveShadow = false;
-        group.position.set(px, py, pz);
-        structureGroup.add(group);
+        roof.position.set(px, py + baseH, pz);
+        roof.castShadow = false;
+        roof.receiveShadow = false;
+        structureGroup.add(roof);
       } else {
-        const geom = new THREE.BoxGeometry(sx, sy, sz);
-        const mesh = new THREE.Mesh(geom, defaultMaterial);
-        mesh.castShadow = false;
-        mesh.receiveShadow = false;
-        mesh.position.set(px, py, pz);
-        structureGroup.add(mesh);
+        // Default decoration - collect for merging
+        const defaultMaterialKey = 'decoration_default';
+        if (!decorationsByMaterial.has(defaultMaterialKey)) {
+          decorationsByMaterial.set(defaultMaterialKey, []);
+        }
+        decorationsByMaterial.get(defaultMaterialKey).push({
+          geometry: this.getCachedGeometry('box', () => new THREE.BoxGeometry(1, 1, 1)),
+          position: [px, py, pz],
+          rotation: [0, 0, 0],
+          scale: [sx, sy, sz]
+        });
       }
+    });
+
+    // PERFORMANCE: Merge all decorations by material into single meshes
+    decorationsByMaterial.forEach((geomDefs, materialKey) => {
+      if (geomDefs.length === 0) return;
+      
+      // Get cached material
+      let mat;
+      switch (materialKey) {
+        case 'vent_stack':
+          mat = this.getCachedMaterial('vent_stack', () => 
+            new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.5 })
+          );
+          break;
+        case 'roof_railing':
+          mat = this.getCachedMaterial('roof_railing', () =>
+            new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.6, metalness: 0.2 })
+          );
+          break;
+        case 'piping':
+          mat = this.getCachedMaterial('piping', () =>
+            new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.15, metalness: 0.85 })
+          );
+          break;
+        case 'cooling_tower':
+          mat = this.getCachedMaterial('cooling_tower', () =>
+            new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6, metalness: 0.15 })
+          );
+          break;
+        case 'cooling_tower_stripe':
+          mat = this.getCachedMaterial('cooling_tower_stripe', () =>
+            new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.2 })
+          );
+          break;
+        case 'roof_access_hut':
+          mat = this.getCachedMaterial('roof_access_hut', () =>
+            new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.65, metalness: 0.15 })
+          );
+          break;
+        case 'roof_access_door':
+          mat = this.getCachedMaterial('roof_access_door', () =>
+            new THREE.MeshStandardMaterial({ color: 0x3a2b1a, roughness: 0.6, metalness: 0.1 })
+          );
+          break;
+        case 'reactor_base':
+          mat = this.getCachedMaterial('reactor_base', () =>
+            new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.65, metalness: 0.2 })
+          );
+          break;
+        default:
+          mat = this.getCachedMaterial('decoration_default', () =>
+            new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.1 })
+          );
+      }
+      
+      // Convert geometry definitions to mergeable format
+      const geometriesToMerge = geomDefs.map(def => {
+        const geom = def.geometry.clone();
+        
+        // Apply scale
+        if (def.scale && (def.scale[0] !== 1 || def.scale[1] !== 1 || def.scale[2] !== 1)) {
+          const scaleMatrix = new THREE.Matrix4().makeScale(...def.scale);
+          geom.applyMatrix4(scaleMatrix);
+        }
+        
+        // Apply rotation
+        if (def.rotation && (def.rotation[0] !== 0 || def.rotation[1] !== 0 || def.rotation[2] !== 0)) {
+          const rotationMatrix = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(...def.rotation, 'XYZ')
+          );
+          geom.applyMatrix4(rotationMatrix);
+        }
+        
+        return {
+          geometry: geom,
+          position: def.position,
+          rotation: [0, 0, 0] // Already applied
+        };
+      });
+      
+      // Merge all geometries of this material type
+      const mergedGeom = this.mergeBoxGeometries(geometriesToMerge);
+      const mergedMesh = new THREE.Mesh(mergedGeom, mat);
+      mergedMesh.castShadow = false;
+      mergedMesh.receiveShadow = false;
+      structureGroup.add(mergedMesh);
     });
 
     // Instanced loading docks
     if (dockInstances.length > 0) {
+      // PERFORMANCE: Use cached material for loading docks
+      const mat = this.getCachedMaterial('loading_dock', () =>
+        new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 })
+      );
       const geom = new THREE.BoxGeometry(1, 1, 1);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.1 });
       const inst = new THREE.InstancedMesh(geom, mat, dockInstances.length);
       const m = new THREE.Matrix4();
       dockInstances.forEach((d, i) => {
@@ -803,8 +991,11 @@ export class StructureManager {
 
     // Instanced roof HVAC boxes
     if (hvacInstances.length > 0) {
+      // PERFORMANCE: Use cached material for HVAC
+      const mat = this.getCachedMaterial('roof_hvac', () =>
+        new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.2 })
+      );
       const geom = new THREE.BoxGeometry(1, 1, 1);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.2 });
       const inst = new THREE.InstancedMesh(geom, mat, hvacInstances.length);
       const m = new THREE.Matrix4();
       hvacInstances.forEach((d, i) => {
@@ -823,8 +1014,11 @@ export class StructureManager {
 
     // Instanced solar panels
     if (solarInstances.length > 0) {
+      // PERFORMANCE: Use cached material for solar panels
+      const mat = this.getCachedMaterial('solar_panel', () =>
+        new THREE.MeshStandardMaterial({ color: 0x1a1f2e, roughness: 0.35, metalness: 0.8 })
+      );
       const geom = new THREE.BoxGeometry(1, 1, 1);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x1a1f2e, roughness: 0.35, metalness: 0.8 });
       const inst = new THREE.InstancedMesh(geom, mat, solarInstances.length);
       const m = new THREE.Matrix4();
       const tiltQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 10, 0, 0, 'YXZ')); // gentle tilt toward +Z
@@ -842,8 +1036,11 @@ export class StructureManager {
 
     // Instanced solar bases (pedestals)
     if (solarBaseInstances.length > 0) {
+      // PERFORMANCE: Use cached material for solar bases
+      const mat = this.getCachedMaterial('solar_base', () =>
+        new THREE.MeshStandardMaterial({ color: 0x2f3135, roughness: 0.5, metalness: 0.5 })
+      );
       const geom = new THREE.BoxGeometry(1, 1, 1);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x2f3135, roughness: 0.5, metalness: 0.5 });
       const inst = new THREE.InstancedMesh(geom, mat, solarBaseInstances.length);
       const m = new THREE.Matrix4();
       solarBaseInstances.forEach((d, i) => {
