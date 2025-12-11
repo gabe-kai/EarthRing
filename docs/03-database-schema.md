@@ -174,6 +174,7 @@ CREATE TABLE players (
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'player' NOT NULL, -- User role: 'player', 'admin', etc.
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP,
     level INTEGER DEFAULT 1,
@@ -186,6 +187,7 @@ CREATE TABLE players (
 
 CREATE INDEX idx_players_username ON players(username);
 CREATE INDEX idx_players_email ON players(email);
+CREATE INDEX idx_players_role ON players(role);
 ```
 
 **Note on POINT Type Queries:**

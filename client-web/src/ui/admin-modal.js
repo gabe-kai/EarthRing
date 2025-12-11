@@ -8,6 +8,7 @@ import { getCurrentUser } from '../auth/auth-service.js';
 import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
 import { deleteAllChunks, getChunkMetadata, deleteChunk } from '../api/chunk-service.js';
 import { getCurrentPlayerProfile, updatePlayerPosition } from '../api/player-service.js';
+import { deleteAllProceduralStructures } from '../api/structure-service.js';
 import { legacyPositionToRingPolar, ringPolarToRingArc, ringPolarToLegacyPosition, ringArcToRingPolar } from '../utils/coordinates-new.js';
 
 let adminModal = null;
@@ -476,14 +477,14 @@ export function showAdminModal() {
       </div>
       <div class="admin-modal-tabs">
         <button class="admin-modal-tab active" data-tab="player">Player</button>
-        <button class="admin-modal-tab" data-tab="zones">Zones</button>
         <button class="admin-modal-tab" data-tab="chunks">Chunks</button>
+        <button class="admin-modal-tab" data-tab="zones">Zones</button>
         <button class="admin-modal-tab" data-tab="structures">Structures</button>
       </div>
       <div class="admin-modal-body">
         <div class="admin-tab-content active" id="admin-tab-player"></div>
-        <div class="admin-tab-content" id="admin-tab-zones"></div>
         <div class="admin-tab-content" id="admin-tab-chunks"></div>
+        <div class="admin-tab-content" id="admin-tab-zones"></div>
         <div class="admin-tab-content" id="admin-tab-structures"></div>
       </div>
     </div>
@@ -584,12 +585,12 @@ function loadTabContent(tabId) {
     // Create a wrapper for the player panel content
     // We'll extract the body content from showPlayerPanel
     loadPlayerTabContent(contentContainer);
-  } else if (tabId === 'zones') {
-    // Load zones tab content
-    loadZonesTabContent(contentContainer);
   } else if (tabId === 'chunks') {
     // Create a wrapper for the chunk panel content
     loadChunksTabContent(contentContainer);
+  } else if (tabId === 'zones') {
+    // Load zones tab content
+    loadZonesTabContent(contentContainer);
   } else if (tabId === 'structures') {
     // Load structures tab content
     loadStructuresTabContent(contentContainer);
@@ -714,8 +715,20 @@ function loadChunksTabContent(container) {
     
     <div class="chunk-section">
       <h3>Database Reset</h3>
-      <p class="help-text">WARNING: This will delete ALL chunks from the database. They will be regenerated on next request.</p>
-      <button id="admin-reset-all-chunks-btn" class="delete-button" style="width: 100%;">Reset All Chunks Database</button>
+      <p class="help-text" style="color: #ff6666; font-weight: 600; margin-bottom: 0.5rem;">
+        WARNING: This action cannot be undone.
+      </p>
+      <button id="admin-reset-all-chunks-btn" class="delete-button" style="width: 100%;">
+        Reset All Chunks Database
+      </button>
+      <p class="help-text" style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #ccc;">
+        <strong>What this does:</strong><br>
+        • Deletes all chunks from the database<br>
+        • Keeps existing zones in the database (zones are NOT deleted)<br>
+        • Chunks will be regenerated when you visit them<br>
+        • Regenerated chunks will use existing zones from the database<br>
+        • Player-created zones and zones from other chunks are preserved
+      </p>
       <div id="admin-reset-chunks-result" class="result-display"></div>
     </div>
   `;
@@ -759,20 +772,37 @@ function loadZonesTabContent(container) {
     
     <div class="chunk-section">
       <h3>Database Reset</h3>
-      <p class="help-text">WARNING: This will delete ALL zones from the database. This action cannot be undone.</p>
-      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-        <button id="admin-reset-all-zones-cascade-btn" class="delete-button" style="width: 100%;">
-          Clean Reset (TRUNCATE CASCADE)
-        </button>
-        <p class="help-text" style="margin: 0; font-size: 0.85rem; color: #aaa;">
-          Deletes all zones, resets sequence numbering, and cascades to related tables (structures, roads, npcs).
-        </p>
-        <button id="admin-reset-all-zones-preserve-btn" class="delete-button" style="width: 100%;">
-          Preserve Related Records (DELETE)
-        </button>
-        <p class="help-text" style="margin: 0; font-size: 0.85rem; color: #aaa;">
-          Deletes all zones but preserves related records. Clears zone references in structures, roads, and npcs.
-        </p>
+      <p class="help-text" style="color: #ff6666; font-weight: 600; margin-bottom: 0.5rem;">
+        WARNING: These actions cannot be undone.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div style="border: 1px solid #444; border-radius: 6px; padding: 1rem; background: rgba(255, 68, 68, 0.05);">
+          <button id="admin-reset-all-zones-cascade-btn" class="delete-button" style="width: 100%; margin-bottom: 0.5rem;">
+            Clean Reset (TRUNCATE CASCADE)
+          </button>
+          <p class="help-text" style="margin: 0; font-size: 0.9rem; color: #ccc;">
+            <strong>What this does:</strong><br>
+            • Deletes ALL zones from the database<br>
+            • Resets zone ID sequence to start at 1 (fresh start)<br>
+            • Cascades to related tables: sets structures.zone_id to NULL, clears chunk_data.zone_ids, affects npcs, roads<br>
+            • Deletes all chunks (so they regenerate with new zones)<br>
+            • Zones are regenerated when chunks regenerate<br>
+            • Player-created zones are deleted
+          </p>
+        </div>
+        <div style="border: 1px solid #444; border-radius: 6px; padding: 1rem; background: rgba(255, 68, 68, 0.05);">
+          <button id="admin-reset-all-zones-preserve-btn" class="delete-button" style="width: 100%; margin-bottom: 0.5rem;">
+            Preserve Related Records (DELETE)
+          </button>
+          <p class="help-text" style="margin: 0; font-size: 0.9rem; color: #ccc;">
+            <strong>What this does:</strong><br>
+            • Deletes ALL zones from the database<br>
+            • Resets zone ID sequence to start at 1<br>
+            • Preserves related records: clears zone_id references in structures, roads, npcs (sets to NULL)<br>
+            • Does NOT delete chunks (chunks remain with empty zone_ids arrays)<br>
+            • Player-created zones are deleted
+          </p>
+        </div>
       </div>
       <div id="admin-reset-zones-result" class="result-display"></div>
     </div>
@@ -802,16 +832,21 @@ function loadStructuresTabContent(container) {
   structuresContent.innerHTML = `
     <div class="chunk-section">
       <h3>Rebuild Structures</h3>
-      <p class="help-text">
-        This will delete all procedural structures from the database and delete all chunks. 
-        Chunks will be regenerated with new structures when you visit them.
+      <p class="help-text" style="color: #ff6666; font-weight: 600; margin-bottom: 0.5rem;">
+        WARNING: This action cannot be undone.
       </p>
-      <p class="help-text" style="color: #ff6666; font-weight: 600;">
-        WARNING: This action cannot be undone. All procedural structures will be lost and regenerated.
-      </p>
-      <button id="admin-rebuild-structures-btn" class="delete-button" style="width: 100%; margin-top: 1rem;">
+      <button id="admin-rebuild-structures-btn" class="delete-button" style="width: 100%; margin-bottom: 0.5rem;">
         Rebuild Structures
       </button>
+      <p class="help-text" style="margin: 0; font-size: 0.9rem; color: #ccc;">
+        <strong>What this does:</strong><br>
+        • Deletes all procedural structures from the database<br>
+        • Keeps player-placed structures (non-procedural structures are preserved)<br>
+        • Deletes all chunks (so they regenerate with new structures)<br>
+        • Keeps existing zones in the database (zones are NOT deleted)<br>
+        • Chunks regenerate with new procedural structures when you visit them<br>
+        • New structures use construction animations (5-minute build time)
+      </p>
       <div id="admin-rebuild-structures-result" class="result-display"></div>
     </div>
   `;
@@ -830,71 +865,108 @@ function setupAdminStructuresListeners(container) {
   
   if (rebuildBtn) {
     rebuildBtn.addEventListener('click', async () => {
-      if (!confirm('Are you sure you want to rebuild all structures? This will delete all procedural structures and chunks. They will be regenerated when you visit them.')) {
+      const { showConfirmationModal } = await import('./game-modal.js');
+      const confirmed = await showConfirmationModal({
+        title: 'WARNING: Rebuild Structures',
+        message: 'This will delete all procedural structures from the database and delete all chunks.\n\nChunks will be regenerated with new structures when you visit them.\n\nThis action cannot be undone.',
+        checkboxLabel: 'I understand this will delete all procedural structures and chunks',
+        confirmText: 'Rebuild Structures',
+        cancelText: 'Cancel',
+        confirmColor: '#ff4444'
+      });
+      
+      if (!confirmed) {
         return;
       }
       
       rebuildBtn.disabled = true;
       rebuildBtn.textContent = 'Rebuilding...';
-      resultDiv.className = 'result-display';
-      resultDiv.style.display = 'none';
+      resultDiv.textContent = 'Deleting procedural structures...';
+      resultDiv.className = 'result-display show';
       
       try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('Not authenticated');
-        }
+        // Delete procedural structures via service
+        const data = await deleteAllProceduralStructures();
         
-        const response = await fetch('/api/structures/all/procedural', {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to rebuild structures');
-        }
-        
+        console.log('[Admin] Procedural structures deleted:', data);
+        resultDiv.textContent = `Success! Deleted ${data.structures_deleted || 0} procedural structures and ${data.chunks_deleted || 0} chunks. Regenerating...`;
         resultDiv.className = 'result-display show success';
-        resultDiv.textContent = `Success! Deleted ${data.structures_deleted || 0} procedural structures. Chunks have been reset and will regenerate with new structures when visited.`;
         
-        // Clear local chunks and trigger reload to see new structures with animations
+        // Clear structures from client (but keep zones and chunks visible)
+        if (window.earthring && window.earthring.structureManager) {
+          const structureManager = window.earthring.structureManager;
+          const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
+          allStructureIDs.forEach(structureID => {
+            structureManager.removeStructure(structureID);
+          });
+        }
+        
+        // Clear chunks from client so they reload with new structures
         if (window.earthring && window.earthring.chunkManager) {
           const chunkManager = window.earthring.chunkManager;
           const gameStateManager = window.earthring.gameStateManager;
+          const zoneManager = window.earthring.zoneManager;
           
-          // Clear all chunks from client (this will trigger cleanup of structures)
+          // Clear all chunks from client (this will trigger cleanup, but zones will reload with chunks)
           const allChunkIDs = Array.from(gameStateManager.chunks.keys());
           allChunkIDs.forEach(chunkID => {
             gameStateManager.removeChunk(chunkID);
           });
           
-          // Reload chunks at current position to see new structures with construction animations
-          // Zones will automatically reload with chunks (they're embedded in chunk data)
-          setTimeout(() => {
-            if (window.earthring && window.earthring.cameraController) {
-              const cameraPos = window.earthring.cameraController.getEarthRingPosition();
-              const floor = gameStateManager.getActiveFloor();
-              chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true) // Force reload
-                .catch(error => {
-                  console.error('[Chunks] Failed to reload chunks after rebuild:', error);
-                });
+          // Reload chunks at current position - wait for them to arrive
+          if (window.earthring.cameraController) {
+            const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+            const floor = gameStateManager.getActiveFloor();
+            
+            console.log('[Admin] Requesting chunk reload at position:', cameraPos.x, 'floor:', floor);
+            
+            // Request chunks and wait for them to load (force reload clears subscription and creates new one)
+            await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true); // Force reload
+            
+            console.log('[Admin] Chunk reload requested, waiting for chunks to arrive...');
+            
+            // Wait for chunks to arrive via WebSocket and be processed
+            // Chunks are sent asynchronously after subscription, so we need to wait
+            // Check every 200ms for up to 5 seconds to see if chunks have arrived
+            let chunksReceived = false;
+            const maxWaitTime = 5000; // 5 seconds
+            const checkInterval = 200;
+            let elapsed = 0;
+            
+            while (elapsed < maxWaitTime && !chunksReceived) {
+              await new Promise(resolve => setTimeout(resolve, checkInterval));
+              elapsed += checkInterval;
+              
+              // Check if we have chunks loaded
+              const loadedChunkCount = gameStateManager.chunks.size;
+              if (loadedChunkCount > 0) {
+                chunksReceived = true;
+                console.log(`[Admin] Chunks received after rebuild! Loaded ${loadedChunkCount} chunks.`);
+                break;
+              }
             }
+            
+            if (!chunksReceived) {
+              console.warn('[Admin] Warning: No chunks received after waiting', elapsed, 'ms');
+            }
+            
+            // Give a bit more time for zones/structures to be extracted from chunks
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Re-render zones to ensure they are displayed properly (zones come with chunks)
-            if (window.earthring && window.earthring.zoneManager) {
-              window.earthring.zoneManager.reRenderAllZones();
+            if (zoneManager) {
+              zoneManager.reRenderAllZones();
+              console.log('[Admin] Zones re-rendered after rebuild');
             }
-          }, 500);
+          }
         }
+        
+        // Close the modal after successful rebuild
+        hideAdminModal();
         
       } catch (error) {
         resultDiv.className = 'result-display show error';
         resultDiv.textContent = `Error: ${error.message}`;
-      } finally {
         rebuildBtn.disabled = false;
         rebuildBtn.textContent = 'Rebuild Structures';
       }
@@ -1660,20 +1732,6 @@ async function handleAdminResetAllZones(container, cascade = false) {
     return;
   }
   
-  // Double confirmation
-  const doubleConfirmed = await showConfirmationModal({
-    title: `Final Confirmation: ${mode}`,
-    message: 'This will permanently remove all zone data from the database.',
-    checkboxLabel: 'I confirm I want to delete all zones',
-    confirmText: 'Yes, Delete All',
-    cancelText: 'Cancel',
-    confirmColor: '#ff4444'
-  });
-  
-  if (!doubleConfirmed) {
-    return;
-  }
-  
   resultDisplay.textContent = `Deleting all zones (${mode})...`;
   resultDisplay.className = 'result-display show';
   if (cascadeButton) cascadeButton.disabled = true;
@@ -1681,31 +1739,97 @@ async function handleAdminResetAllZones(container, cascade = false) {
   
   try {
     const result = await deleteAllZones(cascade);
-    resultDisplay.textContent = JSON.stringify(result, null, 2);
+    resultDisplay.textContent = `Zones deleted: ${result.count || result.rows_affected || 0}`;
     resultDisplay.className = 'result-display show success';
     
-    // Clear zones from the client
-    if (window.earthring && window.earthring.zoneManager) {
-      window.earthring.zoneManager.clearAllZones();
+    // Zones are created when chunks are generated, so we need to delete chunks
+    // so they regenerate with zones. This ensures zones are recreated properly.
+    resultDisplay.textContent += '\nDeleting chunks to trigger regeneration...';
+    try {
+      const chunkResult = await deleteAllChunks();
+      resultDisplay.textContent += `\nChunks deleted: ${chunkResult.count || chunkResult.chunks_deleted || 0}`;
+    } catch (chunkError) {
+      console.error('[Admin] Failed to delete chunks after zone reset:', chunkError);
+      resultDisplay.textContent += `\nWarning: Failed to delete chunks: ${chunkError.message}`;
+      resultDisplay.className = 'result-display show warning';
     }
     
-    // Zones come embedded in chunks, so trigger chunk reload to get zones back
-    // This ensures zones appear immediately without page refresh
-    if (window.earthring && window.earthring.chunkManager && window.earthring.cameraController) {
-      const cameraPos = window.earthring.cameraController.getEarthRingPosition();
-      const floor = window.earthring.gameStateManager?.getActiveFloor() || 0;
-      window.earthring.chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true) // Force reload
-        .catch(error => {
-          console.error('[Chunks] Failed to reload chunks after zone reset:', error);
+    // Clear zones, chunks, and structures from the client
+    if (window.earthring) {
+      const gameStateManager = window.earthring.gameStateManager;
+      const chunkManager = window.earthring.chunkManager;
+      const zoneManager = window.earthring.zoneManager;
+      const structureManager = window.earthring.structureManager;
+      
+      // Clear all zones first
+      if (zoneManager) {
+        zoneManager.clearAllZones();
+      }
+      
+      // Clear all structures
+      if (structureManager) {
+        const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
+        allStructureIDs.forEach(structureID => {
+          structureManager.removeStructure(structureID);
         });
-    }
-    // Re-render zones to ensure they are displayed properly
-    if (window.earthring && window.earthring.zoneManager) {
-      window.earthring.zoneManager.reRenderAllZones();
+      }
+      
+      // Clear all chunks from client
+      const allChunkIDs = Array.from(gameStateManager.chunks.keys());
+      allChunkIDs.forEach(chunkID => {
+        gameStateManager.removeChunk(chunkID);
+      });
+      
+      // Reload chunks at current position - wait for them to arrive
+      if (chunkManager && window.earthring.cameraController) {
+        const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+        const floor = gameStateManager?.getActiveFloor() || 0;
+        
+        console.log('[Admin] Requesting chunk reload at position:', cameraPos.x, 'floor:', floor);
+        
+        // Request chunks and wait for them to load (force reload clears subscription and creates new one)
+        await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true); // Force reload
+        
+        console.log('[Admin] Chunk reload requested, waiting for chunks to arrive...');
+        
+        // Wait for chunks to arrive via WebSocket and be processed
+        // Chunks are sent asynchronously after subscription, so we need to wait
+        // Check every 200ms for up to 5 seconds to see if chunks have arrived
+        let chunksReceived = false;
+        const maxWaitTime = 5000; // 5 seconds
+        const checkInterval = 200;
+        let elapsed = 0;
+        
+        while (elapsed < maxWaitTime && !chunksReceived) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          elapsed += checkInterval;
+          
+          // Check if we have chunks loaded
+          const loadedChunkCount = gameStateManager.chunks.size;
+          if (loadedChunkCount > 0) {
+            chunksReceived = true;
+            console.log(`[Admin] Chunks received after zone reset! Loaded ${loadedChunkCount} chunks.`);
+            break;
+          }
+        }
+        
+        if (!chunksReceived) {
+          console.warn('[Admin] Warning: No chunks received after waiting', elapsed, 'ms');
+        }
+        
+        // Give a bit more time for zones/structures to be extracted from chunks
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Re-render zones to ensure they are displayed properly (zones come with chunks)
+        if (zoneManager) {
+          zoneManager.reRenderAllZones();
+          console.log('[Admin] Zones re-rendered after zone reset');
+        }
+      }
     }
     
-    // Refresh zones by floor (for admin UI display)
-    await loadZonesByFloor(container);
+    // Close the modal after successful reset (like chunk reset does)
+    hideAdminModal();
   } catch (error) {
     resultDisplay.textContent = `Error: ${error.message}`;
     resultDisplay.className = 'result-display show error';
@@ -1733,20 +1857,6 @@ async function handleAdminResetAllChunks(container) {
   });
   
   if (!confirmed) {
-    return;
-  }
-  
-  // Double confirmation
-  const doubleConfirmed = await showConfirmationModal({
-    title: 'Final Confirmation: Delete All Chunks',
-    message: 'This will remove all chunk data from the database. Chunks will be regenerated on next request.',
-    checkboxLabel: 'I confirm I want to delete all chunks',
-    confirmText: 'Yes, Delete All',
-    cancelText: 'Cancel',
-    confirmColor: '#ff4444'
-  });
-  
-  if (!doubleConfirmed) {
     return;
   }
   

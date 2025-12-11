@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -324,8 +325,14 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 	}
 
 	// Check admin role
-	authRole, _ := r.Context().Value(auth.RoleKey).(string) //nolint:errcheck // ok value ignored - defaults to empty string if not a string
+	authRole, ok := r.Context().Value(auth.RoleKey).(string)
+	if !ok || authRole == "" {
+		log.Printf("DeleteAllProceduralStructures: Role not found in context or empty")
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
 	if authRole != "admin" {
+		log.Printf("DeleteAllProceduralStructures: User does not have admin role (got: %q, want: admin)", authRole)
 		respondWithError(w, http.StatusForbidden, "Admin access required")
 		return
 	}

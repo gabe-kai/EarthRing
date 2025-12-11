@@ -3,6 +3,55 @@
 **Status**: ✅ **COMPLETED** - December 2024  
 **Related**: [Building Construction Animation Strategies](../strategies/building-construction-animation.md)
 
+---
+
+## Admin Panel Improvements (December 2024)
+
+**Status**: ✅ **COMPLETED**
+
+Enhanced the admin panel with improved UX and role-based access control.
+
+### Tab Reorganization
+- **New Tab Order**: Player (1st), Chunks (2nd), Zones (3rd), Structures (4th)
+- Reorganized for better workflow and logical grouping
+
+### Enhanced Button Descriptions
+All reset buttons now include explicit descriptions of their actions:
+- **Chunks -> Reset All Chunks Database**: Deletes all chunks, keeps zones, regenerates chunks on visit
+- **Zones -> Clean Reset (TRUNCATE CASCADE)**: Deletes all zones, cascades to related tables, deletes chunks, regenerates zones
+- **Zones -> Preserve Related Records (DELETE)**: Deletes zones but preserves related records, doesn't delete chunks
+- **Structures -> Rebuild Structures**: Deletes procedural structures, keeps player structures, deletes chunks, regenerates with new structures
+
+### Improved Reset Flow
+All reset buttons now:
+- Close modal automatically after successful reset
+- Clear client-side state (chunks, zones, structures)
+- Force reload chunks with `forceReload: true`
+- Wait for chunks to arrive via WebSocket
+- Re-render zones and structures automatically
+- **No page refresh required** - all updates happen in real-time
+
+### Single Confirmation
+- Removed double confirmation dialogs
+- Single confirmation with checkbox is sufficient
+- More streamlined user experience
+
+### Role-Based Access Control
+- Added `role` column to `players` table (migration 000025)
+- Default role: `'player'`
+- Admin role: `'admin'` (set via database)
+- Admin endpoints check role from JWT context
+- Structure rebuild endpoint requires admin role
+
+**Implementation Files:**
+- `client-web/src/ui/admin-modal.js` - Admin panel UI improvements
+- `client-web/src/api/structure-service.js` - Structure service with admin endpoint
+- `server/internal/api/structure_handlers.go` - Admin role checking
+- `server/internal/auth/handlers.go` - Role reading from database
+- `database/migrations/000025_add_role_to_players.up.sql` - Role column migration
+
+**Related**: [Authentication & Security](../05-authentication-security.md), [Structure System](../11-structure-system.md)
+
 ## Overview
 
 This document describes the completed implementation of real-time building construction and demolition animations, along with improvements to chunk/zone reloading and admin functionality. Buildings now construct over time with visual animations, and all admin reset operations work seamlessly without requiring page refreshes.

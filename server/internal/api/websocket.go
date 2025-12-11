@@ -570,6 +570,219 @@ type ChunkDataResponse struct {
 	Chunks []ChunkData `json:"chunks"`
 }
 
+// loadStructuresAndZonesFromDB loads structures and zones from the database for a chunk
+// Returns (zones, structures) as []interface{} in the format expected by the client
+func (h *WebSocketHandlers) loadStructuresAndZonesFromDB(chunkDBID int64, floor int, chunkData *database.StoredChunkData) ([]interface{}, []interface{}) {
+	var zones []interface{}
+	var structures []interface{}
+	zoneIDMap := make(map[int64]bool) // Track zone IDs we've already added to avoid duplicates
+
+	// Load zones from chunk_data.zone_ids (system zones)
+	if chunkData != nil && len(chunkData.ZoneIDs) > 0 {
+		zoneRecords, err := h.zoneStorage.GetZonesByIDs(chunkData.ZoneIDs)
+		if err == nil {
+			for _, zone := range zoneRecords {
+				zoneIDMap[zone.ID] = true
+				zoneFeature := map[string]interface{}{
+					"type": "Feature",
+					"properties": map[string]interface{}{
+						"id":             zone.ID,
+						"name":           zone.Name,
+						"zone_type":      zone.ZoneType,
+						"floor":          zone.Floor,
+						"is_system_zone": zone.IsSystemZone,
+					},
+					"geometry": json.RawMessage(zone.Geometry),
+				}
+				// Add area explicitly (always include, even if 0)
+				if zone.Area >= 0 {
+					zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+				} else {
+					zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+				}
+				// Add properties and metadata if present
+				if len(zone.Properties) > 0 {
+					zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck
+				}
+				if len(zone.Metadata) > 0 {
+					zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck
+				}
+				zones = append(zones, zoneFeature)
+			}
+		} else {
+			log.Printf("[Chunks] Warning: Failed to load zones by IDs for chunk %d: %v", chunkDBID, err)
+		}
+	}
+
+	// Also load zones that overlap with the chunk's geometry (includes player-placed zones)
+	overlappingZones, err := h.zoneStorage.GetZonesOverlappingChunk(chunkDBID, floor)
+	if err == nil {
+		for _, zone := range overlappingZones {
+			// Skip if we already added this zone from zone_ids
+			if zoneIDMap[zone.ID] {
+				continue
+			}
+			zoneIDMap[zone.ID] = true
+			zoneFeature := map[string]interface{}{
+				"type": "Feature",
+				"properties": map[string]interface{}{
+					"id":             zone.ID,
+					"name":           zone.Name,
+					"zone_type":      zone.ZoneType,
+					"floor":          zone.Floor,
+					"is_system_zone": zone.IsSystemZone,
+				},
+				"geometry": json.RawMessage(zone.Geometry),
+			}
+			// Add area explicitly (always include, even if 0)
+			if zone.Area >= 0 {
+				zoneFeature["properties"].(map[string]interface{})["area"] = zone.Area
+			} else {
+				zoneFeature["properties"].(map[string]interface{})["area"] = 0.0
+			}
+			// Add properties and metadata if present
+			if len(zone.Properties) > 0 {
+				zoneFeature["properties"].(map[string]interface{})["properties"] = json.RawMessage(zone.Properties) //nolint:errcheck
+			}
+			if len(zone.Metadata) > 0 {
+				zoneFeature["properties"].(map[string]interface{})["metadata"] = json.RawMessage(zone.Metadata) //nolint:errcheck
+			}
+			zones = append(zones, zoneFeature)
+		}
+	} else {
+		log.Printf("[Chunks] Warning: Failed to load overlapping zones for chunk %d: %v", chunkDBID, err)
+	}
+
+	// Load structures from chunk_data.structure_ids
+	if chunkData != nil && len(chunkData.StructureIDs) > 0 {
+		for _, structID := range chunkData.StructureIDs {
+			structure, err := h.structureStorage.GetStructure(structID)
+			if err != nil {
+				log.Printf("[Chunks] Warning: Failed to load structure %d for chunk %d: %v", structID, chunkDBID, err)
+				continue
+			}
+
+			// Convert structure to format expected by client
+			structureFeature := map[string]interface{}{
+				"id":             fmt.Sprintf("%d", structure.ID),
+				"type":           "building",
+				"structure_type": structure.StructureType,
+				"floor":          structure.Floor,
+				"position": map[string]interface{}{
+					"x": structure.Position.X,
+					"y": structure.Position.Y,
+				},
+				"rotation":      structure.Rotation,
+				"scale":         structure.Scale,
+				"is_procedural": structure.IsProcedural,
+			}
+
+			// Extract dimensions, windows, doors, and garage doors from model_data if present
+			if len(structure.ModelData) > 0 {
+				var modelDataMap map[string]interface{}
+				if err := json.Unmarshal(structure.ModelData, &modelDataMap); err == nil {
+					if dimensions, ok := modelDataMap["dimensions"].(map[string]interface{}); ok {
+						structureFeature["dimensions"] = dimensions
+					}
+					if windows, ok := modelDataMap["windows"].([]interface{}); ok {
+						structureFeature["windows"] = windows
+					}
+					if doorsVal, exists := modelDataMap["doors"]; exists {
+						if doors, ok := doorsVal.(map[string]interface{}); ok {
+							structureFeature["doors"] = doors
+						}
+					}
+					if garageDoorsVal, exists := modelDataMap["garage_doors"]; exists {
+						if garageDoors, ok := garageDoorsVal.([]interface{}); ok {
+							structureFeature["garage_doors"] = garageDoors
+						}
+					}
+					if decorationsVal, exists := modelDataMap["decorations"]; exists {
+						if decorations, ok := decorationsVal.([]interface{}); ok {
+							structureFeature["decorations"] = decorations
+						}
+					}
+					if className, ok := modelDataMap["class"].(string); ok {
+						structureFeature["building_class"] = className
+					}
+					if category, ok := modelDataMap["category"].(string); ok {
+						structureFeature["category"] = category
+					}
+					if subcategory, ok := modelDataMap["subcategory"].(string); ok {
+						structureFeature["subcategory"] = subcategory
+					}
+					if shape, ok := modelDataMap["shape"].(string); ok {
+						structureFeature["shape"] = shape
+					}
+					if sizeClass, ok := modelDataMap["size_class"].(string); ok {
+						structureFeature["size_class"] = sizeClass
+					}
+					if height, ok := modelDataMap["height"].(float64); ok {
+						structureFeature["height"] = height
+					}
+					if colorPalette, ok := modelDataMap["color_palette"].(map[string]interface{}); ok {
+						structureFeature["color_palette"] = colorPalette
+					}
+					if shaderPatterns, ok := modelDataMap["shader_patterns"].([]interface{}); ok {
+						structureFeature["shader_patterns"] = shaderPatterns
+					}
+					if decorativeElements, ok := modelDataMap["decorative_elements"].([]interface{}); ok {
+						structureFeature["decorative_elements"] = decorativeElements
+					}
+					if _, hasSubtype := structureFeature["building_subtype"]; !hasSubtype {
+						if subtype, ok := modelDataMap["building_subtype"].(string); ok {
+							structureFeature["building_subtype"] = subtype
+						}
+					}
+				}
+			}
+
+			// Extract properties and parse as JSON object
+			var propertiesMap map[string]interface{}
+			if len(structure.Properties) > 0 {
+				if err := json.Unmarshal(structure.Properties, &propertiesMap); err == nil {
+					if buildingSubtype, ok := propertiesMap["building_subtype"].(string); ok {
+						structureFeature["building_subtype"] = buildingSubtype
+					}
+					structureFeature["properties"] = propertiesMap
+				} else {
+					structureFeature["properties"] = structure.Properties
+				}
+			} else {
+				structureFeature["properties"] = map[string]interface{}{}
+			}
+
+			// Add procedural seed if present
+			if structure.ProceduralSeed != nil {
+				structureFeature["procedural_seed"] = *structure.ProceduralSeed
+			}
+
+			// Add zone_id if present
+			if structure.ZoneID != nil {
+				structureFeature["zone_id"] = *structure.ZoneID
+			}
+
+			// Add construction state fields if present
+			if structure.ConstructionState != nil {
+				structureFeature["construction_state"] = *structure.ConstructionState
+			}
+			if structure.ConstructionStartedAt != nil {
+				structureFeature["construction_started_at"] = structure.ConstructionStartedAt.Format(time.RFC3339)
+			}
+			if structure.ConstructionCompletedAt != nil {
+				structureFeature["construction_completed_at"] = structure.ConstructionCompletedAt.Format(time.RFC3339)
+			}
+			if structure.ConstructionDurationSecs != nil {
+				structureFeature["construction_duration_seconds"] = *structure.ConstructionDurationSecs
+			}
+
+			structures = append(structures, structureFeature)
+		}
+	}
+
+	return zones, structures
+}
+
 // loadChunksForIDs loads chunk data for the given chunk IDs and LOD level.
 // This is the server-side chunk processing pipeline that handles database lookup,
 // generation, compression, and wrapping.
@@ -657,62 +870,70 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 				// Store the generated chunk in the database
 				if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 					log.Printf("Failed to store chunk %s: %v", chunkID, err)
-				}
-
-				// Add construction state to structures from procedural generation
-				// Structures from procedural service don't have construction state, but we set it when storing
-				// Add it here so client can animate construction
-				now := time.Now()
-				structuresWithState := make([]interface{}, 0, len(genResponse.Structures))
-				for _, structObj := range genResponse.Structures {
-					structMap, ok := structObj.(map[string]interface{})
-					if !ok {
-						structuresWithState = append(structuresWithState, structObj)
-						continue
+					// Return empty chunk on storage failure
+					chunk = ChunkData{
+						ID:         chunkID,
+						Geometry:   nil,
+						Structures: []interface{}{},
+						Zones:      []interface{}{},
+						Metadata: &ChunkMetadata{
+							ID:           chunkID,
+							Floor:        floor,
+							ChunkIndex:   chunkIndex,
+							Version:      1,
+							LastModified: time.Time{},
+							IsDirty:      false,
+						},
 					}
+				} else {
+						// Reload chunk from database to get proper IDs and calculated fields (area, etc.)
+						reloadedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
+						if err != nil || reloadedMetadata == nil {
+							log.Printf("Failed to reload chunk metadata %s after storing: %v", chunkID, err)
+							// Fall back to using genResponse data
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   genResponse.Geometry,
+								Structures: []interface{}{},
+								Zones:      []interface{}{},
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        floor,
+									ChunkIndex:   chunkIndex,
+									Version:      genResponse.Chunk.Version,
+									LastModified: time.Now(),
+									IsDirty:      false,
+								},
+							}
+						} else {
+							// Load structures and zones from database with proper IDs
+							chunkData, err := h.chunkStorage.GetChunkData(reloadedMetadata.ID)
+							if err != nil {
+								log.Printf("Failed to load chunk data %s after storing: %v", chunkID, err)
+							}
 
-					// Check if it's a building type
-					structureType, _ := structMap["structure_type"].(string)
-					if structureType == "" {
-						if typeVal, ok := structMap["type"].(string); ok {
-							structureType = typeVal
+							// Load zones and structures from database
+							zones, structures := h.loadStructuresAndZonesFromDB(reloadedMetadata.ID, reloadedMetadata.Floor, chunkData)
+
+							// Use geometry from genResponse (not stored as PostGIS, stored as JSONB)
+							geometry := genResponse.Geometry
+
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   geometry,
+								Structures: structures,
+								Zones:      zones,
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        reloadedMetadata.Floor,
+									ChunkIndex:   reloadedMetadata.ChunkIndex,
+									Version:      reloadedMetadata.Version,
+									LastModified: reloadedMetadata.LastModified,
+									IsDirty:      reloadedMetadata.IsDirty,
+								},
+							}
 						}
 					}
-
-					// Set construction state for buildings
-					if structureType == "building" {
-						structMap["construction_state"] = "constructing"
-						structMap["construction_started_at"] = now.Format(time.RFC3339)
-						constructionDurationSecs := 300 // 5 minutes default
-						structMap["construction_duration_seconds"] = constructionDurationSecs
-						completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
-						structMap["construction_completed_at"] = completionTime.Format(time.RFC3339)
-					} else {
-						// Non-building structures spawn instantly
-						structMap["construction_state"] = "completed"
-						structMap["construction_started_at"] = now.Format(time.RFC3339)
-						structMap["construction_completed_at"] = now.Format(time.RFC3339)
-						structMap["construction_duration_seconds"] = 0
-					}
-
-					structuresWithState = append(structuresWithState, structMap)
-				}
-
-				// Convert procedural service response to chunk data
-				chunk = ChunkData{
-					ID:         chunkID,
-					Geometry:   genResponse.Geometry,
-					Structures: structuresWithState,
-					Zones:      genResponse.Zones,
-					Metadata: &ChunkMetadata{
-						ID:           chunkID,
-						Floor:        floor,
-						ChunkIndex:   chunkIndex,
-						Version:      genResponse.Chunk.Version,
-						LastModified: time.Now(),
-						IsDirty:      false,
-					},
-				}
 			}
 		} else {
 			// Chunk exists in database - check if version is current
@@ -822,59 +1043,69 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 					// Store the regenerated chunk in the database
 					if err := h.chunkStorage.StoreChunk(floor, chunkIndex, genResponse, nil); err != nil {
 						log.Printf("Failed to store regenerated chunk %s: %v", chunkID, err)
-					}
-
-					// Add construction state to structures from procedural generation
-					now := time.Now()
-					structuresWithState := make([]interface{}, 0, len(genResponse.Structures))
-					for _, structObj := range genResponse.Structures {
-						structMap, ok := structObj.(map[string]interface{})
-						if !ok {
-							structuresWithState = append(structuresWithState, structObj)
-							continue
+						// Fall back to using genResponse data if storage fails
+						chunk = ChunkData{
+							ID:         chunkID,
+							Geometry:   genResponse.Geometry,
+							Structures: []interface{}{},
+							Zones:      []interface{}{},
+							Metadata: &ChunkMetadata{
+								ID:           chunkID,
+								Floor:        floor,
+								ChunkIndex:   chunkIndex,
+								Version:      genResponse.Chunk.Version,
+								LastModified: time.Now(),
+								IsDirty:      false,
+							},
 						}
+					} else {
+						// Reload chunk from database to get proper IDs and calculated fields (area, etc.)
+						reloadedMetadata, err := h.chunkStorage.GetChunkMetadata(floor, chunkIndex)
+						if err != nil || reloadedMetadata == nil {
+							log.Printf("Failed to reload chunk metadata %s after regenerating: %v", chunkID, err)
+							// Fall back to using genResponse data
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   genResponse.Geometry,
+								Structures: []interface{}{},
+								Zones:      []interface{}{},
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        floor,
+									ChunkIndex:   chunkIndex,
+									Version:      genResponse.Chunk.Version,
+									LastModified: time.Now(),
+									IsDirty:      false,
+								},
+							}
+						} else {
+							// Load structures and zones from database with proper IDs
+							chunkData, err := h.chunkStorage.GetChunkData(reloadedMetadata.ID)
+							if err != nil {
+								log.Printf("Failed to load chunk data %s after regenerating: %v", chunkID, err)
+							}
 
-						// Check if it's a building type
-						structureType, _ := structMap["structure_type"].(string)
-						if structureType == "" {
-							if typeVal, ok := structMap["type"].(string); ok {
-								structureType = typeVal
+							// Load zones and structures from database
+							zones, structures := h.loadStructuresAndZonesFromDB(reloadedMetadata.ID, reloadedMetadata.Floor, chunkData)
+
+							// Use geometry from genResponse (not stored as PostGIS, stored as JSONB)
+							geometry := genResponse.Geometry
+
+							chunk = ChunkData{
+								ID:         chunkID,
+								Geometry:   geometry,
+								Structures: structures,
+								Zones:      zones,
+								Metadata: &ChunkMetadata{
+									ID:           chunkID,
+									Floor:        reloadedMetadata.Floor,
+									ChunkIndex:   reloadedMetadata.ChunkIndex,
+									Version:      reloadedMetadata.Version,
+									LastModified: reloadedMetadata.LastModified,
+									IsDirty:      reloadedMetadata.IsDirty,
+								},
 							}
 						}
-
-						// Set construction state for buildings
-						if structureType == "building" {
-							structMap["construction_state"] = "constructing"
-							structMap["construction_started_at"] = now.Format(time.RFC3339)
-							constructionDurationSecs := 300 // 5 minutes default
-							structMap["construction_duration_seconds"] = constructionDurationSecs
-							completionTime := now.Add(time.Duration(constructionDurationSecs) * time.Second)
-							structMap["construction_completed_at"] = completionTime.Format(time.RFC3339)
-						} else {
-							// Non-building structures spawn instantly
-							structMap["construction_state"] = "completed"
-							structMap["construction_started_at"] = now.Format(time.RFC3339)
-							structMap["construction_completed_at"] = now.Format(time.RFC3339)
-							structMap["construction_duration_seconds"] = 0
-						}
-
-						structuresWithState = append(structuresWithState, structMap)
-					}
-
-					// Convert procedural service response to chunk data
-					chunk = ChunkData{
-						ID:         chunkID,
-						Geometry:   genResponse.Geometry,
-						Structures: structuresWithState,
-						Zones:      genResponse.Zones,
-						Metadata: &ChunkMetadata{
-							ID:           chunkID,
-							Floor:        floor,
-							ChunkIndex:   chunkIndex,
-							Version:      genResponse.Chunk.Version,
-							LastModified: time.Now(),
-							IsDirty:      false,
-						},
 					}
 				}
 			} else {
