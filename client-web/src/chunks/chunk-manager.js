@@ -1029,8 +1029,9 @@ export class ChunkManager {
       });
 
       this.streamingSubscriptionID = response.subscription_id;
-      // Store wrapped position for consistent distance calculations
-      this.lastSubscriptionPosition = wrappedRingPosition;
+      // Store raw position (not wrapped) for accurate tracking
+      this.lastSubscriptionPosition = ringPosition;
+      this.lastSubscriptionFloor = floor;
       this.subscriptionRadiusMeters = radiusMeters;
       this.subscriptionWidthMeters = widthMeters;
       return response.subscription_id;
@@ -1049,7 +1050,17 @@ export class ChunkManager {
    * @param {string|number} lodLevel - Level of detail: "low", "medium", "high" or 0-3 (default: "medium")
    * @returns {Promise} Promise that resolves when request is sent
    */
-  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium') {
+  async requestChunksAtPosition(ringPosition, floor, radius = 1, lodLevel = 'medium', forceReload = false) {
+    // If forceReload is true, clear subscription state to force a fresh subscription
+    // This ensures chunks are regenerated from the database
+    if (forceReload && this.useStreaming) {
+      // Clear subscription state - this will cause a fresh subscription below
+      this.streamingSubscriptionID = null;
+      this.lastSubscriptionPosition = null;
+      this.lastSubscriptionFloor = null;
+      console.log('[Chunks] Force reload: cleared subscription state to trigger fresh chunk load');
+    }
+    
     // If streaming is enabled and we have a subscription, update subscription if camera moved significantly
     if (this.useStreaming && this.streamingSubscriptionID) {
       // Check if camera has moved significantly (more than 1000m, different chunk, or different floor)
@@ -1094,6 +1105,7 @@ export class ChunkManager {
         // Update pose using stream_update_pose instead of re-subscribing
         try {
           await this.updateStreamingPose(ringPosition, floor);
+          this.lastSubscriptionPosition = ringPosition;
           this.lastSubscriptionFloor = floor;
         } catch (error) {
           console.error('[Chunks] Failed to update streaming pose:', error);
@@ -1106,6 +1118,8 @@ export class ChunkManager {
     // If we don't have a subscription, create one
     if (!this.streamingSubscriptionID) {
       await this.subscribeToStreaming(ringPosition, floor, radius * 1000, radius * 1000);
+      this.lastSubscriptionPosition = ringPosition;
+      this.lastSubscriptionFloor = floor;
       return;
     }
     
@@ -1341,6 +1355,11 @@ export class ChunkManager {
             procedural_seed: properties.procedural_seed,
             properties: properties.properties,
             model_data: properties.model_data,
+            // Extract construction state fields for animations
+            construction_state: properties.construction_state,
+            construction_started_at: properties.construction_started_at,
+            construction_completed_at: properties.construction_completed_at,
+            construction_duration_seconds: properties.construction_duration_seconds,
           };
           
           // Extract doors and garage_doors from model_data if present (for structures loaded from database)
@@ -1378,7 +1397,7 @@ export class ChunkManager {
           return null;
         }
       } else {
-        // Direct structure object format
+        // Direct structure object format (from database via WebSocket)
         structure = structureFeature;
         
         // Ensure position is an object with x, y
@@ -1389,6 +1408,15 @@ export class ChunkManager {
           } catch (e) {
             console.warn(`[Chunks] Failed to parse structure position from chunk ${chunkID}:`, e);
             return null;
+          }
+        }
+        
+        // Ensure zone_id is preserved (should already be there from server, but verify)
+        // zone_id comes from database and should be a number
+        if (structure.zone_id !== undefined && structure.zone_id !== null) {
+          // Ensure it's a number (server sends as int64)
+          if (typeof structure.zone_id === 'string') {
+            structure.zone_id = parseInt(structure.zone_id, 10);
           }
         }
         
@@ -1445,6 +1473,26 @@ export class ChunkManager {
       return;
     }
 
+    // Debug: Log zone_id information for structures
+    if (window.earthring?.debug && structures.length > 0) {
+      const structuresWithZoneId = structures.filter(s => s && s.zone_id != null);
+      if (structuresWithZoneId.length > 0) {
+        console.log(`[Chunks] Extracted ${structures.length} structures from chunk ${chunkID}, ${structuresWithZoneId.length} have zone_id:`, {
+          chunkID,
+          totalStructures: structures.length,
+          withZoneId: structuresWithZoneId.length,
+          sampleZoneIds: structuresWithZoneId.slice(0, 5).map(s => ({
+            id: s.id,
+            zone_id: s.zone_id,
+            zone_id_type: typeof s.zone_id,
+            structure_type: s.structure_type
+          }))
+        });
+      } else if (window.earthring?.debug) {
+        console.warn(`[Chunks] Extracted ${structures.length} structures from chunk ${chunkID}, but NONE have zone_id set`);
+      }
+    }
+    
     // Pass structures to structure manager with chunkID for tracking
     if (this.structureManager) {
       this.structureManager.handleStreamedStructures(structures, chunkID);

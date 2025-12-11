@@ -579,10 +579,24 @@ export class ZoneInfoTags {
     let structureCount = 0;
     if (this.gameStateManager) {
       const structures = this.gameStateManager.getAllStructures();
-      const zoneId = typeof zone.id === 'string' ? parseInt(zone.id) : zone.id;
+      
+      // Normalize zone ID to number for comparison
+      const zoneIdNum = typeof zone.id === 'string' ? parseInt(zone.id, 10) : Number(zone.id);
+      const zoneIdStr = String(zone.id);
+      
+      // Count structures that match this zone ID
+      // Handle both number and string comparisons, and null/undefined zone_id
       structureCount = structures.filter(s => {
-        const sZoneId = s.zone_id;
-        return sZoneId === zoneId || sZoneId === zone.id;
+        if (!s || s.zone_id === null || s.zone_id === undefined) {
+          return false;
+        }
+        
+        // Normalize structure zone_id to number for comparison
+        const sZoneIdNum = typeof s.zone_id === 'string' ? parseInt(s.zone_id, 10) : Number(s.zone_id);
+        const sZoneIdStr = String(s.zone_id);
+        
+        // Compare as both number and string to handle type mismatches
+        return sZoneIdNum === zoneIdNum || sZoneIdStr === zoneIdStr;
       }).length;
     }
     
