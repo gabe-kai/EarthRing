@@ -525,7 +525,8 @@ func (h *ChunkHandlers) BatchRegenerateChunks(w http.ResponseWriter, r *http.Req
 			}
 
 			// Generate and store the regenerated chunk
-			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, req.LODLevel, nil)
+			// Use nil for regeneration counter (HTTP endpoint doesn't track it)
+			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, req.LODLevel, nil, nil)
 			if err != nil {
 				log.Printf("Failed to regenerate chunk %d_%d: %v", floor, chunkIndex, err)
 				failedCount++

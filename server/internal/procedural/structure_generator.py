@@ -630,11 +630,20 @@ def generate_structures_for_zones(
     chunk_index: int,
     chunk_seed: int,
     hub_name: Optional[str],
+    regeneration_counter: int = 0,
 ) -> List[Dict[str, Any]]:
     """
     Generate structures for zones using the new structure libraries.
     Supports all zone types (industrial, residential, commercial, etc.).
     Places multiple non-overlapping buildings per zone when possible.
+    
+    Args:
+        zones: List of zone dictionaries
+        floor: Floor number
+        chunk_index: Chunk index
+        chunk_seed: Chunk seed for deterministic generation
+        hub_name: Hub name for color palette lookup
+        regeneration_counter: Regeneration counter for complete regeneration (affects building placement)
     """
     structures: List[Dict[str, Any]] = []
 
@@ -669,7 +678,9 @@ def generate_structures_for_zones(
             centroid = polygon.centroid
             centroid_x, centroid_y = centroid.x, centroid.y
 
-        rng_seed = hash((chunk_seed, floor, chunk_index, idx, STRUCTURE_PLACEMENT_VERSION)) % (2**31)
+        # Include regeneration_counter in seed to ensure different building placements
+        # when complete regeneration is performed
+        rng_seed = hash((chunk_seed, floor, chunk_index, idx, STRUCTURE_PLACEMENT_VERSION, regeneration_counter)) % (2**31)
         rng = random.Random(rng_seed)
 
         # Get zone distribution for this zone type

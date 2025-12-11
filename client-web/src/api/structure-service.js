@@ -214,4 +214,78 @@ export async function deleteAllProceduralStructures() {
   return await response.json();
 }
 
+/**
+ * Complete regeneration - increments regeneration counter and deletes all procedural structures
+ * This ensures different buildings in different positions on next generation
+ * Admin-only endpoint
+ * @returns {Promise<Object>} Response with regeneration_counter, structures_deleted, and chunks_deleted counts
+ */
+export async function completeRegeneration() {
+  // Ensure we have a valid token before making the request
+  const tokenValid = await ensureValidToken();
+  if (!tokenValid) {
+    throw new Error('Not authenticated. Please log in again.');
+  }
+  
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+  
+  const response = await fetch(getAPIURL('/api/structures/regenerate'), {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    // Handle 401 Unauthorized - token expired or invalid
+    if (response.status === 401) {
+      const refreshed = await ensureValidToken();
+      if (!refreshed) {
+        throw new Error('Session expired');
+      }
+      const newToken = getAccessToken();
+      const retryResponse = await fetch(getAPIURL('/api/structures/regenerate'), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${newToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!retryResponse.ok) {
+        let errorMessage = `Request failed (${retryResponse.status})`;
+        try {
+          const error = await retryResponse.json();
+          errorMessage = error.message || error.error || errorMessage;
+        } catch (err) {
+          errorMessage = `${errorMessage}: ${retryResponse.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      return await retryResponse.json();
+    }
+    
+    // Handle 403 Forbidden - admin access required
+    if (response.status === 403) {
+      const error = await response.json().catch(() => ({ message: 'Admin access required' }));
+      throw new Error(error.message || 'Admin access required. Please log out and log back in if you recently received admin privileges.');
+    }
+    
+    let errorMessage = `Request failed (${response.status})`;
+    try {
+      const error = await response.json();
+      errorMessage = error.message || error.error || errorMessage;
+    } catch (err) {
+      errorMessage = `${errorMessage}: ${response.statusText}`;
+    }
+    throw new Error(errorMessage);
+  }
+  
+  return await response.json();
+}
 

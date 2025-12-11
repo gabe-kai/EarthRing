@@ -22,6 +22,8 @@ func SetupStructureRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 		switch {
 		case r.Method == http.MethodPost && path == "":
 			handlers.CreateStructure(w, r)
+		case r.Method == http.MethodPost && path == "regenerate":
+			handlers.CompleteRegeneration(w, r)
 		case r.Method == http.MethodGet && path == "area":
 			handlers.ListStructuresByArea(w, r)
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "owner/"):

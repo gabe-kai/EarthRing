@@ -960,7 +960,7 @@ def generate_chunk_agricultural_zones(floor: int, chunk_index: int) -> list:
     return zones
 
 
-def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
+def generate_chunk(floor: int, chunk_index: int, chunk_seed: int, regeneration_counter: int = 0):
     """
     Generate a chunk with smooth curved ring floor geometry.
 
@@ -971,6 +971,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
         floor: Floor number
         chunk_index: Chunk index (0-263,999)
         chunk_seed: Chunk seed for deterministic generation
+        regeneration_counter: Regeneration counter for complete regeneration (affects building placement)
 
     Returns:
         Dictionary with chunk data including geometry and zones
@@ -1022,7 +1023,7 @@ def generate_chunk(floor: int, chunk_index: int, chunk_seed: int):
 
     try:
         all_structures = structure_generator.generate_structures_for_zones(
-            all_zones, floor, chunk_index, chunk_seed, hub_name
+            all_zones, floor, chunk_index, chunk_seed, hub_name, regeneration_counter
         )
     except Exception as e:
         print(f"Warning: structure generation failed: {e}")

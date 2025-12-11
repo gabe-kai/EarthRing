@@ -151,6 +151,7 @@ type WebSocketHandlers struct {
 	chunkStorage     *database.ChunkStorage
 	zoneStorage      *database.ZoneStorage
 	structureStorage *database.StructureStorage
+	configStorage    *database.ConfigStorage
 	streamManager    *streaming.Manager
 	profiler         *performance.Profiler
 	upgrader         websocket.Upgrader
@@ -164,6 +165,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 	jwtService := auth.NewJWTService(cfg)
 	proceduralClient := procedural.NewProceduralClient(cfg)
 	chunkStorage := database.NewChunkStorage(db)
+	configStorage := database.NewConfigStorage(db)
 
 	// Get allowed origins from config or use defaults
 	allowedOrigins := []string{
@@ -177,6 +179,7 @@ func NewWebSocketHandlers(db *sql.DB, cfg *config.Config, profiler *performance.
 		hub:              NewWebSocketHub(),
 		db:               db,
 		config:           cfg,
+		configStorage:    configStorage,
 		jwtService:       jwtService,
 		proceduralClient: proceduralClient,
 		chunkStorage:     chunkStorage,
@@ -848,7 +851,13 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 			}
 		} else if storedMetadata == nil {
 			// Chunk doesn't exist - generate it using procedural service
-			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+			// Get regeneration counter for building placement variation
+			regenerationCounter, err := h.configStorage.GetRegenerationCounter()
+			if err != nil {
+				log.Printf("Warning: Failed to get regeneration counter, using 0: %v", err)
+				regenerationCounter = 0
+			}
+			genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil, &regenerationCounter)
 			if err != nil {
 				log.Printf("Failed to generate chunk %s: %v", chunkID, err)
 				// Return empty chunk on generation failure
@@ -939,7 +948,13 @@ func (h *WebSocketHandlers) loadChunksForIDs(chunkIDs []string, lodLevel string)
 			// Chunk exists in database - check if version is current
 			if storedMetadata.Version < CurrentGeometryVersion {
 				// Chunk is outdated - regenerate it
-				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil)
+				// Get regeneration counter for building placement variation
+				regenerationCounter, err := h.configStorage.GetRegenerationCounter()
+				if err != nil {
+					log.Printf("Warning: Failed to get regeneration counter, using 0: %v", err)
+					regenerationCounter = 0
+				}
+				genResponse, err := h.proceduralClient.GenerateChunk(floor, chunkIndex, lodLevel, nil, &regenerationCounter)
 				if err != nil {
 					log.Printf("Failed to regenerate outdated chunk %s: %v", chunkID, err)
 					// Fall back to loading old geometry if regeneration fails

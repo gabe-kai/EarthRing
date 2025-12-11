@@ -59,6 +59,9 @@ class GenerateChunkRequest(BaseModel):
     world_seed: Optional[int] = Field(
         default=None, description="World seed (uses default if not provided)"
     )
+    regeneration_counter: Optional[int] = Field(
+        default=None, description="Regeneration counter for complete regeneration (affects building placement)"
+    )
 
 
 class ChunkGeometry(BaseModel):
@@ -136,8 +139,10 @@ async def generate_chunk(request: GenerateChunkRequest):
         )
 
         # Generate chunk with geometry (Phase 2)
+        # Pass regeneration_counter to affect building placement
+        regeneration_counter = request.regeneration_counter if request.regeneration_counter is not None else 0
         chunk_data = generation.generate_chunk(
-            request.floor, request.chunk_index, chunk_seed
+            request.floor, request.chunk_index, chunk_seed, regeneration_counter
         )
 
         chunk_id = chunk_data["chunk_id"]

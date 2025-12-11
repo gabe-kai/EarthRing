@@ -8,7 +8,7 @@ import { getCurrentUser } from '../auth/auth-service.js';
 import { getZoneCount, deleteAllZones, getZonesByFloor, getZone } from '../api/zone-service.js';
 import { deleteAllChunks, getChunkMetadata, deleteChunk } from '../api/chunk-service.js';
 import { getCurrentPlayerProfile, updatePlayerPosition } from '../api/player-service.js';
-import { deleteAllProceduralStructures } from '../api/structure-service.js';
+import { deleteAllProceduralStructures, completeRegeneration } from '../api/structure-service.js';
 import { legacyPositionToRingPolar, ringPolarToRingArc, ringPolarToLegacyPosition, ringArcToRingPolar } from '../utils/coordinates-new.js';
 
 let adminModal = null;
@@ -848,6 +848,23 @@ function loadStructuresTabContent(container) {
         • New structures use construction animations (5-minute build time)
       </p>
       <div id="admin-rebuild-structures-result" class="result-display"></div>
+      
+      <h3>Complete Regeneration</h3>
+      <p class="help-text" style="color: #ff6666; font-weight: 600; margin-bottom: 0.5rem;">
+        WARNING: This action cannot be undone.
+      </p>
+      <button id="admin-complete-regeneration-btn" class="delete-button" style="width: 100%; margin-bottom: 0.5rem;">
+        Complete Regeneration
+      </button>
+      <p class="help-text" style="margin: 0; font-size: 0.9rem; color: #ccc;">
+        <strong>What this does:</strong><br>
+        • Increments regeneration counter (affects building placement)<br>
+        • Deletes all procedural structures from the database<br>
+        • Keeps player-placed structures (non-procedural structures are preserved)<br>
+        • Deletes all chunks (so they regenerate with new buildings in different positions)<br>
+        • New buildings will be different types in different positions than before
+      </p>
+      <div id="admin-complete-regeneration-result" class="result-display"></div>
     </div>
   `;
   
@@ -978,6 +995,129 @@ function setupAdminStructuresListeners(container) {
         resultDiv.textContent = `Error: ${error.message}`;
         rebuildBtn.disabled = false;
         rebuildBtn.textContent = 'Rebuild Structures';
+      }
+    });
+  }
+  
+  // Complete Regeneration button
+  const completeRegenBtn = container.querySelector('#admin-complete-regeneration-btn');
+  const completeRegenResultDiv = container.querySelector('#admin-complete-regeneration-result');
+  
+  if (completeRegenBtn) {
+    completeRegenBtn.addEventListener('click', async () => {
+      const { showConfirmationModal } = await import('./game-modal.js');
+      const confirmed = await showConfirmationModal({
+        title: 'WARNING: Complete Regeneration',
+        message: 'This will increment the regeneration counter and delete all procedural structures and chunks.\n\nBuildings will regenerate in DIFFERENT positions with DIFFERENT buildings than before.\n\nThis action cannot be undone.',
+        checkboxLabel: 'I understand this will completely regenerate buildings in new positions',
+        confirmText: 'Complete Regeneration',
+        cancelText: 'Cancel',
+        confirmColor: '#ff4444'
+      });
+      
+      if (!confirmed) {
+        return;
+      }
+      
+      completeRegenBtn.disabled = true;
+      completeRegenBtn.textContent = 'Regenerating...';
+      completeRegenResultDiv.textContent = 'Incrementing regeneration counter and deleting structures...';
+      completeRegenResultDiv.className = 'result-display show';
+      
+      try {
+        // Complete regeneration via service
+        const data = await completeRegeneration();
+        
+        console.log('[Admin] Complete regeneration triggered:', data);
+        completeRegenResultDiv.textContent = `Success! Regeneration counter: ${data.regeneration_counter || 0}. Deleted ${data.structures_deleted || 0} procedural structures and ${data.chunks_deleted || 0} chunks. Regenerating with new building positions...`;
+        completeRegenResultDiv.className = 'result-display show success';
+        
+        // Clear structures from client (this starts demolition animations)
+        if (window.earthring && window.earthring.structureManager) {
+          const structureManager = window.earthring.structureManager;
+          const allStructureIDs = Array.from(structureManager.structureMeshes.keys());
+          allStructureIDs.forEach(structureID => {
+            structureManager.removeStructure(structureID);
+          });
+        }
+        
+        // Close modal immediately so user can see the demolition animations
+        hideAdminModal();
+        
+        // Wait for demolition animations to complete before loading new chunks
+        // This prevents new structures from appearing while old ones are still demolishing
+        if (window.earthring && window.earthring.structureManager) {
+          const structureManager = window.earthring.structureManager;
+          console.log('[Admin] Waiting for demolition animations to complete...');
+          await structureManager.waitForDemolitionAnimations(10000); // Wait up to 10 seconds
+          console.log('[Admin] Demolition animations complete, proceeding with chunk reload');
+        }
+        
+        // Clear chunks from client so they reload with new structures
+        if (window.earthring && window.earthring.chunkManager) {
+          const chunkManager = window.earthring.chunkManager;
+          const gameStateManager = window.earthring.gameStateManager;
+          const zoneManager = window.earthring.zoneManager;
+          
+          // Clear all chunks from client (this will trigger cleanup, but zones will reload with chunks)
+          const allChunkIDs = Array.from(gameStateManager.chunks.keys());
+          allChunkIDs.forEach(chunkID => {
+            gameStateManager.removeChunk(chunkID);
+          });
+          
+          // Reload chunks at current position - wait for them to arrive
+          if (window.earthring.cameraController) {
+            const cameraPos = window.earthring.cameraController.getEarthRingPosition();
+            const floor = gameStateManager.getActiveFloor();
+            
+            console.log('[Admin] Requesting chunk reload at position:', cameraPos.x, 'floor:', floor);
+            
+            // Request chunks and wait for them to load (force reload clears subscription and creates new one)
+            await chunkManager.requestChunksAtPosition(cameraPos.x, floor, 4, 'medium', true); // Force reload
+            
+            console.log('[Admin] Chunk reload requested, waiting for chunks to arrive...');
+            
+            // Wait for chunks to arrive via WebSocket and be processed
+            // Chunks are sent asynchronously after subscription, so we need to wait
+            // Check every 200ms for up to 5 seconds to see if chunks have arrived
+            let chunksReceived = false;
+            const maxWaitTime = 5000; // 5 seconds
+            const checkInterval = 200;
+            let elapsed = 0;
+            
+            while (elapsed < maxWaitTime && !chunksReceived) {
+              await new Promise(resolve => setTimeout(resolve, checkInterval));
+              elapsed += checkInterval;
+              
+              // Check if we have chunks loaded
+              const loadedChunkCount = gameStateManager.chunks.size;
+              if (loadedChunkCount > 0) {
+                chunksReceived = true;
+                console.log(`[Admin] Chunks received after complete regeneration! Loaded ${loadedChunkCount} chunks.`);
+                break;
+              }
+            }
+            
+            if (!chunksReceived) {
+              console.warn('[Admin] Warning: No chunks received after waiting', elapsed, 'ms');
+            }
+            
+            // Give a bit more time for zones/structures to be extracted from chunks
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Re-render zones to ensure they are displayed properly (zones come with chunks)
+            if (zoneManager) {
+              zoneManager.reRenderAllZones();
+              console.log('[Admin] Zones re-rendered after complete regeneration');
+            }
+          }
+        }
+        
+      } catch (error) {
+        completeRegenResultDiv.className = 'result-display show error';
+        completeRegenResultDiv.textContent = `Error: ${error.message}`;
+        completeRegenBtn.disabled = false;
+        completeRegenBtn.textContent = 'Complete Regeneration';
       }
     });
   }

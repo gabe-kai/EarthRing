@@ -248,6 +248,38 @@ sceneManager.onRender((deltaTime) => {
 
 ## Admin Panel Improvements
 
+### Complete Regeneration Feature (December 2024)
+
+**Status**: ✅ **COMPLETED**
+
+Added a new "Complete Regeneration" button in Admin -> Structures that ensures buildings regenerate in different positions with different types.
+
+**How It Works**:
+- Uses a `regeneration_counter` stored in the database (`structure_regeneration_config` table)
+- Counter is incremented each time "Complete Regeneration" is called
+- Counter is included in the procedural generation seed calculation
+- Different counter value = different seed = different building placements and types
+
+**Database**:
+- Migration `000026` adds `structure_regeneration_config` table
+- Stores a single-row counter that increments on each complete regeneration
+- Counter is retrieved and passed to procedural service during chunk generation
+
+**Server-Side**:
+- New `ConfigStorage` in `server/internal/database/config.go` for counter management
+- New endpoint: `POST /api/structures/regenerate` (admin-only)
+- Procedural service updated to accept `regeneration_counter` parameter
+- Python `structure_generator.py` includes counter in seed: `hash((chunk_seed, floor, chunk_index, idx, STRUCTURE_PLACEMENT_VERSION, regeneration_counter))`
+
+**Client-Side**:
+- New `completeRegeneration()` function in `structure-service.js`
+- New button in Admin -> Structures tab
+- Same demolition animation flow as other reset buttons
+
+**Difference from "Rebuild Structures"**:
+- **Rebuild Structures**: Same buildings, same positions (counter unchanged)
+- **Complete Regeneration**: Different buildings, different positions (counter incremented)
+
 ### Automatic Reloading (`client-web/src/ui/admin-modal.js`)
 
 **Reset All Chunks Database**:
@@ -275,6 +307,17 @@ sceneManager.onRender((deltaTime) => {
 - Clears all chunks and structures
 - Forces chunk regeneration
 - Structures spawn with construction animations
+- **Note**: Buildings regenerate in the same positions with similar types (regeneration counter unchanged)
+
+**Complete Regeneration**:
+- Increments regeneration counter (affects building placement seed)
+- Starts demolition animations for existing structures
+- Closes modal immediately so user can view demolitions
+- Waits for demolition animations to complete
+- Deletes all procedural structures and chunks
+- Forces chunk regeneration with new counter value
+- Structures spawn with construction animations
+- **Key Difference**: Buildings regenerate in **DIFFERENT positions** with **DIFFERENT types** than before
 
 **Implementation Details**:
 ```javascript

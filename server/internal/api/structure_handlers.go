@@ -360,6 +360,62 @@ func (h *StructureHandlers) DeleteAllProceduralStructures(w http.ResponseWriter,
 	})
 }
 
+// CompleteRegeneration handles POST /api/structures/regenerate
+// Admin-only endpoint that increments regeneration counter and deletes all procedural structures and chunks.
+// This ensures different buildings in different positions on next generation.
+func (h *StructureHandlers) CompleteRegeneration(w http.ResponseWriter, r *http.Request) {
+	// Check authentication
+	_, ok := r.Context().Value(auth.UserIDKey).(int64)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	// Check admin role
+	authRole, ok := r.Context().Value(auth.RoleKey).(string)
+	if !ok || authRole == "" {
+		log.Printf("CompleteRegeneration: Role not found in context or empty")
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+	if authRole != "admin" {
+		log.Printf("CompleteRegeneration: User does not have admin role (got: %q, want: admin)", authRole)
+		respondWithError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	// Increment regeneration counter first (this affects building placement)
+	configStorage := database.NewConfigStorage(h.db)
+	regenerationCounter, err := configStorage.IncrementRegenerationCounter()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to increment regeneration counter: %v", err))
+		return
+	}
+
+	// Delete all procedural structures
+	count, err := h.storage.DeleteAllProceduralStructures()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete procedural structures: %v", err))
+		return
+	}
+
+	// Also delete all chunks to force regeneration with new building placements
+	chunkStorage := database.NewChunkStorage(h.db)
+	chunksDeleted, err := chunkStorage.DeleteAllChunks()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete chunks: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":                "Complete regeneration triggered - buildings will be in different positions",
+		"regeneration_counter":    regenerationCounter,
+		"structures_deleted":     count,
+		"chunks_deleted":         chunksDeleted,
+		"regeneration_triggered":  true,
+	})
+}
+
 // DeleteAllStructures handles DELETE /api/structures/all
 // Admin-only endpoint that deletes all structures (procedural and player), resets ids, and triggers regeneration.
 func (h *StructureHandlers) DeleteAllStructures(w http.ResponseWriter, r *http.Request) {
